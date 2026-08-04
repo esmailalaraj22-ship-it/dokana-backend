@@ -1,0 +1,761 @@
+Shop Ledger PostgreSQL Static Validation Report
+=======================================================
+Passed: 756
+Failed: 0
+
+[PASS] SQL lexical balance — paren=0, single=False, double=False, dollar=None, block=False
+[PASS] PostgreSQL table count — 60 tables
+[PASS] FK target table ledger.devices->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.devices — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.devices->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.document_sequences->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.document_sequences — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.document_sequences->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.app_settings->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.app_settings — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.app_settings->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.attachments->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.attachments — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.attachments->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.customers->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.customers — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.customers->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.customers->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.customers — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.customers->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.suppliers->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.suppliers — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.suppliers->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.suppliers->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.suppliers — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.suppliers->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.products->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.products — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.products->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.products->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.products — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.products->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.product_units->ledger.products — ledger.products
+[PASS] FK local columns ledger.product_units — ['store_id', 'product_id', 'measurement_type']
+[PASS] FK remote columns ledger.products — ['store_id', 'id', 'measurement_type']
+[PASS] FK arity ledger.product_units->ledger.products — ['store_id', 'product_id', 'measurement_type'] vs ['store_id', 'id', 'measurement_type']
+[PASS] FK target table ledger.product_units->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.product_units — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.product_units->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_accounts->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.money_accounts — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.money_accounts->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.money_accounts->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.money_accounts — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.money_accounts->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.accounting_periods->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.accounting_periods — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.accounting_periods->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.accounting_periods->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.accounting_periods — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.accounting_periods->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_categories->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.expense_categories — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.expense_categories->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.expense_categories->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.expense_categories — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.expense_categories->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_movements->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.money_movements — ['store_id', 'account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.money_movements->ledger.money_accounts — ['store_id', 'account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_movements->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.money_movements — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.money_movements->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_movements->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.money_movements — ['store_id', 'counter_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.money_movements->ledger.money_accounts — ['store_id', 'counter_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_movements->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.money_movements — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.money_movements->ledger.money_movements — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_movements->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.money_movements — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.money_movements->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.owner_ledger_entries->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.owner_ledger_entries — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.owner_ledger_entries->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.owner_ledger_entries->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.owner_ledger_entries — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.owner_ledger_entries->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.owner_ledger_entries->ledger.owner_ledger_entries — ledger.owner_ledger_entries
+[PASS] FK local columns ledger.owner_ledger_entries — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.owner_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.owner_ledger_entries->ledger.owner_ledger_entries — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.owner_ledger_entries->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.owner_ledger_entries — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.owner_ledger_entries->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_balances->ledger.products — ledger.products
+[PASS] FK local columns ledger.stock_balances — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.stock_balances->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.inventory_movements->ledger.products — ledger.products
+[PASS] FK local columns ledger.inventory_movements — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.inventory_movements->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.inventory_movements->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.inventory_movements — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.inventory_movements->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.inventory_movements->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.inventory_movements — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.inventory_movements->ledger.inventory_movements — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.inventory_movements->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.inventory_movements — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.inventory_movements->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sales->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.sales — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.sales->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.sales->ledger.customers — ledger.customers
+[PASS] FK local columns ledger.sales — ['store_id', 'customer_id']
+[PASS] FK remote columns ledger.customers — ['store_id', 'id']
+[PASS] FK arity ledger.sales->ledger.customers — ['store_id', 'customer_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sales->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.sales — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.sales->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sales->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.sales — ['store_id', 'correction_of_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.sales->ledger.sales — ['store_id', 'correction_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sales->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.sales — ['store_id', 'reversed_by_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.sales->ledger.sales — ['store_id', 'reversed_by_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sales->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.sales — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.sales->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_items->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.sale_items — ['store_id', 'sale_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.sale_items->ledger.sales — ['store_id', 'sale_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_items->ledger.products — ledger.products
+[PASS] FK local columns ledger.sale_items — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.sale_items->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_items->ledger.product_units — ledger.product_units
+[PASS] FK local columns ledger.sale_items — ['store_id', 'product_id', 'product_unit_id']
+[PASS] FK remote columns ledger.product_units — ['store_id', 'product_id', 'id']
+[PASS] FK arity ledger.sale_items->ledger.product_units — ['store_id', 'product_id', 'product_unit_id'] vs ['store_id', 'product_id', 'id']
+[PASS] FK target table ledger.sale_items->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.sale_items — ['store_id', 'inventory_movement_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.sale_items->ledger.inventory_movements — ['store_id', 'inventory_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_payments->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.sale_payments — ['store_id', 'sale_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.sale_payments->ledger.sales — ['store_id', 'sale_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_payments->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.sale_payments — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.sale_payments->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_payments->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.sale_payments — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.sale_payments->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_invoices->ledger.suppliers — ledger.suppliers
+[PASS] FK local columns ledger.purchase_invoices — ['store_id', 'supplier_id']
+[PASS] FK remote columns ledger.suppliers — ['store_id', 'id']
+[PASS] FK arity ledger.purchase_invoices->ledger.suppliers — ['store_id', 'supplier_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_invoices->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.purchase_invoices — ['store_id', 'correction_of_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.purchase_invoices->ledger.purchase_invoices — ['store_id', 'correction_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_invoices->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.purchase_invoices — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.purchase_invoices->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_items->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.purchase_items — ['store_id', 'purchase_invoice_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.purchase_items->ledger.purchase_invoices — ['store_id', 'purchase_invoice_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_items->ledger.products — ledger.products
+[PASS] FK local columns ledger.purchase_items — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.purchase_items->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.purchase_items->ledger.product_units — ledger.product_units
+[PASS] FK local columns ledger.purchase_items — ['store_id', 'product_id', 'product_unit_id']
+[PASS] FK remote columns ledger.product_units — ['store_id', 'product_id', 'id']
+[PASS] FK arity ledger.purchase_items->ledger.product_units — ['store_id', 'product_id', 'product_unit_id'] vs ['store_id', 'product_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.suppliers — ledger.suppliers
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'supplier_id']
+[PASS] FK remote columns ledger.suppliers — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.suppliers — ['store_id', 'supplier_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'purchase_invoice_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.purchase_invoices — ['store_id', 'purchase_invoice_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.goods_receipts — ledger.goods_receipts
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.goods_receipts — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.goods_receipts — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.goods_receipts — ledger.goods_receipts
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'reversed_by_id']
+[PASS] FK remote columns ledger.goods_receipts — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.goods_receipts — ['store_id', 'reversed_by_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipts->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.goods_receipts — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipts->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipt_items->ledger.goods_receipts — ledger.goods_receipts
+[PASS] FK local columns ledger.goods_receipt_items — ['store_id', 'goods_receipt_id']
+[PASS] FK remote columns ledger.goods_receipts — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipt_items->ledger.goods_receipts — ['store_id', 'goods_receipt_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipt_items->ledger.purchase_items — ledger.purchase_items
+[PASS] FK local columns ledger.goods_receipt_items — ['store_id', 'purchase_item_id']
+[PASS] FK remote columns ledger.purchase_items — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipt_items->ledger.purchase_items — ['store_id', 'purchase_item_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipt_items->ledger.products — ledger.products
+[PASS] FK local columns ledger.goods_receipt_items — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipt_items->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.goods_receipt_items->ledger.product_units — ledger.product_units
+[PASS] FK local columns ledger.goods_receipt_items — ['store_id', 'product_id', 'product_unit_id']
+[PASS] FK remote columns ledger.product_units — ['store_id', 'product_id', 'id']
+[PASS] FK arity ledger.goods_receipt_items->ledger.product_units — ['store_id', 'product_id', 'product_unit_id'] vs ['store_id', 'product_id', 'id']
+[PASS] FK target table ledger.goods_receipt_items->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.goods_receipt_items — ['store_id', 'inventory_movement_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.goods_receipt_items->ledger.inventory_movements — ['store_id', 'inventory_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payments->ledger.customers — ledger.customers
+[PASS] FK local columns ledger.customer_payments — ['store_id', 'customer_id']
+[PASS] FK remote columns ledger.customers — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payments->ledger.customers — ['store_id', 'customer_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payments->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.customer_payments — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payments->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payments->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.customer_payments — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payments->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payments->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.customer_payments — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payments->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payments->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.customer_payments — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payments->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.suppliers — ledger.suppliers
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'supplier_id']
+[PASS] FK remote columns ledger.suppliers — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.suppliers — ['store_id', 'supplier_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.owner_ledger_entries — ledger.owner_ledger_entries
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'owner_ledger_entry_id']
+[PASS] FK remote columns ledger.owner_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.owner_ledger_entries — ['store_id', 'owner_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payments->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.supplier_payments — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payments->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expenses->ledger.expense_categories — ledger.expense_categories
+[PASS] FK local columns ledger.expenses — ['store_id', 'category_id']
+[PASS] FK remote columns ledger.expense_categories — ['store_id', 'id']
+[PASS] FK arity ledger.expenses->ledger.expense_categories — ['store_id', 'category_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expenses->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.expenses — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.expenses->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expenses->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.expenses — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.expenses->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.expenses — ledger.expenses
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'expense_id']
+[PASS] FK remote columns ledger.expenses — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.expenses — ['store_id', 'expense_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.owner_ledger_entries — ledger.owner_ledger_entries
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'owner_ledger_entry_id']
+[PASS] FK remote columns ledger.owner_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.owner_ledger_entries — ['store_id', 'owner_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.expense_payments->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.expense_payments — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.expense_payments->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'source_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.money_accounts — ['store_id', 'source_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'destination_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.money_accounts — ['store_id', 'destination_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'source_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.money_movements — ['store_id', 'source_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'destination_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.money_movements — ['store_id', 'destination_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.money_transfers->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.money_transfers — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.money_transfers->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_returns->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.sale_returns — ['store_id', 'sale_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.sale_returns->ledger.sales — ['store_id', 'sale_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_returns->ledger.customers — ledger.customers
+[PASS] FK local columns ledger.sale_returns — ['store_id', 'customer_id']
+[PASS] FK remote columns ledger.customers — ['store_id', 'id']
+[PASS] FK arity ledger.sale_returns->ledger.customers — ['store_id', 'customer_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_returns->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.sale_returns — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.sale_returns->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_returns->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.sale_returns — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.sale_returns->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_items->ledger.sale_returns — ledger.sale_returns
+[PASS] FK local columns ledger.sale_return_items — ['store_id', 'sale_return_id']
+[PASS] FK remote columns ledger.sale_returns — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_items->ledger.sale_returns — ['store_id', 'sale_return_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_items->ledger.sale_items — ledger.sale_items
+[PASS] FK local columns ledger.sale_return_items — ['store_id', 'sale_item_id']
+[PASS] FK remote columns ledger.sale_items — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_items->ledger.sale_items — ['store_id', 'sale_item_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_items->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.sale_return_items — ['store_id', 'inventory_movement_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_items->ledger.inventory_movements — ['store_id', 'inventory_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_returns->ledger.suppliers — ledger.suppliers
+[PASS] FK local columns ledger.supplier_returns — ['store_id', 'supplier_id']
+[PASS] FK remote columns ledger.suppliers — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_returns->ledger.suppliers — ['store_id', 'supplier_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_returns->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.supplier_returns — ['store_id', 'purchase_invoice_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_returns->ledger.purchase_invoices — ['store_id', 'purchase_invoice_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_returns->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.supplier_returns — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_returns->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_returns->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.supplier_returns — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_returns->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_items->ledger.supplier_returns — ledger.supplier_returns
+[PASS] FK local columns ledger.supplier_return_items — ['store_id', 'supplier_return_id']
+[PASS] FK remote columns ledger.supplier_returns — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_items->ledger.supplier_returns — ['store_id', 'supplier_return_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_items->ledger.products — ledger.products
+[PASS] FK local columns ledger.supplier_return_items — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_items->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_items->ledger.product_units — ledger.product_units
+[PASS] FK local columns ledger.supplier_return_items — ['store_id', 'product_id', 'product_unit_id']
+[PASS] FK remote columns ledger.product_units — ['store_id', 'product_id', 'id']
+[PASS] FK arity ledger.supplier_return_items->ledger.product_units — ['store_id', 'product_id', 'product_unit_id'] vs ['store_id', 'product_id', 'id']
+[PASS] FK target table ledger.supplier_return_items->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.supplier_return_items — ['store_id', 'inventory_movement_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_items->ledger.inventory_movements — ['store_id', 'inventory_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_counts->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.stock_counts — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.stock_counts->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_counts->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.stock_counts — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.stock_counts->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_count_items->ledger.stock_counts — ledger.stock_counts
+[PASS] FK local columns ledger.stock_count_items — ['store_id', 'stock_count_id']
+[PASS] FK remote columns ledger.stock_counts — ['store_id', 'id']
+[PASS] FK arity ledger.stock_count_items->ledger.stock_counts — ['store_id', 'stock_count_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_count_items->ledger.products — ledger.products
+[PASS] FK local columns ledger.stock_count_items — ['store_id', 'product_id']
+[PASS] FK remote columns ledger.products — ['store_id', 'id']
+[PASS] FK arity ledger.stock_count_items->ledger.products — ['store_id', 'product_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.stock_count_items->ledger.inventory_movements — ledger.inventory_movements
+[PASS] FK local columns ledger.stock_count_items — ['store_id', 'adjustment_movement_id']
+[PASS] FK remote columns ledger.inventory_movements — ['store_id', 'id']
+[PASS] FK arity ledger.stock_count_items->ledger.inventory_movements — ['store_id', 'adjustment_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.notifications->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.notifications — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.notifications->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.audit_logs->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.audit_logs — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.audit_logs->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.audit_logs->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.audit_logs — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.audit_logs->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.backup_metadata->ledger.stores — ledger.stores
+[PASS] FK local columns ledger.backup_metadata — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity ledger.backup_metadata->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table ledger.backup_metadata->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.backup_metadata — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.backup_metadata->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_ledger_entries->ledger.customers — ledger.customers
+[PASS] FK local columns ledger.customer_ledger_entries — ['store_id', 'customer_id']
+[PASS] FK remote columns ledger.customers — ['store_id', 'id']
+[PASS] FK arity ledger.customer_ledger_entries->ledger.customers — ['store_id', 'customer_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_ledger_entries->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.customer_ledger_entries — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.customer_ledger_entries->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_ledger_entries->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.customer_ledger_entries — ['store_id', 'source_sale_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.customer_ledger_entries->ledger.sales — ['store_id', 'source_sale_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_ledger_entries->ledger.customer_ledger_entries — ledger.customer_ledger_entries
+[PASS] FK local columns ledger.customer_ledger_entries — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.customer_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.customer_ledger_entries->ledger.customer_ledger_entries — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_ledger_entries->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.customer_ledger_entries — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.customer_ledger_entries->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_ledger_entries->ledger.suppliers — ledger.suppliers
+[PASS] FK local columns ledger.supplier_ledger_entries — ['store_id', 'supplier_id']
+[PASS] FK remote columns ledger.suppliers — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_ledger_entries->ledger.suppliers — ['store_id', 'supplier_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_ledger_entries->ledger.accounting_periods — ledger.accounting_periods
+[PASS] FK local columns ledger.supplier_ledger_entries — ['store_id', 'accounting_period_id']
+[PASS] FK remote columns ledger.accounting_periods — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_ledger_entries->ledger.accounting_periods — ['store_id', 'accounting_period_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_ledger_entries->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.supplier_ledger_entries — ['store_id', 'source_purchase_invoice_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_ledger_entries->ledger.purchase_invoices — ['store_id', 'source_purchase_invoice_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_ledger_entries->ledger.supplier_ledger_entries — ledger.supplier_ledger_entries
+[PASS] FK local columns ledger.supplier_ledger_entries — ['store_id', 'reversal_of_id']
+[PASS] FK remote columns ledger.supplier_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_ledger_entries->ledger.supplier_ledger_entries — ['store_id', 'reversal_of_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_ledger_entries->ledger.devices — ledger.devices
+[PASS] FK local columns ledger.supplier_ledger_entries — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_ledger_entries->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payment_allocations->ledger.customer_payments — ledger.customer_payments
+[PASS] FK local columns ledger.customer_payment_allocations — ['store_id', 'customer_payment_id']
+[PASS] FK remote columns ledger.customer_payments — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payment_allocations->ledger.customer_payments — ['store_id', 'customer_payment_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payment_allocations->ledger.sales — ledger.sales
+[PASS] FK local columns ledger.customer_payment_allocations — ['store_id', 'sale_id']
+[PASS] FK remote columns ledger.sales — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payment_allocations->ledger.sales — ['store_id', 'sale_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.customer_payment_allocations->ledger.customer_ledger_entries — ledger.customer_ledger_entries
+[PASS] FK local columns ledger.customer_payment_allocations — ['store_id', 'customer_ledger_entry_id']
+[PASS] FK remote columns ledger.customer_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.customer_payment_allocations->ledger.customer_ledger_entries — ['store_id', 'customer_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payment_allocations->ledger.supplier_payments — ledger.supplier_payments
+[PASS] FK local columns ledger.supplier_payment_allocations — ['store_id', 'supplier_payment_id']
+[PASS] FK remote columns ledger.supplier_payments — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payment_allocations->ledger.supplier_payments — ['store_id', 'supplier_payment_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payment_allocations->ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] FK local columns ledger.supplier_payment_allocations — ['store_id', 'purchase_invoice_id']
+[PASS] FK remote columns ledger.purchase_invoices — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payment_allocations->ledger.purchase_invoices — ['store_id', 'purchase_invoice_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_payment_allocations->ledger.supplier_ledger_entries — ledger.supplier_ledger_entries
+[PASS] FK local columns ledger.supplier_payment_allocations — ['store_id', 'supplier_ledger_entry_id']
+[PASS] FK remote columns ledger.supplier_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_payment_allocations->ledger.supplier_ledger_entries — ['store_id', 'supplier_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_settlements->ledger.sale_returns — ledger.sale_returns
+[PASS] FK local columns ledger.sale_return_settlements — ['store_id', 'sale_return_id']
+[PASS] FK remote columns ledger.sale_returns — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_settlements->ledger.sale_returns — ['store_id', 'sale_return_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_settlements->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.sale_return_settlements — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_settlements->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_settlements->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.sale_return_settlements — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_settlements->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.sale_return_settlements->ledger.customer_ledger_entries — ledger.customer_ledger_entries
+[PASS] FK local columns ledger.sale_return_settlements — ['store_id', 'customer_ledger_entry_id']
+[PASS] FK remote columns ledger.customer_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.sale_return_settlements->ledger.customer_ledger_entries — ['store_id', 'customer_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_settlements->ledger.supplier_returns — ledger.supplier_returns
+[PASS] FK local columns ledger.supplier_return_settlements — ['store_id', 'supplier_return_id']
+[PASS] FK remote columns ledger.supplier_returns — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_settlements->ledger.supplier_returns — ['store_id', 'supplier_return_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_settlements->ledger.money_accounts — ledger.money_accounts
+[PASS] FK local columns ledger.supplier_return_settlements — ['store_id', 'money_account_id']
+[PASS] FK remote columns ledger.money_accounts — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_settlements->ledger.money_accounts — ['store_id', 'money_account_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_settlements->ledger.money_movements — ledger.money_movements
+[PASS] FK local columns ledger.supplier_return_settlements — ['store_id', 'money_movement_id']
+[PASS] FK remote columns ledger.money_movements — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_settlements->ledger.money_movements — ['store_id', 'money_movement_id'] vs ['store_id', 'id']
+[PASS] FK target table ledger.supplier_return_settlements->ledger.supplier_ledger_entries — ledger.supplier_ledger_entries
+[PASS] FK local columns ledger.supplier_return_settlements — ['store_id', 'supplier_ledger_entry_id']
+[PASS] FK remote columns ledger.supplier_ledger_entries — ['store_id', 'id']
+[PASS] FK arity ledger.supplier_return_settlements->ledger.supplier_ledger_entries — ['store_id', 'supplier_ledger_entry_id'] vs ['store_id', 'id']
+[PASS] FK target table platform.store_memberships->ledger.stores — ledger.stores
+[PASS] FK local columns platform.store_memberships — ['store_id']
+[PASS] FK remote columns ledger.stores — ['id']
+[PASS] FK arity platform.store_memberships->ledger.stores — ['store_id'] vs ['id']
+[PASS] FK target table platform.auth_sessions->ledger.devices — ledger.devices
+[PASS] FK local columns platform.auth_sessions — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity platform.auth_sessions->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table platform.license_issuances->ledger.devices — ledger.devices
+[PASS] FK local columns platform.license_issuances — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity platform.license_issuances->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table platform.server_backups->ledger.devices — ledger.devices
+[PASS] FK local columns platform.server_backups — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity platform.server_backups->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table sync.processed_operations->ledger.devices — ledger.devices
+[PASS] FK local columns sync.processed_operations — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity sync.processed_operations->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table sync.change_events->ledger.devices — ledger.devices
+[PASS] FK local columns sync.change_events — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity sync.change_events->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table sync.device_cursors->ledger.devices — ledger.devices
+[PASS] FK local columns sync.device_cursors — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity sync.device_cursors->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table sync.dead_letters->ledger.devices — ledger.devices
+[PASS] FK local columns sync.dead_letters — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity sync.dead_letters->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] FK target table audit.central_audit_logs->ledger.devices — ledger.devices
+[PASS] FK local columns audit.central_audit_logs — ['store_id', 'device_id']
+[PASS] FK remote columns ledger.devices — ['store_id', 'id']
+[PASS] FK arity audit.central_audit_logs->ledger.devices — ['store_id', 'device_id'] vs ['store_id', 'id']
+[PASS] Foreign key count — 146
+[PASS] SQLite shared table coverage — missing=[]
+[PASS] Shared type contract
+[PASS] No numeric boolean checks
+[PASS] Composite tenant identity ledger.devices — ledger.devices
+[PASS] Composite tenant identity ledger.attachments — ledger.attachments
+[PASS] Composite tenant identity ledger.customers — ledger.customers
+[PASS] Idempotent operation key ledger.customers — ledger.customers
+[PASS] Composite tenant identity ledger.suppliers — ledger.suppliers
+[PASS] Idempotent operation key ledger.suppliers — ledger.suppliers
+[PASS] Composite tenant identity ledger.products — ledger.products
+[PASS] Idempotent operation key ledger.products — ledger.products
+[PASS] Composite tenant identity ledger.product_units — ledger.product_units
+[PASS] Idempotent operation key ledger.product_units — ledger.product_units
+[PASS] Composite tenant identity ledger.money_accounts — ledger.money_accounts
+[PASS] Idempotent operation key ledger.money_accounts — ledger.money_accounts
+[PASS] Composite tenant identity ledger.accounting_periods — ledger.accounting_periods
+[PASS] Idempotent operation key ledger.accounting_periods — ledger.accounting_periods
+[PASS] Composite tenant identity ledger.expense_categories — ledger.expense_categories
+[PASS] Idempotent operation key ledger.expense_categories — ledger.expense_categories
+[PASS] Composite tenant identity ledger.money_movements — ledger.money_movements
+[PASS] Idempotent operation key ledger.money_movements — ledger.money_movements
+[PASS] Composite tenant identity ledger.owner_ledger_entries — ledger.owner_ledger_entries
+[PASS] Idempotent operation key ledger.owner_ledger_entries — ledger.owner_ledger_entries
+[PASS] Composite tenant identity ledger.inventory_movements — ledger.inventory_movements
+[PASS] Idempotent operation key ledger.inventory_movements — ledger.inventory_movements
+[PASS] Composite tenant identity ledger.sales — ledger.sales
+[PASS] Idempotent operation key ledger.sales — ledger.sales
+[PASS] Composite tenant identity ledger.sale_items — ledger.sale_items
+[PASS] Composite tenant identity ledger.sale_payments — ledger.sale_payments
+[PASS] Composite tenant identity ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] Idempotent operation key ledger.purchase_invoices — ledger.purchase_invoices
+[PASS] Composite tenant identity ledger.purchase_items — ledger.purchase_items
+[PASS] Composite tenant identity ledger.goods_receipts — ledger.goods_receipts
+[PASS] Idempotent operation key ledger.goods_receipts — ledger.goods_receipts
+[PASS] Composite tenant identity ledger.goods_receipt_items — ledger.goods_receipt_items
+[PASS] Composite tenant identity ledger.customer_payments — ledger.customer_payments
+[PASS] Idempotent operation key ledger.customer_payments — ledger.customer_payments
+[PASS] Composite tenant identity ledger.supplier_payments — ledger.supplier_payments
+[PASS] Idempotent operation key ledger.supplier_payments — ledger.supplier_payments
+[PASS] Composite tenant identity ledger.expenses — ledger.expenses
+[PASS] Idempotent operation key ledger.expenses — ledger.expenses
+[PASS] Composite tenant identity ledger.expense_payments — ledger.expense_payments
+[PASS] Idempotent operation key ledger.expense_payments — ledger.expense_payments
+[PASS] Composite tenant identity ledger.money_transfers — ledger.money_transfers
+[PASS] Idempotent operation key ledger.money_transfers — ledger.money_transfers
+[PASS] Composite tenant identity ledger.sale_returns — ledger.sale_returns
+[PASS] Idempotent operation key ledger.sale_returns — ledger.sale_returns
+[PASS] Composite tenant identity ledger.sale_return_items — ledger.sale_return_items
+[PASS] Composite tenant identity ledger.supplier_returns — ledger.supplier_returns
+[PASS] Idempotent operation key ledger.supplier_returns — ledger.supplier_returns
+[PASS] Composite tenant identity ledger.supplier_return_items — ledger.supplier_return_items
+[PASS] Composite tenant identity ledger.stock_counts — ledger.stock_counts
+[PASS] Idempotent operation key ledger.stock_counts — ledger.stock_counts
+[PASS] Composite tenant identity ledger.stock_count_items — ledger.stock_count_items
+[PASS] Composite tenant identity ledger.notifications — ledger.notifications
+[PASS] Composite tenant identity ledger.audit_logs — ledger.audit_logs
+[PASS] Composite tenant identity ledger.backup_metadata — ledger.backup_metadata
+[PASS] Composite tenant identity ledger.customer_ledger_entries — ledger.customer_ledger_entries
+[PASS] Idempotent operation key ledger.customer_ledger_entries — ledger.customer_ledger_entries
+[PASS] Composite tenant identity ledger.supplier_ledger_entries — ledger.supplier_ledger_entries
+[PASS] Idempotent operation key ledger.supplier_ledger_entries — ledger.supplier_ledger_entries
+[PASS] Composite tenant identity ledger.customer_payment_allocations — ledger.customer_payment_allocations
+[PASS] Composite tenant identity ledger.supplier_payment_allocations — ledger.supplier_payment_allocations
+[PASS] Composite tenant identity ledger.sale_return_settlements — ledger.sale_return_settlements
+[PASS] Composite tenant identity ledger.supplier_return_settlements — ledger.supplier_return_settlements
+[PASS] RLS listed ledger.devices — devices
+[PASS] RLS listed ledger.document_sequences — document_sequences
+[PASS] RLS listed ledger.app_settings — app_settings
+[PASS] RLS listed ledger.attachments — attachments
+[PASS] RLS listed ledger.customers — customers
+[PASS] RLS listed ledger.suppliers — suppliers
+[PASS] RLS listed ledger.products — products
+[PASS] RLS listed ledger.product_units — product_units
+[PASS] RLS listed ledger.money_accounts — money_accounts
+[PASS] RLS listed ledger.accounting_periods — accounting_periods
+[PASS] RLS listed ledger.expense_categories — expense_categories
+[PASS] RLS listed ledger.money_movements — money_movements
+[PASS] RLS listed ledger.owner_ledger_entries — owner_ledger_entries
+[PASS] RLS listed ledger.stock_balances — stock_balances
+[PASS] RLS listed ledger.inventory_movements — inventory_movements
+[PASS] RLS listed ledger.sales — sales
+[PASS] RLS listed ledger.sale_items — sale_items
+[PASS] RLS listed ledger.sale_payments — sale_payments
+[PASS] RLS listed ledger.purchase_invoices — purchase_invoices
+[PASS] RLS listed ledger.purchase_items — purchase_items
+[PASS] RLS listed ledger.goods_receipts — goods_receipts
+[PASS] RLS listed ledger.goods_receipt_items — goods_receipt_items
+[PASS] RLS listed ledger.customer_payments — customer_payments
+[PASS] RLS listed ledger.supplier_payments — supplier_payments
+[PASS] RLS listed ledger.expenses — expenses
+[PASS] RLS listed ledger.expense_payments — expense_payments
+[PASS] RLS listed ledger.money_transfers — money_transfers
+[PASS] RLS listed ledger.sale_returns — sale_returns
+[PASS] RLS listed ledger.sale_return_items — sale_return_items
+[PASS] RLS listed ledger.supplier_returns — supplier_returns
+[PASS] RLS listed ledger.supplier_return_items — supplier_return_items
+[PASS] RLS listed ledger.stock_counts — stock_counts
+[PASS] RLS listed ledger.stock_count_items — stock_count_items
+[PASS] RLS listed ledger.notifications — notifications
+[PASS] RLS listed ledger.audit_logs — audit_logs
+[PASS] RLS listed ledger.backup_metadata — backup_metadata
+[PASS] RLS listed ledger.customer_ledger_entries — customer_ledger_entries
+[PASS] RLS listed ledger.supplier_ledger_entries — supplier_ledger_entries
+[PASS] RLS listed ledger.customer_payment_allocations — customer_payment_allocations
+[PASS] RLS listed ledger.supplier_payment_allocations — supplier_payment_allocations
+[PASS] RLS listed ledger.sale_return_settlements — sale_return_settlements
+[PASS] RLS listed ledger.supplier_return_settlements — supplier_return_settlements
+[PASS] FORCE RLS configured
+[PASS] Server-only table coverage — []
+[PASS] Function present apply_inventory_movement — apply_inventory_movement
+[PASS] Function present claim_operation — claim_operation
+[PASS] Function present validate_sale_post — validate_sale_post
+[PASS] Function present validate_purchase_status — validate_purchase_status
+[PASS] Function present validate_goods_receipt_post — validate_goods_receipt_post
+[PASS] Function present validate_customer_payment_post — validate_customer_payment_post
+[PASS] Function present validate_supplier_payment_post — validate_supplier_payment_post
+[PASS] Function present validate_sale_return_post — validate_sale_return_post
+[PASS] Function present validate_supplier_return_post — validate_supplier_return_post
+[PASS] Function present next_document_number — next_document_number
+[PASS] Inventory row locking
+[PASS] Advisory sequence locking
+[PASS] Append-only protection — 8
+[PASS] View count — 11
+[PASS] Index count — 55
+[PASS] Trigger definitions — 50
+[PASS] Function count — 30
+[PASS] Column coverage ledger.accounting_periods — []
+[PASS] Column coverage ledger.app_settings — []
+[PASS] Column coverage ledger.attachments — []
+[PASS] Column coverage ledger.audit_logs — []
+[PASS] Column coverage ledger.backup_metadata — []
+[PASS] Column coverage ledger.customer_ledger_entries — []
+[PASS] Column coverage ledger.customer_payment_allocations — []
+[PASS] Column coverage ledger.customer_payments — []
+[PASS] Column coverage ledger.customers — []
+[PASS] Column coverage ledger.devices — []
+[PASS] Column coverage ledger.document_sequences — []
+[PASS] Column coverage ledger.expense_categories — []
+[PASS] Column coverage ledger.expense_payments — []
+[PASS] Column coverage ledger.expenses — []
+[PASS] Column coverage ledger.goods_receipt_items — []
+[PASS] Column coverage ledger.goods_receipts — []
+[PASS] Column coverage ledger.inventory_movements — []
+[PASS] Column coverage ledger.money_accounts — []
+[PASS] Column coverage ledger.money_movements — []
+[PASS] Column coverage ledger.money_transfers — []
+[PASS] Column coverage ledger.notifications — []
+[PASS] Column coverage ledger.owner_ledger_entries — []
+[PASS] Column coverage ledger.product_units — []
+[PASS] Column coverage ledger.products — []
+[PASS] Column coverage ledger.purchase_invoices — []
+[PASS] Column coverage ledger.purchase_items — []
+[PASS] Column coverage ledger.sale_items — []
+[PASS] Column coverage ledger.sale_payments — []
+[PASS] Column coverage ledger.sale_return_items — []
+[PASS] Column coverage ledger.sale_return_settlements — []
+[PASS] Column coverage ledger.sale_returns — []
+[PASS] Column coverage ledger.sales — []
+[PASS] Column coverage ledger.stock_balances — []
+[PASS] Column coverage ledger.stock_count_items — []
+[PASS] Column coverage ledger.stock_counts — []
+[PASS] Column coverage ledger.stores — []
+[PASS] Column coverage ledger.supplier_ledger_entries — []
+[PASS] Column coverage ledger.supplier_payment_allocations — []
+[PASS] Column coverage ledger.supplier_payments — []
+[PASS] Column coverage ledger.supplier_return_items — []
+[PASS] Column coverage ledger.supplier_return_settlements — []
+[PASS] Column coverage ledger.supplier_returns — []
+[PASS] Column coverage ledger.suppliers — []

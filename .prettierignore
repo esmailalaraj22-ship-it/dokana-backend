@@ -1,0 +1,5 @@
+node_modules
+dist
+coverage
+database/reference/backend_database_reference
+package-lock.json
