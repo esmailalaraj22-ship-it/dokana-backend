@@ -79,10 +79,22 @@ Store-owned work must use `DatabaseService.withTenantTransaction()`. It validate
 UUID context and sets `app.store_id`, `app.user_id`, `app.device_id`, and
 `app.request_id` with transaction-local scope before invoking business work.
 
-`drizzle.config.ts` reads only `DATABASE_ADMIN_URL`. No Drizzle migrations or
-business-table mappings are included in Station 2. Migration generation and
+`drizzle.config.ts` reads only `DATABASE_ADMIN_URL`. No Drizzle-generated
+migrations or business-table mappings are included. Migration generation and
 push scripts are intentionally unavailable until the existing baseline has
 been mapped and independently reviewed.
+
+Versioned migrations live in `database/migrations/` as hand-authored SQL and
+are applied only through the administrative connection, for example:
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" $env:DATABASE_ADMIN_URL -v ON_ERROR_STOP=1 -f database/migrations/0001_rls_context_function_privileges.sql
+```
+
+Migration `0001_rls_context_function_privileges.sql` makes the four
+`platform.current_*` context functions `SECURITY DEFINER` with a pinned
+`search_path` so the runtime role can evaluate tenant RLS policies. It grants
+nothing to the runtime role and leaves the baseline reference files untouched.
 
 ## Health
 
@@ -115,12 +127,24 @@ values are replaced.
   inventory, backup, or restoration behavior is implemented.
 - The approved PostgreSQL tables are not yet mapped into Drizzle TypeScript
   schemas.
-- No migration was created or applied.
+- One migration exists and was applied to the local development database:
+  `database/migrations/0001_rls_context_function_privileges.sql`. Without it,
+  every tenant-table query fails for the runtime role with `42501` because the
+  baseline grants no path to the RLS context functions.
 - Runtime connectivity cannot be verified without owner-provided local
   credentials.
 - The baseline `shop_app_migrator` grants object privileges but does not grant
   schema `CREATE` or object ownership. The backend owner must approve the
   effective migration-login ownership and privilege model before the first
   migration.
-- PostgreSQL runtime, migration, concurrency, RLS scenario, and backup/restore
-  approval remains outside Station 2.
+- `06_runtime_tests.sql` was executed on 2026-08-05 against the local
+  development database after migration 0001 (fully rolled back): 19 of 20
+  tests passed, including the runtime-role RLS isolation test. Two known
+  reference-package defects remain and need a versioned test-artifact
+  correction: the script seeds no `platform.users` row for its fixed
+  `app.user_id` although `audit.central_audit_logs.user_id` enforces a foreign
+  key (worked around by an external wrapper seed; the reference file was not
+  modified), and the test `Posted sale items cannot be changed` expects
+  SQLSTATE `55000` while the amount-consistency guard rejects the update first
+  with `23514` (the mutation is still blocked).
+- Backup/restore and full production approval remain outside Station 2.
