@@ -2,18 +2,18 @@ import 'dotenv/config';
 
 import { defineConfig } from 'drizzle-kit';
 
-const adminDatabaseUrl = process.env.DATABASE_ADMIN_URL;
+const migrationDatabaseUrl = process.env.DATABASE_MIGRATION_URL;
 
-if (!adminDatabaseUrl) {
+if (!migrationDatabaseUrl) {
   throw new Error(
-    'DATABASE_ADMIN_URL is required for Drizzle administrative commands. The runtime URL is never used.',
+    'DATABASE_MIGRATION_URL is required for Drizzle commands. Runtime and administrative URLs are never used.',
   );
 }
 
-const parsedAdminUrl = new URL(adminDatabaseUrl);
+const parsedMigrationUrl = new URL(migrationDatabaseUrl);
 
-if (!['postgres:', 'postgresql:'].includes(parsedAdminUrl.protocol)) {
-  throw new Error('DATABASE_ADMIN_URL must use the postgres or postgresql protocol.');
+if (!['postgres:', 'postgresql:'].includes(parsedMigrationUrl.protocol)) {
+  throw new Error('DATABASE_MIGRATION_URL must use the postgres or postgresql protocol.');
 }
 
 export default defineConfig({
@@ -21,7 +21,7 @@ export default defineConfig({
   schema: './src/database/schema/index.ts',
   out: './database/migrations',
   dbCredentials: {
-    url: adminDatabaseUrl,
+    url: migrationDatabaseUrl,
   },
   strict: true,
   verbose: true,
