@@ -14,6 +14,21 @@ export interface RuntimeDatabaseConfig {
   idleInTransactionTimeoutMs: number;
 }
 
+export interface AuthenticationDatabaseConfig extends RuntimeDatabaseConfig {
+  poolMax: number;
+}
+
+export interface AuthenticationTokenConfig {
+  issuer: string;
+  audience: string;
+  activeKeyId: string;
+  activeSecret: string;
+  previousSecrets: Readonly<Record<string, string>>;
+  accessTokenTtlSeconds: number;
+  refreshTokenTtlSeconds: number;
+  sessionTtlSeconds: number;
+}
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly config: ConfigService<Environment, true>) {}
@@ -74,6 +89,35 @@ export class AppConfigService {
       idleInTransactionTimeoutMs: this.config.get('DB_IDLE_IN_TRANSACTION_TIMEOUT_MS', {
         infer: true,
       }),
+    };
+  }
+
+  get authenticationDatabase(): AuthenticationDatabaseConfig {
+    return {
+      ...this.runtimeDatabase,
+      connectionString: this.config.get('AUTH_DATABASE_URL', { infer: true }),
+      poolMax: this.config.get('AUTH_DB_POOL_MAX', { infer: true }),
+    };
+  }
+
+  get authenticationTokens(): AuthenticationTokenConfig {
+    const previousSecrets: unknown = JSON.parse(
+      this.config.get('AUTH_ACCESS_TOKEN_PREVIOUS_KEYS', { infer: true }),
+    );
+
+    return {
+      issuer: this.config.get('AUTH_TOKEN_ISSUER', { infer: true }),
+      audience: this.config.get('AUTH_TOKEN_AUDIENCE', { infer: true }),
+      activeKeyId: this.config.get('AUTH_ACCESS_TOKEN_ACTIVE_KID', { infer: true }),
+      activeSecret: this.config.get('AUTH_ACCESS_TOKEN_ACTIVE_SECRET', { infer: true }),
+      previousSecrets: previousSecrets as Readonly<Record<string, string>>,
+      accessTokenTtlSeconds: this.config.get('AUTH_ACCESS_TOKEN_TTL_SECONDS', {
+        infer: true,
+      }),
+      refreshTokenTtlSeconds: this.config.get('AUTH_REFRESH_TOKEN_TTL_SECONDS', {
+        infer: true,
+      }),
+      sessionTtlSeconds: this.config.get('AUTH_SESSION_TTL_SECONDS', { infer: true }),
     };
   }
 }

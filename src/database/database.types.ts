@@ -1,6 +1,8 @@
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-export type DatabaseSchema = Record<string, never>;
+import type * as databaseSchema from './schema';
+
+export type DatabaseSchema = typeof databaseSchema;
 export type DatabaseClient = NodePgDatabase<DatabaseSchema>;
 export type DatabaseTransaction = Parameters<Parameters<DatabaseClient['transaction']>[0]>[0];
 

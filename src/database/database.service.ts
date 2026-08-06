@@ -27,8 +27,14 @@ interface RuntimeRoleInspection {
   rowSecurityEnabled: boolean;
   isRuntimeRoleMember: boolean;
   isMigrationRoleMember: boolean;
+  isAuthenticationRoleMember: boolean;
+  canSetMigrationRole: boolean;
+  canSetAuthenticationRole: boolean;
+  canSetAuthenticationOwnerRole: boolean;
   hasRuntimeSchemaAccess: boolean;
   hasRestrictedSchemaAccess: boolean;
+  hasAuthenticationSchemaAccess: boolean;
+  hasGlobalIdentityTableAccess: boolean;
   ownsProtectedTables: boolean;
 }
 
@@ -82,8 +88,14 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
         rowSecurityEnabled: inspection.rowSecurityEnabled,
         isRuntimeRoleMember: inspection.isRuntimeRoleMember,
         isMigrationRoleMember: inspection.isMigrationRoleMember,
+        isAuthenticationRoleMember: inspection.isAuthenticationRoleMember,
+        canSetMigrationRole: inspection.canSetMigrationRole,
+        canSetAuthenticationRole: inspection.canSetAuthenticationRole,
+        canSetAuthenticationOwnerRole: inspection.canSetAuthenticationOwnerRole,
         hasRuntimeSchemaAccess: inspection.hasRuntimeSchemaAccess,
         hasRestrictedSchemaAccess: inspection.hasRestrictedSchemaAccess,
+        hasAuthenticationSchemaAccess: inspection.hasAuthenticationSchemaAccess,
+        hasGlobalIdentityTableAccess: inspection.hasGlobalIdentityTableAccess,
         ownsProtectedTables: inspection.ownsProtectedTables,
       });
       throw new UnsafeRuntimeDatabaseRoleError();
@@ -154,6 +166,13 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
           current_setting('row_security') = 'on' as "rowSecurityEnabled",
           pg_has_role(current_user, 'shop_app_runtime', 'MEMBER') as "isRuntimeRoleMember",
           pg_has_role(current_user, 'shop_app_migrator', 'MEMBER') as "isMigrationRoleMember",
+          pg_has_role(current_user, 'shop_app_auth', 'MEMBER')
+            as "isAuthenticationRoleMember",
+          pg_has_role(current_user, 'shop_app_migrator', 'SET') as "canSetMigrationRole",
+          pg_has_role(current_user, 'shop_app_auth', 'SET')
+            as "canSetAuthenticationRole",
+          pg_has_role(current_user, 'shop_app_auth_owner', 'SET')
+            as "canSetAuthenticationOwnerRole",
           (
             has_schema_privilege(current_user, 'ledger', 'USAGE')
             and has_schema_privilege(current_user, 'sync', 'USAGE')
@@ -162,6 +181,35 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
             has_schema_privilege(current_user, 'platform', 'USAGE')
             or has_schema_privilege(current_user, 'audit', 'USAGE')
           ) as "hasRestrictedSchemaAccess",
+          has_schema_privilege(current_user, 'auth_api', 'USAGE')
+            as "hasAuthenticationSchemaAccess",
+          exists (
+            select 1
+            from pg_class as protected_identity
+            inner join pg_namespace as protected_namespace
+              on protected_namespace.oid = protected_identity.relnamespace
+            where
+              protected_namespace.nspname = 'platform'
+              and protected_identity.relname in (
+                'users',
+                'store_memberships',
+                'auth_sessions',
+                'refresh_tokens'
+              )
+              and (
+                has_table_privilege(current_user, protected_identity.oid, 'SELECT')
+                or has_table_privilege(current_user, protected_identity.oid, 'INSERT')
+                or has_table_privilege(current_user, protected_identity.oid, 'UPDATE')
+                or has_table_privilege(current_user, protected_identity.oid, 'DELETE')
+                or has_table_privilege(current_user, protected_identity.oid, 'TRUNCATE')
+                or has_table_privilege(current_user, protected_identity.oid, 'REFERENCES')
+                or has_table_privilege(current_user, protected_identity.oid, 'TRIGGER')
+                or has_any_column_privilege(current_user, protected_identity.oid, 'SELECT')
+                or has_any_column_privilege(current_user, protected_identity.oid, 'INSERT')
+                or has_any_column_privilege(current_user, protected_identity.oid, 'UPDATE')
+                or has_any_column_privilege(current_user, protected_identity.oid, 'REFERENCES')
+              )
+          ) as "hasGlobalIdentityTableAccess",
           exists (
             select 1
             from pg_class as protected_table
@@ -196,8 +244,14 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
       inspection.rowSecurityEnabled &&
       inspection.isRuntimeRoleMember &&
       !inspection.isMigrationRoleMember &&
+      !inspection.isAuthenticationRoleMember &&
+      !inspection.canSetMigrationRole &&
+      !inspection.canSetAuthenticationRole &&
+      !inspection.canSetAuthenticationOwnerRole &&
       inspection.hasRuntimeSchemaAccess &&
       !inspection.hasRestrictedSchemaAccess &&
+      !inspection.hasAuthenticationSchemaAccess &&
+      !inspection.hasGlobalIdentityTableAccess &&
       !inspection.ownsProtectedTables
     );
   }

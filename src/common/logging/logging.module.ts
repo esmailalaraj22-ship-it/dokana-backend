@@ -9,7 +9,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function serializeRequest(value: unknown): Record<string, unknown> {
+export function serializeRequestForLogging(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) {
     return {};
   }
@@ -21,7 +21,7 @@ function serializeRequest(value: unknown): Record<string, unknown> {
   };
 }
 
-function serializeResponse(value: unknown): Record<string, unknown> {
+export function serializeResponseForLogging(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) {
     return {};
   }
@@ -56,8 +56,8 @@ function serializeResponse(value: unknown): Record<string, unknown> {
             requestId: request.id,
           }),
           serializers: {
-            req: serializeRequest,
-            res: serializeResponse,
+            req: serializeRequestForLogging,
+            res: serializeResponseForLogging,
           },
           redact: {
             paths: [
