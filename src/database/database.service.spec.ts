@@ -62,3 +62,64 @@ describe('DatabaseService tenant transactions', () => {
     expect(database.transaction).not.toHaveBeenCalled();
   });
 });
+
+describe('DatabaseService runtime role safety', () => {
+  const safeInspection = {
+    isSuperuser: false,
+    bypassesRls: false,
+    canCreateDatabases: false,
+    canCreateRoles: false,
+    canReplicate: false,
+    rowSecurityEnabled: true,
+    isRuntimeRoleMember: true,
+    isMigrationRoleMember: false,
+    isAuthenticationRoleMember: false,
+    canSetMigrationRole: false,
+    canSetAuthenticationRole: false,
+    canSetAuthenticationOwnerRole: false,
+    hasRuntimeSchemaAccess: true,
+    hasRestrictedSchemaAccess: false,
+    hasAuthenticationSchemaAccess: false,
+    hasGlobalIdentityTableAccess: false,
+    ownsProtectedTables: false,
+  };
+
+  function createReadinessService(inspection: typeof safeInspection): {
+    service: DatabaseService;
+    query: jest.Mock;
+  } {
+    const query = jest.fn().mockResolvedValue({ rows: [inspection] });
+    const pool = {
+      on: jest.fn(),
+      query,
+    } as unknown as Pool;
+    const service = new DatabaseService(
+      {} as DatabaseClient,
+      pool,
+      {} as AppConfigService,
+      {
+        error: jest.fn(),
+      } as unknown as PinoLogger,
+    );
+
+    return { service, query };
+  }
+
+  it('accepts the least-privileged runtime role', async () => {
+    const { service } = createReadinessService(safeInspection);
+
+    await expect(service.checkReadiness(500)).resolves.toMatchObject({ ready: true });
+  });
+
+  it('rejects runtime membership or access in the authentication boundary', async () => {
+    for (const unsafeInspection of [
+      { ...safeInspection, isAuthenticationRoleMember: true },
+      { ...safeInspection, canSetAuthenticationOwnerRole: true },
+      { ...safeInspection, hasAuthenticationSchemaAccess: true },
+      { ...safeInspection, hasGlobalIdentityTableAccess: true },
+    ]) {
+      const { service } = createReadinessService(unsafeInspection);
+      await expect(service.checkReadiness(500)).resolves.toMatchObject({ ready: false });
+    }
+  });
+});

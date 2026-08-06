@@ -21,11 +21,14 @@ describe('application bootstrap', () => {
     process.env.APP_ENV = 'test';
     process.env.APP_PORT = '3108';
     process.env.DATABASE_URL = 'postgresql://runtime:password@127.0.0.1:1/dokana';
+    process.env.AUTH_DATABASE_URL = 'postgresql://auth:password@127.0.0.1:1/dokana';
     process.env.DATABASE_SSL_MODE = 'disable';
     process.env.DB_CONNECTION_TIMEOUT_MS = '100';
     process.env.HEALTH_CHECK_TIMEOUT_MS = '100';
     process.env.LOG_LEVEL = 'silent';
     process.env.REQUEST_BODY_LIMIT_BYTES = '1024';
+    process.env.AUTH_ACCESS_TOKEN_ACTIVE_KID = 'test-v1';
+    process.env.AUTH_ACCESS_TOKEN_ACTIVE_SECRET = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({

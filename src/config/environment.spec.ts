@@ -2,7 +2,10 @@ import { validateEnvironment } from './environment';
 
 const minimumEnvironment = {
   DATABASE_URL: 'postgresql://runtime:password@localhost:5432/dokana',
+  AUTH_DATABASE_URL: 'postgresql://auth:password@localhost:5432/dokana',
   DATABASE_SSL_MODE: 'disable',
+  AUTH_ACCESS_TOKEN_ACTIVE_KID: 'test-v1',
+  AUTH_ACCESS_TOKEN_ACTIVE_SECRET: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
 };
 
 describe('validateEnvironment', () => {
@@ -17,6 +20,8 @@ describe('validateEnvironment', () => {
       REQUEST_ID_TRUST_INCOMING: false,
       CORS_ORIGINS: '',
       DB_POOL_MAX: 10,
+      AUTH_DB_POOL_MAX: 5,
+      AUTH_ACCESS_TOKEN_TTL_SECONDS: 900,
       HEALTH_CHECK_TIMEOUT_MS: 2000,
     });
   });
@@ -54,5 +59,34 @@ describe('validateEnvironment', () => {
     });
 
     expect(environment.DATABASE_ADMIN_URL).toBeUndefined();
+  });
+
+  it('rejects a signing secret shorter than 256 bits', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        AUTH_ACCESS_TOKEN_ACTIVE_SECRET: 'dG9vLXNob3J0',
+      }),
+    ).toThrow('AUTH_ACCESS_TOKEN_ACTIVE_SECRET');
+  });
+
+  it('rejects the public example signing placeholder', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        AUTH_ACCESS_TOKEN_ACTIVE_SECRET: 'change-me',
+      }),
+    ).toThrow('AUTH_ACCESS_TOKEN_ACTIVE_SECRET');
+  });
+
+  it('rejects an active signing key duplicated in previous keys', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        AUTH_ACCESS_TOKEN_PREVIOUS_KEYS: JSON.stringify({
+          'test-v1': 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        }),
+      }),
+    ).toThrow('must not contain the active key ID');
   });
 });
