@@ -13,5 +13,6 @@ export interface HealthResponse {
   checks: {
     application: HealthCheck;
     database?: HealthCheck;
+    authenticationDatabase?: HealthCheck;
   };
 }

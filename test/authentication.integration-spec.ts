@@ -621,6 +621,19 @@ describeWithAuthenticationDatabase('authentication API with real PostgreSQL', ()
       .expect(401);
   });
 
+  it('reports full readiness including the verified authentication boundary', async () => {
+    const response = await request(server).get('/health/ready').expect(200);
+
+    expect(response.body).toMatchObject({
+      status: 'up',
+      checks: {
+        application: { status: 'up' },
+        database: { status: 'up' },
+        authenticationDatabase: { status: 'up' },
+      },
+    });
+  });
+
   it('rejects malformed login and refresh requests before database effects', async () => {
     await request(server)
       .post('/v1/auth/login')

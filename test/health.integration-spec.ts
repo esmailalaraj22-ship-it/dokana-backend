@@ -3,6 +3,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import type { Server } from 'node:http';
 import request from 'supertest';
 
+import type { AuthenticationDatabaseService } from '../src/auth/auth-database.service';
+import { AuthenticationDatabaseService as AuthenticationDatabaseToken } from '../src/auth/auth-database.service';
 import type { AppConfigService } from '../src/config/app-config.service';
 import { AppConfigService as AppConfigToken } from '../src/config/app-config.service';
 import type { DatabaseService } from '../src/database/database.service';
@@ -16,6 +18,9 @@ describe('health endpoints', () => {
   const database = {
     checkReadiness: jest.fn(),
   } as unknown as DatabaseService;
+  const authenticationDatabase = {
+    checkReadiness: jest.fn(),
+  } as unknown as AuthenticationDatabaseService;
   const config = {
     environment: 'test',
     healthCheckTimeoutMs: 250,
@@ -27,6 +32,7 @@ describe('health endpoints', () => {
       providers: [
         HealthService,
         { provide: DatabaseToken, useValue: database },
+        { provide: AuthenticationDatabaseToken, useValue: authenticationDatabase },
         { provide: AppConfigToken, useValue: config },
       ],
     }).compile();
@@ -54,10 +60,14 @@ describe('health endpoints', () => {
       },
     });
     expect(database.checkReadiness).not.toHaveBeenCalled();
+    expect(authenticationDatabase.checkReadiness).not.toHaveBeenCalled();
   });
 
   it('GET /health/ready returns 503 when PostgreSQL is not ready', async () => {
     jest.mocked(database.checkReadiness).mockResolvedValue({ ready: false, latencyMs: 251 });
+    jest
+      .mocked(authenticationDatabase.checkReadiness)
+      .mockResolvedValue({ ready: true, latencyMs: 2 });
 
     const response = await request(server).get('/health/ready').expect(503);
 
@@ -69,8 +79,29 @@ describe('health endpoints', () => {
     });
   });
 
+  it('GET /health/ready returns 503 while the authentication boundary is unverified', async () => {
+    jest.mocked(database.checkReadiness).mockResolvedValue({ ready: true, latencyMs: 3 });
+    jest
+      .mocked(authenticationDatabase.checkReadiness)
+      .mockResolvedValue({ ready: false, latencyMs: 251 });
+
+    const response = await request(server).get('/health/ready').expect(503);
+
+    expect(response.body).toMatchObject({
+      status: 'down',
+      checks: {
+        database: { status: 'up', latencyMs: 3 },
+        authenticationDatabase: { status: 'down', latencyMs: 251 },
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/postgres(ql)?:\/\//);
+  });
+
   it('GET /health returns 200 when all readiness checks pass', async () => {
     jest.mocked(database.checkReadiness).mockResolvedValue({ ready: true, latencyMs: 4 });
+    jest
+      .mocked(authenticationDatabase.checkReadiness)
+      .mockResolvedValue({ ready: true, latencyMs: 6 });
 
     const response = await request(server).get('/health').expect(200);
 
@@ -79,6 +110,7 @@ describe('health endpoints', () => {
       checks: {
         application: { status: 'up' },
         database: { status: 'up', latencyMs: 4 },
+        authenticationDatabase: { status: 'up', latencyMs: 6 },
       },
     });
   });

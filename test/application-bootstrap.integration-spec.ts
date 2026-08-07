@@ -64,6 +64,22 @@ describe('application bootstrap', () => {
     expect(isUuid(requestIdHeader)).toBe(true);
   });
 
+  it('reports not ready while runtime and authentication databases are unavailable', async () => {
+    const response = await request(server).get('/health/ready').expect(503);
+
+    expect(response.body).toMatchObject({
+      status: 'down',
+      checks: {
+        application: { status: 'up' },
+        database: { status: 'down' },
+        authenticationDatabase: { status: 'down' },
+      },
+    });
+    const serialized = JSON.stringify(response.body);
+    expect(serialized).not.toMatch(/postgres(ql)?:\/\//);
+    expect(serialized).not.toContain('password');
+  }, 15_000);
+
   it('returns a traced structured 413 response for oversized JSON', async () => {
     const response = await request(server)
       .post('/v1/not-found')

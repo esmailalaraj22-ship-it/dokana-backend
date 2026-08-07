@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { AuthenticationDatabaseService } from '../auth/auth-database.service';
 import { AppConfigService } from '../config/app-config.service';
 import { DatabaseService } from '../database/database.service';
 import type { HealthResponse } from './health.types';
@@ -8,6 +9,7 @@ import type { HealthResponse } from './health.types';
 export class HealthService {
   constructor(
     private readonly database: DatabaseService,
+    private readonly authenticationDatabase: AuthenticationDatabaseService,
     private readonly config: AppConfigService,
   ) {}
 
@@ -18,14 +20,21 @@ export class HealthService {
   }
 
   async getReadiness(): Promise<HealthResponse> {
-    const database = await this.database.checkReadiness(this.config.healthCheckTimeoutMs);
-    const status = database.ready ? 'up' : 'down';
+    const [database, authenticationDatabase] = await Promise.all([
+      this.database.checkReadiness(this.config.healthCheckTimeoutMs),
+      this.authenticationDatabase.checkReadiness(this.config.healthCheckTimeoutMs),
+    ]);
+    const status = database.ready && authenticationDatabase.ready ? 'up' : 'down';
 
     return this.createResponse(status, {
       application: { status: 'up' },
       database: {
-        status,
+        status: database.ready ? 'up' : 'down',
         latencyMs: database.latencyMs,
+      },
+      authenticationDatabase: {
+        status: authenticationDatabase.ready ? 'up' : 'down',
+        latencyMs: authenticationDatabase.latencyMs,
       },
     });
   }

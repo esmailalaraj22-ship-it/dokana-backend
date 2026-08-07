@@ -5,8 +5,9 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { Pool } from 'pg';
+import type { Pool, QueryConfig } from 'pg';
 
+import type { DatabaseReadiness } from '../database/database.types';
 import { AUTH_DATABASE_POOL } from './auth.constants';
 import type {
   AuthenticatedPrincipal,
@@ -92,6 +93,23 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
     this.logger.info({
       event: 'authentication_database_pool_closed',
     });
+  }
+
+  async checkReadiness(timeoutMs: number): Promise<DatabaseReadiness> {
+    const startedAt = performance.now();
+
+    try {
+      const inspection = await this.inspectRole(timeoutMs);
+      return {
+        ready: this.isSafeRole(inspection),
+        latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      };
+    } catch {
+      return {
+        ready: false,
+        latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      };
+    }
   }
 
   async lookupCredentials(normalizedEmail: string): Promise<CredentialRecord | undefined> {
@@ -246,8 +264,9 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
     return result.rows[0]?.revoked === true;
   }
 
-  private async inspectRole(): Promise<AuthenticationRoleInspection> {
-    const result = await this.pool.query<AuthenticationRoleInspection>(`
+  private async inspectRole(timeoutMs?: number): Promise<AuthenticationRoleInspection> {
+    const query = {
+      text: `
       select
         session_user as "sessionUser",
         current_user as "currentUser",
@@ -327,7 +346,10 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
         ) as "ownsApplicationObjects"
       from pg_roles as role_state
       where role_state.rolname = current_user
-    `);
+    `,
+      ...(timeoutMs === undefined ? {} : { query_timeout: timeoutMs }),
+    } as QueryConfig;
+    const result = await this.pool.query<AuthenticationRoleInspection>(query);
     const inspection = result.rows[0];
     if (!inspection) {
       throw new Error('Unable to inspect the authentication database role.');

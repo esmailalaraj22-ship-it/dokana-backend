@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 import type { Pool } from 'pg';
 
+import type { PinoLogger } from 'nestjs-pino';
+
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import { readMigrationFiles, sha256 } from '../scripts/migrations/migration-files';
+import { AuthenticationDatabaseService } from '../src/auth/auth-database.service';
 import {
   verifyApplicationInventory,
   verifyStation2ContextFunctions,
@@ -703,6 +706,68 @@ describeWithPostgres('Station 3 PostgreSQL security and migrations', () => {
       runtimeClient.release();
       authClient.release();
       adminClient.release();
+      migrationClient.release();
+    }
+  });
+
+  it('re-verifies the authentication boundary for readiness against real roles', async () => {
+    const silentLogger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    } as unknown as PinoLogger;
+
+    const authBoundary = new AuthenticationDatabaseService(authPool, silentLogger);
+    await expect(authBoundary.checkReadiness(5_000)).resolves.toMatchObject({ ready: true });
+
+    const unexpectedIdentity = new AuthenticationDatabaseService(runtimePool, silentLogger);
+    await expect(unexpectedIdentity.checkReadiness(5_000)).resolves.toMatchObject({
+      ready: false,
+    });
+
+    const overPrivileged = new AuthenticationDatabaseService(adminPool, silentLogger);
+    await expect(overPrivileged.checkReadiness(5_000)).resolves.toMatchObject({ ready: false });
+  });
+
+  it('rejects migrations containing top-level transaction control before any execution', async () => {
+    const migrationClient = await migrationPool.connect();
+    const rejectedFilename = '9999_station3_transaction_control_test.sql';
+    const rejectedContents =
+      'create table platform.station3_transaction_control_test (id integer);\ncommit;';
+
+    try {
+      await migrationClient.query('reset role');
+      await verifyMigrationSession(migrationClient);
+      await expect(
+        applyMigration(migrationClient, {
+          filename: rejectedFilename,
+          absolutePath: 'integration-test-only',
+          contents: rejectedContents,
+          checksumSha256: sha256(rejectedContents),
+        }),
+      ).rejects.toThrow('prohibited transaction control');
+
+      const state = await migrationClient.query<{
+        ledgerCount: number;
+        relationName: string | null;
+      }>(
+        `
+          select
+            (
+              select count(*)::integer
+              from platform.schema_migrations
+              where filename = $1
+            ) as "ledgerCount",
+            to_regclass('platform.station3_transaction_control_test')::text as "relationName"
+        `,
+        [rejectedFilename],
+      );
+      expect(state.rows[0]).toEqual({
+        ledgerCount: 0,
+        relationName: null,
+      });
+    } finally {
+      await migrationClient.query('reset role');
       migrationClient.release();
     }
   });

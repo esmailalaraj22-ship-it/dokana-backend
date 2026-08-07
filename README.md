@@ -138,7 +138,9 @@ suite is not a passing runtime verification.
 
 - `GET /health/live` checks only the NestJS process.
 - `GET /health/ready` checks PostgreSQL runtime connectivity and runtime-role
-  safety.
+  safety, and re-verifies the authentication database boundary (expected
+  limited login identity and least-privilege state) on every call. The
+  instance is not ready while either database check fails.
 - `GET /health` returns the combined readiness response.
 
 Responses never expose connection strings, credentials, tokens, or raw
