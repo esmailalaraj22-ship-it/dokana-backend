@@ -108,6 +108,11 @@ It:
 - rejects incomplete one-time bootstrap state;
 - applies pending files in deterministic filename order;
 - wraps each routine migration and ledger insert in one transaction;
+- rejects, before execution, migration files containing top-level
+  transaction-control statements (`BEGIN`, `START TRANSACTION`, `COMMIT`,
+  `END`, `ROLLBACK`, `ABORT`, `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`)
+  using an SQL-aware check that ignores comments, string literals, and
+  dollar-quoted function bodies; the runner owns the migration transaction;
 - permits `SET LOCAL ROLE shop_app_auth_owner` only in the hard-coded managed
   authentication migration allow-list;
 - verifies the effective role after migration SQL;

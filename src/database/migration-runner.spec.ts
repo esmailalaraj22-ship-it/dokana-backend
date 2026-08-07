@@ -1,5 +1,23 @@
-import { parseCommand, validateRoleSwitches, verifyChecksums } from '../../scripts/migrate';
+import type { PoolClient } from 'pg';
+
+import {
+  applyMigration,
+  bootstrapOnlyMigrations,
+  parseCommand,
+  validateRoleSwitches,
+  validateTransactionControl,
+  verifyChecksums,
+} from '../../scripts/migrate';
 import { readMigrationFiles, sha256 } from '../../scripts/migrations/migration-files';
+
+function migrationOf(contents: string) {
+  return {
+    filename: '9999_transaction_control_case.sql',
+    absolutePath: 'ignored',
+    contents,
+    checksumSha256: sha256(contents),
+  };
+}
 
 describe('controlled migration runner', () => {
   it('discovers migrations in deterministic numeric order', async () => {
@@ -39,6 +57,83 @@ describe('controlled migration runner', () => {
         checksumSha256: sha256('set local role shop_app_auth_owner;'),
       }),
     ).not.toThrow();
+  });
+
+  it('accepts every runner-applicable migration and rejects the self-transactional bootstrap file', async () => {
+    const files = await readMigrationFiles();
+    const runnerApplicable = files.filter((file) => !bootstrapOnlyMigrations.has(file.filename));
+
+    expect(runnerApplicable.length).toBeGreaterThan(0);
+    for (const file of runnerApplicable) {
+      expect(() => validateTransactionControl(file)).not.toThrow();
+    }
+
+    // 0001 manages its own transaction and is registered without replay; the
+    // runner must keep refusing to execute it even if the bootstrap gate failed.
+    const bootstrapSelfTransactional = files.find(
+      (file) => file.filename === '0001_rls_context_function_privileges.sql',
+    );
+    if (!bootstrapSelfTransactional) {
+      throw new Error('Expected migration 0001 to exist.');
+    }
+    expect(() => validateTransactionControl(bootstrapSelfTransactional)).toThrow(
+      'prohibited transaction control',
+    );
+  });
+
+  it('rejects every prohibited top-level transaction-control statement', () => {
+    const prohibited = [
+      'begin;',
+      'BEGIN TRANSACTION;',
+      'start transaction;',
+      'START\n  TRANSACTION isolation level serializable;',
+      'commit;',
+      'COMMIT AND CHAIN;',
+      "commit prepared 'dokana';",
+      'end;',
+      'END TRANSACTION;',
+      'rollback;',
+      'ROLLBACK TO SAVEPOINT partial;',
+      "rollback prepared 'dokana';",
+      'abort;',
+      'savepoint partial;',
+      'release savepoint partial;',
+      "prepare transaction 'dokana';",
+    ];
+
+    for (const statement of prohibited) {
+      expect(() => validateTransactionControl(migrationOf(`select 1;\n${statement}`))).toThrow(
+        'prohibited transaction control',
+      );
+    }
+  });
+
+  it('does not reject transaction keywords inside comments, strings, or function bodies', () => {
+    const legitimate = [
+      '-- rollback guidance: run ROLLBACK; then COMMIT elsewhere\nselect 1;',
+      '/* BEGIN; COMMIT; /* nested SAVEPOINT s1; */ ROLLBACK; */\nselect 1;',
+      "insert into platform.notes (body) values ('BEGIN; COMMIT; ROLLBACK;');",
+      "select E'COMMIT;\\n BEGIN;';",
+      'create function platform.example() returns void language plpgsql as $$\n' +
+        'begin\n  perform 1;\nend;\n$$;',
+      'do $tag$\nbegin\n  null; -- COMMIT inside body comment\nend;\n$tag$;',
+      `select 1 as "commit"; select 'it''s a begin';`,
+      "comment on function platform.example() is 'never a COMMIT';",
+      'prepare plan_name as select 1;',
+    ];
+
+    for (const contents of legitimate) {
+      expect(() => validateTransactionControl(migrationOf(contents))).not.toThrow();
+    }
+  });
+
+  it('never executes or records a migration rejected for transaction control', async () => {
+    const client = { query: jest.fn() } as unknown as PoolClient;
+
+    await expect(
+      applyMigration(client, migrationOf('create table platform.x (id integer);\ncommit;')),
+    ).rejects.toThrow('prohibited transaction control');
+    expect(client.query).not.toHaveBeenCalled();
   });
 
   it('fails when an applied migration checksum differs or its file is missing', () => {

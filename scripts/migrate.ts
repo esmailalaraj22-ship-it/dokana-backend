@@ -12,7 +12,7 @@ export interface AppliedMigration {
   checksumSha256: string;
 }
 
-const bootstrapOnlyMigrations = new Set([
+export const bootstrapOnlyMigrations = new Set([
   '0001_rls_context_function_privileges.sql',
   '0002_migration_ownership_foundation.sql',
   '0003_authentication_api_schema.sql',
@@ -78,6 +78,123 @@ export async function verifyMigrationSession(client: PoolClient): Promise<void> 
   }
 }
 
+const prohibitedTransactionControl: readonly RegExp[] = [
+  /^begin\b/i,
+  /^start\s+transaction\b/i,
+  /^commit\b/i,
+  /^end\b/i,
+  /^rollback\b/i,
+  /^abort\b/i,
+  /^savepoint\b/i,
+  /^release\b/i,
+  /^prepare\s+transaction\b/i,
+];
+
+export function stripNonExecutableSql(sqlText: string): string {
+  let executable = '';
+  let index = 0;
+
+  while (index < sqlText.length) {
+    const current = sqlText.charAt(index);
+    const next = sqlText.charAt(index + 1);
+
+    if (current === '-' && next === '-') {
+      const lineEnd = sqlText.indexOf('\n', index);
+      index = lineEnd === -1 ? sqlText.length : lineEnd;
+      executable += ' ';
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      let depth = 1;
+      index += 2;
+      while (index < sqlText.length && depth > 0) {
+        if (sqlText[index] === '/' && sqlText[index + 1] === '*') {
+          depth += 1;
+          index += 2;
+        } else if (sqlText[index] === '*' && sqlText[index + 1] === '/') {
+          depth -= 1;
+          index += 2;
+        } else {
+          index += 1;
+        }
+      }
+      executable += ' ';
+      continue;
+    }
+
+    if (current === '$') {
+      const dollarTag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sqlText.slice(index));
+      if (dollarTag) {
+        const closing = sqlText.indexOf(dollarTag[0], index + dollarTag[0].length);
+        index = closing === -1 ? sqlText.length : closing + dollarTag[0].length;
+        executable += ' ';
+        continue;
+      }
+    }
+
+    if (current === "'" || ((current === 'e' || current === 'E') && next === "'")) {
+      const escapeString = current !== "'";
+      index += escapeString ? 2 : 1;
+      while (index < sqlText.length) {
+        if (escapeString && sqlText[index] === '\\') {
+          index += 2;
+          continue;
+        }
+        if (sqlText[index] === "'") {
+          if (sqlText[index + 1] === "'") {
+            index += 2;
+            continue;
+          }
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      executable += ' ';
+      continue;
+    }
+
+    if (current === '"') {
+      index += 1;
+      while (index < sqlText.length) {
+        if (sqlText[index] === '"') {
+          if (sqlText[index + 1] === '"') {
+            index += 2;
+            continue;
+          }
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      executable += ' ';
+      continue;
+    }
+
+    executable += current;
+    index += 1;
+  }
+
+  return executable;
+}
+
+export function validateTransactionControl(migration: MigrationFile): void {
+  const statements = stripNonExecutableSql(migration.contents)
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+
+  for (const statement of statements) {
+    if (prohibitedTransactionControl.some((pattern) => pattern.test(statement))) {
+      throw new Error(
+        `Migration ${migration.filename} contains prohibited transaction control; ` +
+          'the migration runner owns the transaction.',
+      );
+    }
+  }
+}
+
 export function validateRoleSwitches(migration: MigrationFile): void {
   const roleSwitches = migration.contents.match(/\bset\s+(?:local\s+)?role\s+[a-z0-9_]+/gi) ?? [];
 
@@ -140,6 +257,7 @@ export function verifyChecksums(files: MigrationFile[], applied: AppliedMigratio
 }
 
 export async function applyMigration(client: PoolClient, migration: MigrationFile): Promise<void> {
+  validateTransactionControl(migration);
   validateRoleSwitches(migration);
   const startedAt = performance.now();
   await client.query('begin');
