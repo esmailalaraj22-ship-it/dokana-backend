@@ -91,6 +91,12 @@ so an ordinary competing store-status `UPDATE` is ordered against the business
 mutation. This store-level gate does not grant feature or membership-role
 permissions, and PostgreSQL RLS remains independently enforced.
 
+The Drizzle schema maps the existing `ledger.customers` persistence contract
+without changing PostgreSQL or SQLite. PostgreSQL remains authoritative for its
+forced RLS policy, version/change-event/audit triggers, and no-delete trigger;
+the ORM mapping preserves the table's columns, constraints, foreign keys, and
+indexes without redefining unresolved customer behavior.
+
 ## Authentication API
 
 All routes use the configured URI version, currently `v1`.

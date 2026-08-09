@@ -73,3 +73,68 @@ export const devices = ledgerSchema.table(
     index('idx_devices_status').on(table.storeId, table.status, table.lastSeenAt.desc()),
   ],
 );
+
+export const customers = ledgerSchema.table(
+  'customers',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    phone: text('phone').notNull(),
+    normalizedPhone: text('normalized_phone').notNull(),
+    notes: text('notes'),
+    creditLimitMinor: bigint('credit_limit_minor', { mode: 'bigint' }),
+    creditPolicy: text('credit_policy').$type<'allow' | 'warn' | 'block'>(),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'customers_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customers_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('customers_store_id_id_key').on(table.storeId, table.id),
+    unique('customers_store_id_normalized_phone_key').on(table.storeId, table.normalizedPhone),
+    unique('customers_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('customers_name_check', sql`length(trim(${table.name})) > 0`),
+    check('customers_normalized_name_check', sql`length(trim(${table.normalizedName})) > 0`),
+    check('customers_phone_check', sql`length(trim(${table.phone})) > 0`),
+    check('customers_normalized_phone_check', sql`length(trim(${table.normalizedPhone})) > 0`),
+    check(
+      'customers_credit_limit_minor_check',
+      sql`${table.creditLimitMinor} is null or ${table.creditLimitMinor} >= 0`,
+    ),
+    check(
+      'customers_credit_policy_check',
+      sql`${table.creditPolicy} is null or ${table.creditPolicy} in ('allow', 'warn', 'block')`,
+    ),
+    check('customers_status_check', sql`${table.status} in ('active', 'archived')`),
+    check(
+      'customers_check',
+      sql`(${table.status} = 'archived' and ${table.archivedAt} is not null) or ${table.status} = 'active'`,
+    ),
+    check('customers_version_check', sql`${table.version} >= 1`),
+    index('idx_customers_search').on(
+      table.storeId,
+      table.status,
+      table.normalizedName,
+      table.normalizedPhone,
+    ),
+  ],
+);
