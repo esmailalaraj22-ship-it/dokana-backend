@@ -60,8 +60,15 @@ describe('AuthenticationGuard tenant context', () => {
       id: requestId,
       headers: {
         authorization: 'Bearer signed-access-token',
+        'x-store-id': '690f778f-dab6-4837-9a92-0a4f876285fb',
       },
       body: {
+        storeId: '690f778f-dab6-4837-9a92-0a4f876285fb',
+      },
+      query: {
+        storeId: '690f778f-dab6-4837-9a92-0a4f876285fb',
+      },
+      params: {
         storeId: '690f778f-dab6-4837-9a92-0a4f876285fb',
       },
     } as unknown as Request;

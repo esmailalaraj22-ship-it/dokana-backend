@@ -1,16 +1,18 @@
 import {
+  ForbiddenException,
   Inject,
   Injectable,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import type { Pool, QueryConfig } from 'pg';
 
 import { AppConfigService } from '../config/app-config.service';
 import { isUuid } from '../common/logging/request-id';
 import { DATABASE_POOL, DRIZZLE_DATABASE } from './database.constants';
+import { stores } from './schema';
 import type {
   DatabaseClient,
   DatabaseReadiness,
@@ -132,6 +134,29 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
       await transaction.execute(
         sql`select set_config('app.request_id', ${context.requestId}, true)`,
       );
+
+      return work(transaction);
+    });
+  }
+
+  async withBusinessWriteTransaction<T>(
+    context: TenantTransactionContext,
+    work: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> {
+    return this.withTenantTransaction(context, async (transaction) => {
+      // FOR SHARE is the weakest row lock that conflicts with a normal status UPDATE.
+      const storeState = await transaction
+        .select({ status: stores.status })
+        .from(stores)
+        .where(eq(stores.id, context.storeId))
+        .for('share');
+
+      if (storeState[0]?.status !== 'active') {
+        throw new ForbiddenException({
+          code: 'BUSINESS_WRITE_NOT_ALLOWED',
+          message: 'Business writes are not allowed.',
+        });
+      }
 
       return work(transaction);
     });

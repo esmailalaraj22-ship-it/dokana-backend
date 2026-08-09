@@ -2,4 +2,5 @@ node_modules
 dist
 coverage
 database/reference/backend_database_reference
+docs/product/Dokana_PRD_v1.1_APPROVED.md
 package-lock.json

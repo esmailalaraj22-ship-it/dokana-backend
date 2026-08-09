@@ -81,6 +81,16 @@ Store-owned runtime work uses
 connection used by the operation. The authentication guard derives this context
 from the verified server-side session, not from request-body tenant values.
 
+Business mutations must use
+`DatabaseService.withBusinessWriteTransaction()`. After establishing the same
+transaction-local tenant context, it reads and locks the authoritative
+`ledger.stores` row with `FOR SHARE`. Only `active` stores reach the protected
+callback; `read_only`, `suspended`, `archived`, and missing stores receive the
+same generic denial. The callback executes on the transaction holding the lock,
+so an ordinary competing store-status `UPDATE` is ordered against the business
+mutation. This store-level gate does not grant feature or membership-role
+permissions, and PostgreSQL RLS remains independently enforced.
+
 ## Authentication API
 
 All routes use the configured URI version, currently `v1`.
