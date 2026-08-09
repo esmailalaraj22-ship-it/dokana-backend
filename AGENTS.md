@@ -63,7 +63,7 @@ Use this priority when sources differ:
 
 1. Current explicit backend-owner decision.
 2. Approved decisions in this file.
-3. Approved PRD and architecture documents under `docs/` when present.
+3. Approved PRD and architecture documents under `docs/`.
 4. Applied migrations in chronological order.
 5. Current reviewed Drizzle schema.
 6. Approved PostgreSQL baseline.
@@ -79,6 +79,23 @@ When a material conflict exists:
 - wait for backend-owner approval.
 
 Do not invent missing business rules.
+
+## Approved Product Requirements
+
+The current approved product requirements document is:
+
+```text
+docs/product/Dokana_PRD_v1.1_APPROVED.md
+```
+
+Rules:
+
+- Read the approved PRD completely before planning or implementing work that introduces, changes, or interprets product or business behavior.
+- Older PRD versions are historical only and must not be treated as the current product authority.
+- Do not copy product rules from stale documentation when a newer backend-owner decision or approved rule in this file explicitly supersedes them.
+- The approved supplier rule in this file intentionally supersedes older supplier-receipt or partial-receipt requirements.
+- Do not infer missing product policy from nullable columns, schema capability, implementation accidents, or test fixtures.
+- If this file, the approved PRD, applied migrations, the reviewed Drizzle schema, or the approved database reference materially disagree, identify the conflict and wait for backend-owner approval rather than silently choosing an interpretation.
 
 ---
 
@@ -101,17 +118,18 @@ Important rules:
 - Static validation does not prove runtime correctness.
 - Run `06_runtime_tests.sql` against a disposable real PostgreSQL environment before claiming database runtime readiness.
 
-Expected PostgreSQL schemas:
+Expected PostgreSQL schema responsibilities:
 
 ```text
-platform  users, memberships, sessions, subscriptions, licenses,
-          server backups, administration
-ledger    stores, devices, customers, suppliers, products, sales,
-          supplier invoices, money, inventory, expenses, owner ledger,
-          returns, accounting periods
+platform  server-only identity/authentication, memberships, subscriptions/licenses,
+          backup and administration objects
+ledger    stores, devices, customers, suppliers, products, sales, supplier invoices,
+          money, inventory, expenses, owner ledger, returns, accounting periods
 sync      idempotency, change feed, cursors, conflicts, bootstrap, restore
 audit     immutable central audit records
 ```
+
+`ledger.stores` and `ledger.devices` are deliberate parts of the approved database contract. Do not relocate or duplicate them merely to match conceptual product grouping.
 
 Do not rename, move, repurpose, or duplicate schema objects without an approved migration, compatibility analysis, tests, and remediation guidance.
 
@@ -178,6 +196,8 @@ Runtime-role validation should reject unsafe privileges, ownership, migrator mem
 - Later receivable payment increases only the selected receiving account.
 - Payment allocations cannot exceed the payment amount or remaining balance.
 - Overpayment becomes customer credit or follows an explicit refund flow.
+- Do not invent a walk-in customer record or customer type for fully paid anonymous sales.
+- Customer role permissions, normalization semantics, archive visibility, or restore/reactivation behavior must come from an approved source or explicit backend-owner decision; do not infer them merely because the database can represent a state.
 - One active cash account per store is allowed.
 - Multiple bank, wallet, or transfer accounts are allowed.
 - Internal transfers are neither revenue nor expense.
@@ -350,17 +370,18 @@ against an approved disposable PostgreSQL environment.
 For every non-trivial task:
 
 1. Read this file and the current task prompt.
-2. Inspect relevant code, migrations, tests, configuration, and documents.
-3. Identify accounting, tenancy, sync, security, migration, and compatibility impact.
-4. State a short plan.
-5. Make the smallest complete change.
-6. Add or update tests with the change.
-7. Run repository-defined verification commands.
-8. Fix root causes; do not bypass rules or weaken tests.
-9. Review the diff for unrelated changes, secrets, destructive SQL, and tenant risk.
-10. Update documentation when behavior, setup, schema, or contracts change.
-11. Produce a complete handoff.
-12. Stop at the requested task boundary.
+2. If the task introduces, changes, or interprets product/business behavior, read `docs/product/Dokana_PRD_v1.1_APPROVED.md` completely.
+3. Inspect relevant code, migrations, tests, configuration, and documents.
+4. Identify accounting, tenancy, sync, security, migration, and compatibility impact.
+5. State a short plan.
+6. Make the smallest complete change.
+7. Add or update tests with the change.
+8. Run repository-defined verification commands.
+9. Fix root causes; do not bypass rules or weaken tests.
+10. Review the diff for unrelated changes, secrets, destructive SQL, and tenant risk.
+11. Update documentation when behavior, setup, schema, or contracts change.
+12. Produce a complete handoff.
+13. Stop at the requested task boundary.
 
 Do not begin unrelated future work or broad refactoring without a correctness reason and explicit justification.
 
