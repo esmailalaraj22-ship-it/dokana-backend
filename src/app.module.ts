@@ -4,6 +4,7 @@ import { AuthenticationModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
 import { LoggingModule } from './common/logging/logging.module';
 import { ApplicationConfigModule } from './config/config.module';
+import { CustomersModule } from './customers/customers.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -13,6 +14,7 @@ import { HealthModule } from './health/health.module';
     CommonModule,
     HealthModule,
     AuthenticationModule,
+    CustomersModule,
   ],
 })
 export class AppModule {}
