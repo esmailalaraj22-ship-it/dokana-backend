@@ -1,0 +1,335 @@
+{
+  "normalizationVersion": 1,
+  "nameCases": [
+    {
+      "id": "simple-arabic",
+      "input": "أحمد",
+      "display": "أحمد",
+      "normalized": "احمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "outer-ascii-whitespace",
+      "input": "  أحمد  ",
+      "display": "أحمد",
+      "normalized": "احمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "repeated-internal-whitespace",
+      "input": "أحمد   محمد",
+      "display": "أحمد محمد",
+      "normalized": "احمد محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "non-ascii-v1-whitespace",
+      "input": "أحمد  محمد",
+      "display": "أحمد محمد",
+      "normalized": "احمد محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "nfkc-compatibility",
+      "input": "ＡＨＭＡＤ",
+      "display": "ＡＨＭＡＤ",
+      "normalized": "ahmad",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "tatweel",
+      "input": "أحمــد",
+      "display": "أحمــد",
+      "normalized": "احمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "tashkeel",
+      "input": "مُحَمَّد",
+      "display": "مُحَمَّد",
+      "normalized": "محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "approved-alef-folding",
+      "input": "أمين إسلام آدم ٱدم",
+      "display": "أمين إسلام آدم ٱدم",
+      "normalized": "امين اسلام ادم ادم",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "preserve-teh-marbuta",
+      "input": "فاطمة",
+      "display": "فاطمة",
+      "normalized": "فاطمة",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "preserve-alef-maksura",
+      "input": "هدى",
+      "display": "هدى",
+      "normalized": "هدى",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "preserve-waw-hamza",
+      "input": "رؤوف",
+      "display": "رؤوف",
+      "normalized": "رؤوف",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "preserve-ya-hamza",
+      "input": "سئل",
+      "display": "سئل",
+      "normalized": "سئل",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "punctuation",
+      "input": "أحمد-محمد",
+      "display": "أحمد-محمد",
+      "normalized": "احمد-محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "latin-uppercase",
+      "input": "AHMAD SMITH",
+      "display": "AHMAD SMITH",
+      "normalized": "ahmad smith",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "latin-lowercase",
+      "input": "ahmad smith",
+      "display": "ahmad smith",
+      "normalized": "ahmad smith",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "mixed-arabic-latin",
+      "input": "Ahmad أحمد",
+      "display": "Ahmad أحمد",
+      "normalized": "ahmad احمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "already-normalized",
+      "input": "احمد محمد",
+      "display": "احمد محمد",
+      "normalized": "احمد محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "outside-vocalization-set-preserved",
+      "input": "ب́ت",
+      "display": "ب́ت",
+      "normalized": "ب́ت",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "zero-width-space-preserved",
+      "input": "أحمد​محمد",
+      "display": "أحمد​محمد",
+      "normalized": "احمد​محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "empty-v1-whitespace",
+      "input": "    ",
+      "display": null,
+      "normalized": null,
+      "displayError": "CUSTOMER_DISPLAY_NAME_EMPTY",
+      "normalizedError": "CUSTOMER_NORMALIZED_NAME_EMPTY"
+    },
+    {
+      "id": "canonical-empty-after-removal",
+      "input": "ـً",
+      "display": "ـً",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_NORMALIZED_NAME_EMPTY"
+    },
+    {
+      "id": "approved-example",
+      "input": "  أحمــد   مُحَمَّد  ",
+      "display": "أحمــد مُحَمَّد",
+      "normalized": "احمد محمد",
+      "displayError": null,
+      "normalizedError": null
+    }
+  ],
+  "phoneCases": [
+    {
+      "id": "ps-national-mobile",
+      "input": "0599 123 456",
+      "display": "0599 123 456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "ps-mobile-hyphens",
+      "input": "0599-123-456",
+      "display": "0599-123-456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "ps-mobile-parentheses",
+      "input": "(0599) 123 456",
+      "display": "(0599) 123 456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "explicit-plus-970",
+      "input": "+970 599 123 456",
+      "display": "+970 599 123 456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "explicit-plus-972",
+      "input": "+972 50 234 5678",
+      "display": "+972 50 234 5678",
+      "normalized": "+972502345678",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "non-palestinian-international",
+      "input": "+44 20 7946 0958",
+      "display": "+44 20 7946 0958",
+      "normalized": "+442079460958",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "ps-fixed-line",
+      "input": "02 234 5678",
+      "display": "02 234 5678",
+      "normalized": "+97022345678",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "arabic-indic-digits",
+      "input": "٠٥٩٩ ١٢٣ ٤٥٦",
+      "display": "٠٥٩٩ ١٢٣ ٤٥٦",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "persian-digits",
+      "input": "۰۵۹۹ ۱۲۳ ۴۵۶",
+      "display": "۰۵۹۹ ۱۲۳ ۴۵۶",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "mixed-supported-digits",
+      "input": "0٥۹٩ 1٢۳ ۴5٦",
+      "display": "0٥۹٩ 1٢۳ ۴5٦",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "already-canonical",
+      "input": "+970599123456",
+      "display": "+970599123456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "outer-v1-whitespace",
+      "input": " 0599-123-456 ",
+      "display": "0599-123-456",
+      "normalized": "+970599123456",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "international-00-prefix",
+      "input": "00442079460958",
+      "display": "00442079460958",
+      "normalized": "+442079460958",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "invalid-number",
+      "input": "+970000000000",
+      "display": "+970000000000",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_PHONE_INVALID"
+    },
+    {
+      "id": "impossible-country-code",
+      "input": "+999123456789",
+      "display": "+999123456789",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_PHONE_INVALID"
+    },
+    {
+      "id": "too-short",
+      "input": "123",
+      "display": "123",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_PHONE_INVALID"
+    },
+    {
+      "id": "strict-prose-rejection",
+      "input": "call me at 0599123456",
+      "display": "call me at 0599123456",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_PHONE_INVALID"
+    },
+    {
+      "id": "extension-rejection",
+      "input": "0599 123 456 ext. 12",
+      "display": "0599 123 456 ext. 12",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "CUSTOMER_PHONE_EXTENSION_UNSUPPORTED"
+    },
+    {
+      "id": "empty-v1-whitespace",
+      "input": "    ",
+      "display": null,
+      "normalized": null,
+      "displayError": "CUSTOMER_DISPLAY_PHONE_EMPTY",
+      "normalizedError": "CUSTOMER_PHONE_EMPTY"
+    }
+  ]
+}
