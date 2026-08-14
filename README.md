@@ -1,12 +1,13 @@
 # Dokana Backend
 
 NestJS, TypeScript, Drizzle ORM, and PostgreSQL backend infrastructure for the
-Dokana offline-first SaaS application. The current Station 3 scope provides the
+Dokana offline-first SaaS application. The implemented foundation provides the
 migration ownership model, identity mappings, authentication database boundary,
-session/token lifecycle, membership authorization, and device bootstrap.
+session/token lifecycle, membership authorization, device bootstrap, and the
+tenant-safe Customer read/create/update API.
 
-Business modules, synchronization processing, subscriptions, accounting,
-inventory, backup, and restore are not implemented yet.
+Remaining business modules, synchronization processing, subscriptions,
+accounting, inventory, backup, and restore are not implemented yet.
 
 ## Prerequisites
 
@@ -123,6 +124,32 @@ it preserves the supplied UUID and rejects incompatible existing bindings.
 
 Full request/response contracts and key-rotation instructions are documented in
 [docs/station-3-architecture.md](docs/station-3-architecture.md).
+
+## Customer API
+
+All Customer routes require a verified bearer session and derive store, user,
+and device identity from that session.
+
+| Method | Route                       | Purpose                         |
+| ------ | --------------------------- | ------------------------------- |
+| GET    | `/v1/customers`             | List active or archived records |
+| GET    | `/v1/customers/:customerId` | Read one tenant-visible record  |
+| POST   | `/v1/customers`             | Create an active Customer       |
+| PATCH  | `/v1/customers/:customerId` | Update active Customer details  |
+
+Create accepts the client-generated Customer `id`, a stable `operationId`,
+`name`, `phone`, and optional nullable `notes`. PATCH accepts a new stable
+`operationId`, required positive decimal-string `expectedVersion`, and at least
+one of `name`, `phone`, or nullable `notes`. The server applies Customer
+normalization v1, derives tenant/device fields, and returns the actual lossless
+database `version` plus the accepted `operationId`.
+
+Writes use the business-write transaction and forced PostgreSQL RLS. Operation
+claims, Customer effects, automatic audit/change events, and stored replay
+responses commit atomically. Known conflicts use stable codes including
+`CUSTOMER_PHONE_CONFLICT`, `CUSTOMER_VERSION_CONFLICT`, `CUSTOMER_ARCHIVED`,
+and `OPERATION_ID_CONFLICT`. Customer archive, restore, and delete are not part
+of this API scope.
 
 ## Commands
 
