@@ -4,19 +4,16 @@ import {
   normalizeCustomerName,
   normalizeCustomerPhone,
 } from './customer-normalization';
+import {
+  assertCustomerSearchCursorRepresentable,
+  CustomerCursorRepresentabilityError,
+} from './customer-cursor-representability';
+import { CustomerReadQueryError } from './customer-read-query-error';
 import type { CustomerSearchScope } from './customer-read.types';
 
-type PhoneNormalizer = (input: string) => string;
+export { CustomerReadQueryError } from './customer-read-query-error';
 
-export class CustomerReadQueryError extends Error {
-  constructor(
-    public readonly field: 'search' | 'cursor',
-    public readonly constraint: string,
-  ) {
-    super(`Invalid Customer read ${field}.`);
-    this.name = 'CustomerReadQueryError';
-  }
-}
+type PhoneNormalizer = (input: string) => string;
 
 function isExpectedPhoneValidation(error: CustomerNormalizationError): boolean {
   return (
@@ -57,14 +54,19 @@ export function prepareCustomerSearchScope(
   }
 
   try {
-    return {
+    const scope = {
       // Canonicalizing recognized phones first keeps equivalent display formats in one scope.
       normalizedNamePrefix: normalizeCustomerName(canonicalPhone ?? displaySearch),
       canonicalPhone,
     };
+    assertCustomerSearchCursorRepresentable(scope);
+    return scope;
   } catch (error) {
     if (error instanceof CustomerNormalizationError) {
       throw new CustomerReadQueryError('search', 'customerSearch');
+    }
+    if (error instanceof CustomerCursorRepresentabilityError) {
+      throw new CustomerReadQueryError('search', 'customerCursorRepresentability');
     }
     throw error;
   }

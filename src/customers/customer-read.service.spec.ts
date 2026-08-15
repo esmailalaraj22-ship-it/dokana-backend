@@ -93,6 +93,19 @@ describe('CustomerReadService', () => {
     expect(repository.list).not.toHaveBeenCalled();
   });
 
+  it('rejects an over-budget normalized search before repository access', async () => {
+    await expect(
+      service.list(context, { search: '\ufdfa'.repeat(21) + 'a'.repeat(7) }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'search', constraints: ['customerCursorRepresentability'] }],
+      },
+    });
+    expect(repository.list).not.toHaveBeenCalled();
+  });
+
   it('uses limit plus one results to return a bounded page and keyset cursor', async () => {
     repository.list.mockResolvedValue([firstRow, secondRow, extraRow]);
 

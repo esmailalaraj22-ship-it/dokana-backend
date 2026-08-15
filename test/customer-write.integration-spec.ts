@@ -12,6 +12,9 @@ import type { Response } from 'supertest';
 import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
 import { AppConfigService } from '../src/config/app-config.service';
+import { customerCursorJsonStringContentByteLength } from '../src/customers/customer-cursor-representability';
+import { normalizeCustomerName } from '../src/customers/customer-normalization';
+import { decodeCustomerCursor } from '../src/customers/customer-read-cursor';
 import type { CustomerListResponse } from '../src/customers/customer-read.types';
 import type { CustomerMutationResponse } from '../src/customers/customer-write.types';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
@@ -933,6 +936,191 @@ describe('Customer mutation API with real PostgreSQL', () => {
       [fixture.stores.a, [nilUuid, maximumUuid, lowercaseCustomerId], allOperationIds],
     );
     expect(effects.rows[0]).toEqual({ customers: 3, processed: 6, changes: 6, conflicts: 0 });
+  });
+
+  it('rejects over-budget names before operation claim and preserves atomic retry behavior', async () => {
+    const overBudgetName = 'a'.repeat(700);
+    const safeBoundaryName = 'a'.repeat(699);
+    const createId = randomUUID();
+    const createOperationId = randomUUID();
+    const createPayload = {
+      id: createId,
+      operationId: createOperationId,
+      name: overBudgetName,
+      phone: '0599 310 030',
+    };
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await authorizedPost(access.a)
+        .send(createPayload)
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'name', constraints: ['customerCursorRepresentability'] }],
+          });
+        });
+    }
+    const rejectedCreate = await adminPool.query<{
+      customers: number;
+      operations: number;
+      changes: number;
+      audits: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from ledger.customers where id = $1) as customers,
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $2 and operation_id = $3) as operations,
+          (select count(*)::integer from sync.change_events
+            where store_id = $2 and operation_id = $3) as changes,
+          (select count(*)::integer from audit.central_audit_logs
+            where store_id = $2 and entity_id = $1) as audits
+      `,
+      [createId, fixture.stores.a, createOperationId],
+    );
+    expect(rejectedCreate.rows[0]).toEqual({
+      customers: 0,
+      operations: 0,
+      changes: 0,
+      audits: 0,
+    });
+    await authorizedPost(access.a)
+      .send({ ...createPayload, name: safeBoundaryName })
+      .expect(201);
+
+    const beforeUpdate = await readCustomer(fixture.customers.aTarget);
+    const updateOperationId = randomUUID();
+    const updatePayload = {
+      operationId: updateOperationId,
+      expectedVersion: '1',
+      name: overBudgetName,
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await authorizedPatch(access.a, fixture.customers.aTarget)
+        .send(updatePayload)
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'name', constraints: ['customerCursorRepresentability'] }],
+          });
+        });
+    }
+    expect(await readCustomer(fixture.customers.aTarget)).toEqual(beforeUpdate);
+    const rejectedUpdate = await adminPool.query<{
+      operations: number;
+      changes: number;
+      audits: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = $2) as operations,
+          (select count(*)::integer from sync.change_events
+            where store_id = $1 and operation_id = $2) as changes,
+          (select count(*)::integer from audit.central_audit_logs
+            where store_id = $1 and entity_id = $3) as audits
+      `,
+      [fixture.stores.a, updateOperationId, fixture.customers.aTarget],
+    );
+    expect(rejectedUpdate.rows[0]).toEqual({ operations: 0, changes: 0, audits: 0 });
+    await authorizedPatch(access.a, fixture.customers.aTarget)
+      .send({ ...updatePayload, name: safeBoundaryName })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ name: safeBoundaryName, version: '2' });
+      });
+  });
+
+  it('pages exact boundary names with the exact validated canonical search scope', async () => {
+    const rawBoundary = '\ufdfa'.repeat(21) + 'a'.repeat(6);
+    const normalizedBoundary = normalizeCustomerName(rawBoundary);
+    const customerIds = [randomUUID(), randomUUID()];
+
+    expect(customerCursorJsonStringContentByteLength(normalizedBoundary)).toBe(699);
+    for (const [index, id] of customerIds.entries()) {
+      await authorizedPost(access.a)
+        .send({
+          id,
+          operationId: randomUUID(),
+          name: rawBoundary,
+          phone: `0599 310 ${String(40 + index).padStart(3, '0')}`,
+        })
+        .expect(201);
+    }
+
+    const firstPage = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: rawBoundary, limit: 1 })
+        .expect(200),
+    );
+    if (!firstPage.nextCursor) {
+      throw new Error('Expected a boundary-safe Customer continuation cursor.');
+    }
+    const decoded = decodeCustomerCursor(firstPage.nextCursor);
+    expect(decoded.search).toEqual({
+      normalizedNamePrefix: normalizedBoundary,
+      canonicalPhone: null,
+    });
+    expect(decoded.position.normalizedName).toBe(normalizedBoundary);
+    expect(Buffer.from(firstPage.nextCursor, 'base64url')).toHaveLength(1_520);
+    expect(firstPage.nextCursor).toHaveLength(2_027);
+
+    const secondPage = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: rawBoundary, limit: 1, cursor: firstPage.nextCursor })
+        .expect(200),
+    );
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id))).toEqual(
+      new Set(customerIds),
+    );
+    expect(secondPage.nextCursor).toBeNull();
+
+    await authorizedGet(access.a, '/v1/customers')
+      .query({ search: `${rawBoundary}a`, limit: 1 })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          code: 'VALIDATION_ERROR',
+          details: [{ field: 'search', constraints: ['customerCursorRepresentability'] }],
+        });
+      });
+  });
+
+  it('does not revalidate an unchanged legacy oversized name on unrelated mutations', async () => {
+    const legacyName = 'l'.repeat(700);
+    await adminPool.query(
+      `update ledger.customers set name = $1, normalized_name = $1 where id = $2`,
+      [legacyName, fixture.customers.aTarget],
+    );
+
+    const noteOperation = randomUUID();
+    await authorizedPatch(access.a, fixture.customers.aTarget)
+      .send({ operationId: noteOperation, expectedVersion: '1', notes: 'Legacy notes update' })
+      .expect(200);
+    const phoneOperation = randomUUID();
+    await authorizedPatch(access.a, fixture.customers.aTarget)
+      .send({ operationId: phoneOperation, expectedVersion: '2', phone: '0599 310 099' })
+      .expect(200);
+    const archiveOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aTarget, 'archive')
+      .send({ operationId: archiveOperation, expectedVersion: '3' })
+      .expect(200);
+    const restoreOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aTarget, 'restore')
+      .send({ operationId: restoreOperation, expectedVersion: '4' })
+      .expect(200);
+
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      name: legacyName,
+      normalizedName: legacyName,
+      phone: '0599 310 099',
+      notes: 'Legacy notes update',
+      status: 'active',
+      operationId: restoreOperation,
+      version: '5',
+    });
   });
 
   it('converges concurrent identical create retries to one committed effect', async () => {

@@ -209,6 +209,40 @@ describe('CustomerWriteService', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
+  it('rejects over-budget normalized names before create or update persistence', async () => {
+    const overBudgetName = 'a'.repeat(700);
+
+    await expect(
+      service.create(context, {
+        id: customerId,
+        operationId,
+        name: overBudgetName,
+        phone: '0599 123 456',
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'name', constraints: ['customerCursorRepresentability'] }],
+      },
+    });
+    await expect(
+      service.update(context, customerId, {
+        operationId,
+        expectedVersion: '1',
+        name: overBudgetName,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'name', constraints: ['customerCursorRepresentability'] }],
+      },
+    });
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
   it('prepares only supplied update fields and parses expectedVersion losslessly', async () => {
     await service.update(context, customerId, {
       operationId,

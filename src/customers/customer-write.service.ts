@@ -7,6 +7,10 @@ import {
 import { createHash } from 'node:crypto';
 
 import type { TenantTransactionContext } from '../database/database.types';
+import {
+  assertCustomerNormalizedNameCursorRepresentable,
+  CustomerCursorRepresentabilityError,
+} from './customer-cursor-representability';
 import { canonicalizeCustomerId, canonicalizeCustomerOperationId } from './customer-identifiers';
 import {
   cleanCustomerDisplayName,
@@ -49,6 +53,7 @@ export class CustomerWriteService {
       const phone = cleanCustomerDisplayPhone(dto.phone);
       const normalizedName = normalizeCustomerName(name);
       const normalizedPhone = normalizeCustomerPhone(phone);
+      assertCustomerNormalizedNameCursorRepresentable(normalizedName);
       const notes = dto.notes ?? null;
       input = {
         customerId,
@@ -95,6 +100,9 @@ export class CustomerWriteService {
       const normalizedName = name === undefined ? undefined : normalizeCustomerName(name);
       const phone = dto.phone === undefined ? undefined : cleanCustomerDisplayPhone(dto.phone);
       const normalizedPhone = phone === undefined ? undefined : normalizeCustomerPhone(phone);
+      if (normalizedName !== undefined) {
+        assertCustomerNormalizedNameCursorRepresentable(normalizedName);
+      }
       const canonicalPayload: Record<string, unknown> = {
         v: CUSTOMER_NORMALIZATION_VERSION,
         action: 'update',
@@ -204,6 +212,9 @@ export class CustomerWriteService {
     if (error instanceof CustomerNormalizationError) {
       const field = error.code.includes('NAME') ? 'name' : 'phone';
       throw this.validationException(field, error.code);
+    }
+    if (error instanceof CustomerCursorRepresentabilityError) {
+      throw this.validationException(error.field, 'customerCursorRepresentability');
     }
     throw error;
   }

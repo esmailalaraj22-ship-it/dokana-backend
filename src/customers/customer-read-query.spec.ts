@@ -9,6 +9,10 @@ import {
   prepareCustomerSearchScope,
 } from './customer-read-query';
 import { CustomerNormalizationError } from './customer-normalization';
+import {
+  CUSTOMER_CURSOR_SEARCH_NAME_JSON_BYTE_BUDGET,
+  customerCursorJsonStringContentByteLength,
+} from './customer-cursor-representability';
 
 const position = {
   normalizedName: 'ahmad',
@@ -84,6 +88,48 @@ describe('Customer read search', () => {
     }
 
     throw new Error('Expected a Customer search validation error.');
+  });
+
+  it('accepts the exact post-NFKC cursor-bound search budget', () => {
+    const rawSearch = '\ufdfa'.repeat(21) + 'a'.repeat(6);
+    const scope = prepareCustomerSearchScope(rawSearch);
+
+    expect(scope?.canonicalPhone).toBeNull();
+    expect(customerCursorJsonStringContentByteLength(scope?.normalizedNamePrefix ?? '')).toBe(
+      CUSTOMER_CURSOR_SEARCH_NAME_JSON_BYTE_BUDGET,
+    );
+  });
+
+  it.each([
+    ['Arabic UTF-8', '\u0639'.repeat(256), 512],
+    ['supplementary Unicode', '\u{1f600}'.repeat(128), 512],
+    ['JSON quotes', '"'.repeat(256), 512],
+    ['JSON backslashes', '\\'.repeat(256), 512],
+    ['JSON control escapes', '\u0001'.repeat(116) + 'aaa', 699],
+  ])('accounts for %s in the exact canonical search scope', (_case, rawSearch, expectedBytes) => {
+    const scope = prepareCustomerSearchScope(rawSearch);
+
+    expect(scope?.canonicalPhone).toBeNull();
+    expect(customerCursorJsonStringContentByteLength(scope?.normalizedNamePrefix ?? '')).toBe(
+      expectedBytes,
+    );
+  });
+
+  it('rejects the nearest post-NFKC search overflow with the stable read error', () => {
+    const rawSearch = '\ufdfa'.repeat(21) + 'a'.repeat(7);
+
+    try {
+      prepareCustomerSearchScope(rawSearch);
+    } catch (error) {
+      expect(error).toBeInstanceOf(CustomerReadQueryError);
+      expect(error).toMatchObject({
+        field: 'search',
+        constraint: 'customerCursorRepresentability',
+      });
+      return;
+    }
+
+    throw new Error('Expected a Customer search representability error.');
   });
 });
 

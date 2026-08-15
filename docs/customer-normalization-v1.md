@@ -36,6 +36,28 @@ The letters `ة`, `ى`, `ؤ`, and `ئ`, punctuation, symbols, and combining mark
 outside the closed removal set remain unchanged. Canonical names are not
 unique Customer identities.
 
+## Cursor Representability
+
+Normalization v1 semantics are unchanged by pagination limits. A newly
+accepted Customer name, or canonical Customer search scope, must be
+representable in the complete current server continuation-cursor envelope
+after normalization and JSON serialization. The server validates that
+invariant before persisting a new or changed name and before executing a
+cursor-bound search.
+
+Current byte allowances are derived implementation values of the current
+server cursor format, not permanent product or normalization constants.
+Implementations must not truncate, hash, abbreviate, or silently rewrite
+Customer master data or canonical search scope to satisfy the envelope.
+Existing unchanged Customer names are not retrospectively revalidated during
+unrelated mutations.
+
+Future mobile and synchronization implementations must preserve this semantic
+acceptance invariant. How already-created offline data that violates a future
+central contract is rejected or resolved remains an explicit future
+synchronization-contract decision; it must never be handled by silent
+truncation.
+
 ## Phones
 
 The display phone trims only outer v1 whitespace and preserves all internal

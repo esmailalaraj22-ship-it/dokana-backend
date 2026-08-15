@@ -1,5 +1,5 @@
 import { canonicalizeCustomerId, isCustomerId } from './customer-identifiers';
-import { CustomerReadQueryError } from './customer-read-query';
+import { CustomerReadQueryError } from './customer-read-query-error';
 import type {
   CustomerCursorPosition,
   CustomerSearchScope,
@@ -8,7 +8,7 @@ import type {
 
 export const CUSTOMER_CURSOR_VERSION = 1;
 export const CUSTOMER_CURSOR_MAX_ENCODED_LENGTH = 2_048;
-const CUSTOMER_CURSOR_MAX_DECODED_BYTES = 1_536;
+export const CUSTOMER_CURSOR_MAX_DECODED_BYTES = 1_536;
 const CUSTOMER_CURSOR_MAX_NAME_LENGTH = 1_024;
 const customerCursorKeys = [
   'lastId',
