@@ -34,6 +34,9 @@ interface RepositoryHarness {
   insertValues: jest.Mock;
   update: jest.Mock;
   updateSet: jest.Mock;
+  returningUpdate: jest.Mock;
+  selectLimit: jest.Mock;
+  updateValues: Record<string, unknown>[];
 }
 
 function createHarness(): RepositoryHarness {
@@ -44,12 +47,31 @@ function createHarness(): RepositoryHarness {
   const insert = jest.fn(() => ({ values: insertValues }));
   const returningUpdate = jest.fn().mockResolvedValue([{ ...row, version: 2n }]);
   const whereUpdate = jest.fn(() => ({ returning: returningUpdate }));
-  const updateSet = jest.fn(() => ({ where: whereUpdate }));
+  const updateValues: Record<string, unknown>[] = [];
+  const updateSet = jest.fn((values: Record<string, unknown>) => {
+    updateValues.push(values);
+    return { where: whereUpdate };
+  });
   const update = jest.fn(() => ({ set: updateSet }));
+  const selectLimit = jest.fn(
+    async (): Promise<{ status: 'active' | 'archived'; version: bigint }[]> => [
+      { status: 'active', version: 1n },
+    ],
+  );
+  const selectFor = jest.fn((): ReturnType<typeof selectLimit> => selectLimit());
+  const selectQuery = {
+    from: jest.fn(() => ({
+      where: jest.fn(() => ({
+        limit: jest.fn(() => ({ for: selectFor })),
+      })),
+    })),
+  };
+  const select = jest.fn(() => selectQuery);
   const transaction = {
     execute,
     insert,
     update,
+    select,
   } as unknown as DatabaseTransaction;
   Object.assign(transaction, {
     transaction: jest.fn(async (work: (value: DatabaseTransaction) => Promise<unknown>) =>
@@ -74,6 +96,9 @@ function createHarness(): RepositoryHarness {
     insertValues,
     update,
     updateSet,
+    returningUpdate,
+    selectLimit,
+    updateValues,
   };
 }
 
@@ -190,5 +215,147 @@ describe('CustomerWriteRepository', () => {
     ).resolves.toMatchObject({ ok: true, response: { id: customerId, version: '1' } });
     expect(harness.insert).not.toHaveBeenCalled();
     expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('archives through the business-write boundary with only lifecycle provenance fields', async () => {
+    const harness = createHarness();
+    const archivedAt = new Date('2026-08-14T09:00:00.000Z');
+    harness.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [{ operationId }] });
+    harness.returningUpdate.mockResolvedValueOnce([
+      { ...row, status: 'archived', archivedAt, version: 2n },
+    ]);
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        customerId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'archive',
+        requestHash: 'd'.repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: { status: 'archived', archivedAt: archivedAt.toISOString(), version: '2' },
+    });
+
+    expect(harness.database.withBusinessWriteTransaction).toHaveBeenCalledWith(
+      context,
+      expect.any(Function),
+    );
+    expect(harness.selectLimit).toHaveBeenCalledTimes(1);
+    const updates = harness.updateValues[0];
+    expect(Object.keys(updates ?? {}).sort()).toEqual([
+      'archivedAt',
+      'deviceId',
+      'operationId',
+      'status',
+    ]);
+    expect(updates).toMatchObject({
+      status: 'archived',
+      deviceId: context.deviceId,
+      operationId,
+    });
+    expect(updates?.archivedAt).not.toBeInstanceOf(Date);
+  });
+
+  it('restores the same row without supplying Customer master data', async () => {
+    const harness = createHarness();
+    harness.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [{ operationId }] });
+    harness.selectLimit.mockResolvedValueOnce([{ status: 'archived', version: 1n }]);
+    harness.returningUpdate.mockResolvedValueOnce([
+      { ...row, status: 'active', archivedAt: null, version: 2n },
+    ]);
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        customerId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'restore',
+        requestHash: 'e'.repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: { id: customerId, status: 'active', archivedAt: null, version: '2' },
+    });
+
+    expect(harness.updateSet).toHaveBeenCalledWith({
+      status: 'active',
+      archivedAt: null,
+      deviceId: context.deviceId,
+      operationId,
+    });
+  });
+
+  it.each([
+    {
+      action: 'archive' as const,
+      current: [] as { status: 'active' | 'archived'; version: bigint }[],
+      code: 'CUSTOMER_NOT_FOUND',
+    },
+    {
+      action: 'archive' as const,
+      current: [{ status: 'archived' as const, version: 1n }],
+      code: 'CUSTOMER_ARCHIVED',
+    },
+    {
+      action: 'restore' as const,
+      current: [{ status: 'active' as const, version: 1n }],
+      code: 'CONFLICT',
+    },
+    {
+      action: 'archive' as const,
+      current: [{ status: 'active' as const, version: 2n }],
+      code: 'CUSTOMER_VERSION_CONFLICT',
+    },
+    {
+      action: 'restore' as const,
+      current: [{ status: 'archived' as const, version: 2n }],
+      code: 'CUSTOMER_VERSION_CONFLICT',
+    },
+  ])('classifies $action lifecycle zero-effect state as $code before UPDATE', async (example) => {
+    const harness = createHarness();
+    harness.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [{ operationId }] });
+    harness.selectLimit.mockResolvedValueOnce(example.current);
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        customerId,
+        operationId,
+        expectedVersion: 1n,
+        action: example.action,
+        requestHash: 'f'.repeat(64),
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: example.code } });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('does not falsely complete an operation after an unexpected lifecycle database failure', async () => {
+    const harness = createHarness();
+    const unexpected = new Error('unexpected lifecycle database failure');
+    harness.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] });
+    harness.returningUpdate.mockRejectedValueOnce(unexpected);
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        customerId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'archive',
+        requestHash: '1'.repeat(64),
+      }),
+    ).rejects.toBe(unexpected);
+    expect(harness.execute).toHaveBeenCalledTimes(2);
   });
 });

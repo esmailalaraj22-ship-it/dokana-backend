@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import { CustomerReadService } from './customer-read.service';
@@ -7,6 +19,7 @@ import { CustomerWriteService } from './customer-write.service';
 import type { CustomerMutationResponse } from './customer-write.types';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CustomerIdParamDto } from './dto/customer-id-param.dto';
+import { CustomerLifecycleDto } from './dto/customer-lifecycle.dto';
 import { ListCustomersQueryDto } from './dto/list-customers-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
@@ -49,5 +62,25 @@ export class CustomersController {
     @Body() body: UpdateCustomerDto,
   ): Promise<CustomerMutationResponse> {
     return this.customerWrites.update(request.tenantContext, params.customerId, body);
+  }
+
+  @Post(':customerId/archive')
+  @HttpCode(HttpStatus.OK)
+  archive(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: CustomerLifecycleDto,
+  ): Promise<CustomerMutationResponse> {
+    return this.customerWrites.archive(request.tenantContext, params.customerId, body);
+  }
+
+  @Post(':customerId/restore')
+  @HttpCode(HttpStatus.OK)
+  restore(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: CustomerLifecycleDto,
+  ): Promise<CustomerMutationResponse> {
+    return this.customerWrites.restore(request.tenantContext, params.customerId, body);
   }
 }

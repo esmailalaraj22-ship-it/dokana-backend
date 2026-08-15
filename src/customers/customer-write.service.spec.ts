@@ -48,13 +48,18 @@ describe('CustomerWriteService', () => {
   const repository = {
     create: jest.fn(),
     update: jest.fn(),
-  } as jest.Mocked<Pick<CustomerWriteRepository, 'create' | 'update'>>;
+    changeLifecycle: jest.fn(),
+  } as jest.Mocked<Pick<CustomerWriteRepository, 'create' | 'update' | 'changeLifecycle'>>;
   const service = new CustomerWriteService(repository as unknown as CustomerWriteRepository);
 
   beforeEach(() => {
     jest.clearAllMocks();
     repository.create.mockResolvedValue({ ok: true, response });
     repository.update.mockResolvedValue({ ok: true, response: { ...response, version: '2' } });
+    repository.changeLifecycle.mockResolvedValue({
+      ok: true,
+      response: { ...response, status: 'archived', version: '2' },
+    });
   });
 
   it('prepares an explicit create with preserved client UUIDs and trusted-context separation', async () => {
@@ -232,6 +237,73 @@ describe('CustomerWriteService', () => {
       },
     });
     expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('prepares archive and restore as distinct lifecycle commands without master data', async () => {
+    await service.archive(context, customerId, { operationId, expectedVersion: '1' });
+    const archive = repository.changeLifecycle.mock.calls[0]?.[1];
+
+    repository.changeLifecycle.mockResolvedValueOnce({
+      ok: true,
+      response: { ...response, status: 'active', version: '3' },
+    });
+    await service.restore(context, customerId, { operationId, expectedVersion: '2' });
+    const restore = repository.changeLifecycle.mock.calls[1]?.[1];
+
+    expect(archive).toMatchObject({
+      customerId,
+      operationId,
+      expectedVersion: 1n,
+      action: 'archive',
+    });
+    expect(restore).toMatchObject({
+      customerId,
+      operationId,
+      expectedVersion: 2n,
+      action: 'restore',
+    });
+    expect(Object.keys(archive ?? {}).sort()).toEqual([
+      'action',
+      'customerId',
+      'expectedVersion',
+      'operationId',
+      'requestHash',
+    ]);
+    expect(archive?.requestHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(restore?.requestHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(archive?.requestHash).not.toBe(restore?.requestHash);
+  });
+
+  it('rejects an oversized lifecycle version before persistence', async () => {
+    await expect(
+      service.archive(context, customerId, {
+        operationId,
+        expectedVersion: '9223372036854775808',
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        details: [{ field: 'expectedVersion', constraints: ['maxPostgreSqlBigint'] }],
+      },
+    });
+    expect(repository.changeLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('maps lifecycle state and version failures through the established error contract', async () => {
+    repository.changeLifecycle.mockResolvedValueOnce(rejected('CUSTOMER_ARCHIVED'));
+    await expect(
+      service.archive(context, customerId, { operationId, expectedVersion: '1' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    repository.changeLifecycle.mockResolvedValueOnce(rejected('CONFLICT'));
+    await expect(
+      service.restore(context, customerId, { operationId, expectedVersion: '1' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    repository.changeLifecycle.mockResolvedValueOnce(rejected('CUSTOMER_VERSION_CONFLICT'));
+    await expect(
+      service.restore(context, customerId, { operationId, expectedVersion: '1' }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it.each([

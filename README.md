@@ -4,7 +4,7 @@ NestJS, TypeScript, Drizzle ORM, and PostgreSQL backend infrastructure for the
 Dokana offline-first SaaS application. The implemented foundation provides the
 migration ownership model, identity mappings, authentication database boundary,
 session/token lifecycle, membership authorization, device bootstrap, and the
-tenant-safe Customer read/create/update API.
+tenant-safe Customer read/create/update/archive/restore API.
 
 Remaining business modules, synchronization processing, subscriptions,
 accounting, inventory, backup, and restore are not implemented yet.
@@ -130,12 +130,14 @@ Full request/response contracts and key-rotation instructions are documented in
 All Customer routes require a verified bearer session and derive store, user,
 and device identity from that session.
 
-| Method | Route                       | Purpose                         |
-| ------ | --------------------------- | ------------------------------- |
-| GET    | `/v1/customers`             | List active or archived records |
-| GET    | `/v1/customers/:customerId` | Read one tenant-visible record  |
-| POST   | `/v1/customers`             | Create an active Customer       |
-| PATCH  | `/v1/customers/:customerId` | Update active Customer details  |
+| Method | Route                               | Purpose                         |
+| ------ | ----------------------------------- | ------------------------------- |
+| GET    | `/v1/customers`                     | List active or archived records |
+| GET    | `/v1/customers/:customerId`         | Read one tenant-visible record  |
+| POST   | `/v1/customers`                     | Create an active Customer       |
+| PATCH  | `/v1/customers/:customerId`         | Update active Customer details  |
+| POST   | `/v1/customers/:customerId/archive` | Archive one active Customer     |
+| POST   | `/v1/customers/:customerId/restore` | Restore one archived Customer   |
 
 Create accepts the client-generated Customer `id`, a stable `operationId`,
 `name`, `phone`, and optional nullable `notes`. PATCH accepts a new stable
@@ -144,12 +146,20 @@ one of `name`, `phone`, or nullable `notes`. The server applies Customer
 normalization v1, derives tenant/device fields, and returns the actual lossless
 database `version` plus the accepted `operationId`.
 
+Archive and restore accept only `operationId` and `expectedVersion`. They update
+the same Customer row using the trusted tenant/device context and database
+timestamp, preserve identity, phone reservation, master data, and historical
+references, and advance the database-managed version. They do not delete the
+Customer, settle balances, change accounting records, or determine whether an
+archived Customer is eligible for future accounting workflows.
+
 Writes use the business-write transaction and forced PostgreSQL RLS. Operation
 claims, Customer effects, automatic audit/change events, and stored replay
 responses commit atomically. Known conflicts use stable codes including
 `CUSTOMER_PHONE_CONFLICT`, `CUSTOMER_VERSION_CONFLICT`, `CUSTOMER_ARCHIVED`,
-and `OPERATION_ID_CONFLICT`. Customer archive, restore, and delete are not part
-of this API scope.
+and `OPERATION_ID_CONFLICT`. Applied replays return their stored historical
+response without re-executing or changing the Customer's current state. Hard
+Customer deletion is not implemented.
 
 ## Commands
 

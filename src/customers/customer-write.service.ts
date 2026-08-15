@@ -20,13 +20,17 @@ import type {
   CustomerMutationFailure,
   CustomerMutationResponse,
   CustomerMutationResult,
+  CustomerLifecycleAction,
   PreparedCustomerCreate,
+  PreparedCustomerLifecycle,
   PreparedCustomerUpdate,
 } from './customer-write.types';
 import type { CreateCustomerDto } from './dto/create-customer.dto';
+import type { CustomerLifecycleDto } from './dto/customer-lifecycle.dto';
 import type { UpdateCustomerDto } from './dto/update-customer.dto';
 
 const maximumPostgreSqlBigint = 9_223_372_036_854_775_807n;
+const customerLifecycleCommandVersion = 1;
 
 @Injectable()
 export class CustomerWriteService {
@@ -78,10 +82,7 @@ export class CustomerWriteService {
       throw this.validationException('body', 'customerMutableField');
     }
 
-    const expectedVersion = BigInt(dto.expectedVersion);
-    if (expectedVersion > maximumPostgreSqlBigint) {
-      throw this.validationException('expectedVersion', 'maxPostgreSqlBigint');
-    }
+    const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
 
     let input: PreparedCustomerUpdate;
     try {
@@ -123,6 +124,54 @@ export class CustomerWriteService {
     }
 
     return this.unwrap(await this.repository.update(context, input));
+  }
+
+  archive(
+    context: TenantTransactionContext,
+    customerId: string,
+    dto: CustomerLifecycleDto,
+  ): Promise<CustomerMutationResponse> {
+    return this.changeLifecycle(context, customerId, dto, 'archive');
+  }
+
+  restore(
+    context: TenantTransactionContext,
+    customerId: string,
+    dto: CustomerLifecycleDto,
+  ): Promise<CustomerMutationResponse> {
+    return this.changeLifecycle(context, customerId, dto, 'restore');
+  }
+
+  private async changeLifecycle(
+    context: TenantTransactionContext,
+    customerId: string,
+    dto: CustomerLifecycleDto,
+    action: CustomerLifecycleAction,
+  ): Promise<CustomerMutationResponse> {
+    const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+    const input: PreparedCustomerLifecycle = {
+      customerId,
+      operationId: dto.operationId,
+      expectedVersion,
+      action,
+      requestHash: this.hashRequest({
+        v: customerLifecycleCommandVersion,
+        action,
+        customerId,
+        operationId: dto.operationId,
+        expectedVersion: expectedVersion.toString(),
+      }),
+    };
+
+    return this.unwrap(await this.repository.changeLifecycle(context, input));
+  }
+
+  private parseExpectedVersion(value: string): bigint {
+    const expectedVersion = BigInt(value);
+    if (expectedVersion > maximumPostgreSqlBigint) {
+      throw this.validationException('expectedVersion', 'maxPostgreSqlBigint');
+    }
+    return expectedVersion;
   }
 
   private hashRequest(payload: object): string {

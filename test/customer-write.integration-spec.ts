@@ -70,6 +70,8 @@ interface CustomerFixtureRecord {
   phone: string;
   normalizedPhone: string;
   notes?: string;
+  creditLimitMinor?: string;
+  creditPolicy?: 'allow' | 'warn' | 'block';
   status?: 'active' | 'archived';
 }
 
@@ -81,10 +83,14 @@ interface CustomerDatabaseRow extends Record<string, unknown> {
   phone: string;
   normalizedPhone: string;
   notes: string | null;
+  creditLimitMinor: string | null;
+  creditPolicy: 'allow' | 'warn' | 'block' | null;
   status: 'active' | 'archived';
   archivedAt: Date | null;
   deviceId: string | null;
   operationId: string;
+  createdAt: Date;
+  updatedAt: Date;
   version: string;
 }
 
@@ -108,6 +114,14 @@ function readMutation(response: Response): CustomerMutationResponse {
   return body as unknown as CustomerMutationResponse;
 }
 
+function readErrorCode(response: Response): string {
+  const body: unknown = response.body;
+  if (!isRecord(body) || typeof body.code !== 'string') {
+    throw new Error('Expected an API error code.');
+  }
+  return body.code;
+}
+
 function withoutTraceFields(body: unknown): unknown {
   if (!isRecord(body)) {
     return body;
@@ -119,7 +133,33 @@ function withoutTraceFields(body: unknown): unknown {
   return stable;
 }
 
-describe('Customer create and update API with real PostgreSQL', () => {
+function readCustomerIds(response: Response): string[] {
+  const body: unknown = response.body;
+  if (!isRecord(body) || !Array.isArray(body.items)) {
+    throw new Error('Expected a Customer list response.');
+  }
+  return body.items.map((item: unknown) => {
+    if (!isRecord(item) || typeof item.id !== 'string') {
+      throw new Error('Expected a Customer list item.');
+    }
+    return item.id;
+  });
+}
+
+function changedCustomerFields(before: CustomerDatabaseRow, after: CustomerDatabaseRow): string[] {
+  return Object.keys(before)
+    .filter((key) => {
+      const beforeValue = before[key];
+      const afterValue = after[key];
+      const serializedBefore =
+        beforeValue instanceof Date ? beforeValue.toISOString() : beforeValue;
+      const serializedAfter = afterValue instanceof Date ? afterValue.toISOString() : afterValue;
+      return serializedBefore !== serializedAfter;
+    })
+    .sort();
+}
+
+describe('Customer mutation API with real PostgreSQL', () => {
   let app: INestApplication | undefined;
   let server: Server;
   let adminPool: Pool;
@@ -139,6 +179,8 @@ describe('Customer create and update API with real PostgreSQL', () => {
       phone: '0599 300 001',
       normalizedPhone: '+970599300001',
       notes: 'Original notes',
+      creditLimitMinor: '50000',
+      creditPolicy: 'warn',
     },
     {
       id: fixture.customers.aDuplicate,
@@ -245,6 +287,8 @@ describe('Customer create and update API with real PostgreSQL', () => {
             phone,
             normalized_phone,
             notes,
+            credit_limit_minor,
+            credit_policy,
             status,
             archived_at,
             operation_id,
@@ -258,8 +302,10 @@ describe('Customer create and update API with real PostgreSQL', () => {
             $6,
             $7,
             $8,
-            case when $8 = 'archived' then '2026-08-01T00:00:00Z'::timestamptz else null end,
             $9,
+            $10,
+            case when $10 = 'archived' then '2026-08-01T00:00:00Z'::timestamptz else null end,
+            $11,
             1
           )
         `,
@@ -271,6 +317,8 @@ describe('Customer create and update API with real PostgreSQL', () => {
           customer.phone,
           customer.normalizedPhone,
           customer.notes ?? null,
+          customer.creditLimitMinor ?? null,
+          customer.creditPolicy ?? null,
           customer.status ?? 'active',
           `45500000-0000-4000-8000-${(index + 1).toString().padStart(12, '0')}`,
         ],
@@ -324,6 +372,20 @@ describe('Customer create and update API with real PostgreSQL', () => {
       .set('authorization', `Bearer ${identity.accessToken}`);
   }
 
+  function authorizedLifecycle(
+    identity: AccessIdentity,
+    customerId: string,
+    action: 'archive' | 'restore',
+  ) {
+    return request(server)
+      .post(`/v1/customers/${customerId}/${action}`)
+      .set('authorization', `Bearer ${identity.accessToken}`);
+  }
+
+  function authorizedGet(identity: AccessIdentity, path: string) {
+    return request(server).get(path).set('authorization', `Bearer ${identity.accessToken}`);
+  }
+
   async function readCustomer(customerId: string): Promise<CustomerDatabaseRow | undefined> {
     const result = await adminPool.query<CustomerDatabaseRow>(
       `
@@ -335,10 +397,14 @@ describe('Customer create and update API with real PostgreSQL', () => {
           phone,
           normalized_phone as "normalizedPhone",
           notes,
+          credit_limit_minor::text as "creditLimitMinor",
+          credit_policy as "creditPolicy",
           status,
           archived_at as "archivedAt",
           device_id as "deviceId",
           operation_id as "operationId",
+          created_at as "createdAt",
+          updated_at as "updatedAt",
           version::text
         from ledger.customers
         where id = $1
@@ -346,6 +412,29 @@ describe('Customer create and update API with real PostgreSQL', () => {
       [customerId],
     );
     return result.rows[0];
+  }
+
+  async function readAccountingCounts(storeId: string): Promise<Record<string, number>> {
+    const result = await adminPool.query<Record<string, number>>(
+      `
+        select
+          (select count(*)::integer from ledger.sales where store_id = $1) as sales,
+          (select count(*)::integer from ledger.customer_payments where store_id = $1)
+            as "customerPayments",
+          (select count(*)::integer from ledger.customer_payment_allocations where store_id = $1)
+            as "paymentAllocations",
+          (select count(*)::integer from ledger.customer_ledger_entries where store_id = $1)
+            as "customerLedgerEntries",
+          (select count(*)::integer from ledger.money_movements where store_id = $1)
+            as "moneyMovements"
+      `,
+      [storeId],
+    );
+    const counts = result.rows[0];
+    if (!counts) {
+      throw new Error('Expected Customer accounting counts.');
+    }
+    return counts;
   }
 
   beforeAll(async () => {
@@ -1090,6 +1179,648 @@ describe('Customer create and update API with real PostgreSQL', () => {
     }
   });
 
+  it('validates lifecycle authentication, identifiers, versions, and exact command fields', async () => {
+    const valid = { operationId: randomUUID(), expectedVersion: '1' };
+    await request(server)
+      .post(`/v1/customers/${fixture.customers.aTarget}/archive`)
+      .send(valid)
+      .expect(401);
+    await request(server)
+      .post(`/v1/customers/${fixture.customers.aArchived}/restore`)
+      .send(valid)
+      .expect(401);
+
+    for (const action of ['archive', 'restore'] as const) {
+      await authorizedLifecycle(access.a, 'not-a-uuid', action).send(valid).expect(400);
+      for (const body of [
+        { operationId: 'not-a-uuid', expectedVersion: '1' },
+        { operationId: randomUUID(), expectedVersion: '0' },
+        { operationId: randomUUID(), expectedVersion: '04' },
+        { operationId: randomUUID(), expectedVersion: '1.5' },
+        { operationId: randomUUID(), expectedVersion: '9223372036854775808' },
+        { ...valid, storeId: fixture.stores.b },
+        { ...valid, deviceId: fixture.devices.b },
+        { ...valid, status: action === 'archive' ? 'archived' : 'active' },
+        { ...valid, archivedAt: '2026-08-01T00:00:00Z' },
+        { ...valid, name: 'Forged lifecycle edit' },
+        { ...valid, phone: '0599 999 999' },
+        { ...valid, notes: 'Forged lifecycle edit' },
+        { ...valid, version: '9' },
+      ]) {
+        const customerId =
+          action === 'archive' ? fixture.customers.aTarget : fixture.customers.aArchived;
+        await authorizedLifecycle(access.a, customerId, action)
+          .send(body)
+          .expect(400)
+          .expect(({ body: errorBody }) => {
+            expect(errorBody).toMatchObject({ code: 'VALIDATION_ERROR' });
+          });
+      }
+    }
+
+    await request(server).delete(`/v1/customers/${fixture.customers.aTarget}`).expect(404);
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      status: 'active',
+      version: '1',
+    });
+    await expect(readCustomer(fixture.customers.aArchived)).resolves.toMatchObject({
+      status: 'archived',
+      version: '1',
+    });
+  });
+
+  it('archives one Customer row with database time while preserving master and accounting data', async () => {
+    const before = await readCustomer(fixture.customers.aTarget);
+    if (!before) {
+      throw new Error('Expected the active Customer fixture.');
+    }
+    const accountingBefore = await readAccountingCounts(fixture.stores.a);
+    const lowerBound = await adminPool.query<{ now: Date }>(`select clock_timestamp() as now`);
+    const operationId = randomUUID();
+    const responseMessage = await authorizedLifecycle(
+      access.a,
+      fixture.customers.aTarget,
+      'archive',
+    )
+      .set('x-store-id', fixture.stores.b)
+      .query({ storeId: fixture.stores.b })
+      .send({ operationId, expectedVersion: '1' })
+      .expect(200);
+    const upperBound = await adminPool.query<{ now: Date }>(`select clock_timestamp() as now`);
+    const body = readMutation(responseMessage);
+    const after = await readCustomer(fixture.customers.aTarget);
+    if (!after?.archivedAt) {
+      throw new Error('Expected the archived Customer result.');
+    }
+
+    expect(body).toMatchObject({
+      id: before.id,
+      name: before.name,
+      phone: before.phone,
+      notes: before.notes,
+      status: 'archived',
+      archivedAt: after.archivedAt.toISOString(),
+      updatedAt: after.updatedAt.toISOString(),
+      version: '2',
+      operationId,
+    });
+    expect(Object.keys(body).sort()).toEqual([
+      'archivedAt',
+      'createdAt',
+      'id',
+      'name',
+      'notes',
+      'operationId',
+      'phone',
+      'status',
+      'updatedAt',
+      'version',
+    ]);
+    expect(changedCustomerFields(before, after)).toEqual([
+      'archivedAt',
+      'deviceId',
+      'operationId',
+      'status',
+      'updatedAt',
+      'version',
+    ]);
+    expect(after).toMatchObject({
+      id: before.id,
+      storeId: before.storeId,
+      name: before.name,
+      normalizedName: before.normalizedName,
+      phone: before.phone,
+      normalizedPhone: before.normalizedPhone,
+      notes: before.notes,
+      creditLimitMinor: before.creditLimitMinor,
+      creditPolicy: before.creditPolicy,
+      status: 'archived',
+      deviceId: fixture.devices.a,
+      operationId,
+      version: '2',
+    });
+    expect(after.createdAt.toISOString()).toBe(before.createdAt.toISOString());
+    expect(after.archivedAt.getTime()).toBeGreaterThanOrEqual(
+      lowerBound.rows[0]?.now.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    expect(after.archivedAt.getTime()).toBeLessThanOrEqual(
+      upperBound.rows[0]?.now.getTime() ?? Number.NEGATIVE_INFINITY,
+    );
+    expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(
+      lowerBound.rows[0]?.now.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    expect(after.updatedAt.getTime()).toBeLessThanOrEqual(
+      upperBound.rows[0]?.now.getTime() ?? Number.NEGATIVE_INFINITY,
+    );
+
+    expect(
+      readCustomerIds(await authorizedGet(access.a, '/v1/customers').expect(200)),
+    ).not.toContain(before.id);
+    expect(
+      readCustomerIds(
+        await authorizedGet(access.a, '/v1/customers').query({ status: 'archived' }).expect(200),
+      ),
+    ).toContain(before.id);
+    await authorizedGet(access.a, `/v1/customers/${before.id}`)
+      .expect(200)
+      .expect(({ body: detail }) => {
+        expect(detail).toMatchObject({ id: before.id, status: 'archived', version: '2' });
+      });
+    await authorizedPatch(access.a, before.id)
+      .send({ operationId: randomUUID(), expectedVersion: '2', notes: 'Forbidden edit' })
+      .expect(409)
+      .expect(({ body: errorBody }) => {
+        expect(errorBody).toMatchObject({ code: 'CUSTOMER_ARCHIVED' });
+      });
+    await authorizedPost(access.a)
+      .send({
+        id: randomUUID(),
+        operationId: randomUUID(),
+        name: 'Reserved Phone',
+        phone: before.phone,
+      })
+      .expect(409)
+      .expect(({ body: errorBody }) => {
+        expect(errorBody).toMatchObject({ code: 'CUSTOMER_PHONE_CONFLICT' });
+      });
+
+    await expect(readAccountingCounts(fixture.stores.a)).resolves.toEqual(accountingBefore);
+    const effects = await adminPool.query<{
+      processed: number;
+      changes: number;
+      audits: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = $2 and status = 'applied') as processed,
+          (select count(*)::integer from sync.change_events
+            where store_id = $1 and entity_id = $3 and action = 'archive') as changes,
+          (select count(*)::integer from audit.central_audit_logs
+            where store_id = $1 and entity_id = $3 and action = 'update') as audits
+      `,
+      [fixture.stores.a, operationId, before.id],
+    );
+    expect(effects.rows[0]).toEqual({ processed: 1, changes: 1, audits: 1 });
+  });
+
+  it('restores the same Customer identity and requires the newly current version for PATCH', async () => {
+    const before = await readCustomer(fixture.customers.aArchived);
+    if (!before?.archivedAt) {
+      throw new Error('Expected the archived Customer fixture.');
+    }
+    const accountingBefore = await readAccountingCounts(fixture.stores.a);
+    const operationId = randomUUID();
+    const body = readMutation(
+      await authorizedLifecycle(access.a, before.id, 'restore')
+        .send({ operationId, expectedVersion: '1' })
+        .expect(200),
+    );
+    const after = await readCustomer(before.id);
+    if (!after) {
+      throw new Error('Expected the restored Customer result.');
+    }
+
+    expect(body).toMatchObject({
+      id: before.id,
+      name: before.name,
+      phone: before.phone,
+      notes: before.notes,
+      status: 'active',
+      archivedAt: null,
+      updatedAt: after.updatedAt.toISOString(),
+      version: '2',
+      operationId,
+    });
+    expect(changedCustomerFields(before, after)).toEqual([
+      'archivedAt',
+      'deviceId',
+      'operationId',
+      'status',
+      'updatedAt',
+      'version',
+    ]);
+    expect(after).toMatchObject({
+      id: before.id,
+      storeId: before.storeId,
+      name: before.name,
+      normalizedName: before.normalizedName,
+      phone: before.phone,
+      normalizedPhone: before.normalizedPhone,
+      notes: before.notes,
+      creditLimitMinor: before.creditLimitMinor,
+      creditPolicy: before.creditPolicy,
+      status: 'active',
+      archivedAt: null,
+      deviceId: fixture.devices.a,
+      operationId,
+      version: '2',
+    });
+    expect(after.createdAt.toISOString()).toBe(before.createdAt.toISOString());
+
+    expect(readCustomerIds(await authorizedGet(access.a, '/v1/customers').expect(200))).toContain(
+      before.id,
+    );
+    expect(
+      readCustomerIds(
+        await authorizedGet(access.a, '/v1/customers').query({ status: 'archived' }).expect(200),
+      ),
+    ).not.toContain(before.id);
+    expect(
+      readCustomerIds(
+        await authorizedGet(access.a, '/v1/customers')
+          .query({ search: 'Store A Archived' })
+          .expect(200),
+      ),
+    ).toContain(before.id);
+    await authorizedGet(access.a, `/v1/customers/${before.id}`)
+      .expect(200)
+      .expect(({ body: detail }) => {
+        expect(detail).toMatchObject({ id: before.id, status: 'active', version: '2' });
+      });
+    await authorizedPatch(access.a, before.id)
+      .send({ operationId: randomUUID(), expectedVersion: '1', notes: 'Stale edit' })
+      .expect(409)
+      .expect(({ body: errorBody }) => {
+        expect(errorBody).toMatchObject({ code: 'CUSTOMER_VERSION_CONFLICT' });
+      });
+    await authorizedPatch(access.a, before.id)
+      .send({ operationId: randomUUID(), expectedVersion: '2', notes: 'Current edit' })
+      .expect(200)
+      .expect(({ body: updateBody }) => {
+        expect(updateBody).toMatchObject({ status: 'active', notes: 'Current edit', version: '3' });
+      });
+
+    await expect(readAccountingCounts(fixture.stores.a)).resolves.toEqual(accountingBefore);
+    const effects = await adminPool.query<{ processed: number; changes: number; audits: number }>(
+      `
+        select
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = $2 and status = 'applied') as processed,
+          (select count(*)::integer from sync.change_events
+            where store_id = $1 and entity_id = $3 and action = 'update') as changes,
+          (select count(*)::integer from audit.central_audit_logs
+            where store_id = $1 and entity_id = $3 and action = 'update') as audits
+      `,
+      [fixture.stores.a, operationId, before.id],
+    );
+    expect(effects.rows[0]).toEqual({ processed: 1, changes: 2, audits: 2 });
+  });
+
+  it('classifies lifecycle failures tenant-safely and denies read-only stores before claim', async () => {
+    const missingArchiveOperation = randomUUID();
+    const foreignArchiveOperation = randomUUID();
+    const missing = await authorizedLifecycle(access.a, randomUUID(), 'archive')
+      .send({ operationId: missingArchiveOperation, expectedVersion: '1' })
+      .expect(404);
+    const foreign = await authorizedLifecycle(access.a, fixture.customers.bTarget, 'archive')
+      .send({ operationId: foreignArchiveOperation, expectedVersion: '999' })
+      .expect(404);
+    expect(withoutTraceFields(foreign.body)).toEqual(withoutTraceFields(missing.body));
+    expect(foreign.body).toMatchObject({ code: 'CUSTOMER_NOT_FOUND' });
+
+    const alreadyArchivedOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aArchived, 'archive')
+      .send({ operationId: alreadyArchivedOperation, expectedVersion: '999' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CUSTOMER_ARCHIVED' });
+      });
+    const staleArchiveOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aTarget, 'archive')
+      .send({ operationId: staleArchiveOperation, expectedVersion: '999' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CUSTOMER_VERSION_CONFLICT' });
+      });
+    const alreadyActiveOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aTarget, 'restore')
+      .send({ operationId: alreadyActiveOperation, expectedVersion: '999' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CONFLICT' });
+      });
+    const staleRestoreOperation = randomUUID();
+    await authorizedLifecycle(access.a, fixture.customers.aArchived, 'restore')
+      .send({ operationId: staleRestoreOperation, expectedVersion: '999' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CUSTOMER_VERSION_CONFLICT' });
+      });
+
+    const deniedOperations = [randomUUID(), randomUUID()];
+    await authorizedLifecycle(access.readOnly, fixture.customers.readOnlyTarget, 'archive')
+      .send({ operationId: deniedOperations[0], expectedVersion: '1' })
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'BUSINESS_WRITE_NOT_ALLOWED' });
+      });
+    await authorizedLifecycle(access.readOnly, fixture.customers.readOnlyTarget, 'restore')
+      .send({ operationId: deniedOperations[1], expectedVersion: '1' })
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'BUSINESS_WRITE_NOT_ALLOWED' });
+      });
+
+    const rejectedOperations = [
+      missingArchiveOperation,
+      foreignArchiveOperation,
+      alreadyArchivedOperation,
+      staleArchiveOperation,
+      alreadyActiveOperation,
+      staleRestoreOperation,
+    ];
+    const operationState = await adminPool.query<{ operationId: string; status: string }>(
+      `
+        select operation_id as "operationId", status
+        from sync.processed_operations
+        where store_id = $1 and operation_id = any($2::uuid[])
+        order by operation_id
+      `,
+      [fixture.stores.a, rejectedOperations],
+    );
+    expect(operationState.rows).toHaveLength(rejectedOperations.length);
+    expect(operationState.rows.every((operation) => operation.status === 'rejected')).toBe(true);
+    const deniedState = await adminPool.query(
+      `select operation_id from sync.processed_operations where operation_id = any($1::uuid[])`,
+      [deniedOperations],
+    );
+    expect(deniedState.rows).toEqual([]);
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      status: 'active',
+      version: '1',
+    });
+    await expect(readCustomer(fixture.customers.aArchived)).resolves.toMatchObject({
+      status: 'archived',
+      version: '1',
+    });
+  });
+
+  it('replays historical lifecycle responses without changing the current Customer state', async () => {
+    const archiveOperation = randomUUID();
+    const archivePayload = { operationId: archiveOperation, expectedVersion: '1' };
+    const archive = await authorizedLifecycle(access.a, fixture.customers.aTarget, 'archive')
+      .send(archivePayload)
+      .expect(200);
+    const immediateReplay = await authorizedLifecycle(
+      access.a,
+      fixture.customers.aTarget,
+      'archive',
+    )
+      .send(archivePayload)
+      .expect(200);
+    expect(immediateReplay.body).toEqual(archive.body);
+
+    const restoreOperation = randomUUID();
+    const restore = await authorizedLifecycle(access.a, fixture.customers.aTarget, 'restore')
+      .send({ operationId: restoreOperation, expectedVersion: '2' })
+      .expect(200);
+    expect(restore.body).toMatchObject({ status: 'active', version: '3' });
+
+    const historicalReplay = await authorizedLifecycle(
+      access.a,
+      fixture.customers.aTarget,
+      'archive',
+    )
+      .send(archivePayload)
+      .expect(200);
+    expect(historicalReplay.body).toEqual(archive.body);
+    expect(historicalReplay.body).toMatchObject({ status: 'archived', version: '2' });
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      status: 'active',
+      archivedAt: null,
+      version: '3',
+      operationId: restoreOperation,
+    });
+
+    await authorizedLifecycle(access.a, fixture.customers.aTarget, 'restore')
+      .send({ operationId: archiveOperation, expectedVersion: '3' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
+      });
+    await authorizedLifecycle(access.a, fixture.customers.aDuplicate, 'archive')
+      .send({ operationId: archiveOperation, expectedVersion: '1' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
+      });
+
+    const rejectedOperation = randomUUID();
+    const rejectedPayload = { operationId: rejectedOperation, expectedVersion: '999' };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await authorizedLifecycle(access.a, fixture.customers.aDuplicate, 'archive')
+        .send(rejectedPayload)
+        .expect(409)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ code: 'CUSTOMER_VERSION_CONFLICT' });
+        });
+    }
+    await authorizedLifecycle(access.a, fixture.customers.aDuplicate, 'archive')
+      .send({ operationId: rejectedOperation, expectedVersion: '1' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
+      });
+    await expect(readCustomer(fixture.customers.aDuplicate)).resolves.toMatchObject({
+      status: 'active',
+      version: '1',
+    });
+
+    const operationEffects = await adminPool.query<{
+      changes: number;
+      applied: number;
+      rejected: number;
+      conflicts: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from sync.change_events
+            where store_id = $1 and entity_id = $2) as changes,
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = any($3::uuid[]) and status = 'applied') as applied,
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = $4 and status = 'rejected') as rejected,
+          (select count(*)::integer from sync.conflicts
+            where store_id = $1 and operation_id = any($5::uuid[])) as conflicts
+      `,
+      [
+        fixture.stores.a,
+        fixture.customers.aTarget,
+        [archiveOperation, restoreOperation],
+        rejectedOperation,
+        [archiveOperation, rejectedOperation],
+      ],
+    );
+    expect(operationEffects.rows[0]).toEqual({ changes: 2, applied: 2, rejected: 1, conflicts: 3 });
+  });
+
+  it('scopes the same lifecycle operation ID independently per store', async () => {
+    const operationId = randomUUID();
+    const [storeA, storeB] = await Promise.all([
+      authorizedLifecycle(access.a, fixture.customers.aTarget, 'archive').send({
+        operationId,
+        expectedVersion: '1',
+      }),
+      authorizedLifecycle(access.b, fixture.customers.bTarget, 'archive').send({
+        operationId,
+        expectedVersion: '1',
+      }),
+    ]);
+    expect([storeA.status, storeB.status]).toEqual([200, 200]);
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      storeId: fixture.stores.a,
+      status: 'archived',
+      deviceId: fixture.devices.a,
+      operationId,
+      version: '2',
+    });
+    await expect(readCustomer(fixture.customers.bTarget)).resolves.toMatchObject({
+      storeId: fixture.stores.b,
+      status: 'archived',
+      deviceId: fixture.devices.b,
+      operationId,
+      version: '2',
+    });
+    const operations = await adminPool.query<{ count: number }>(
+      `select count(*)::integer as count from sync.processed_operations where operation_id = $1`,
+      [operationId],
+    );
+    expect(operations.rows[0]?.count).toBe(2);
+
+    await authorizedLifecycle(access.a, fixture.customers.bTarget, 'restore')
+      .send({ operationId: randomUUID(), expectedVersion: '2' })
+      .expect(404)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CUSTOMER_NOT_FOUND' });
+      });
+    await expect(readCustomer(fixture.customers.bTarget)).resolves.toMatchObject({
+      status: 'archived',
+      version: '2',
+    });
+  });
+
+  it('orders update/archive and duplicate lifecycle races with one coherent winner', async () => {
+    const updateOperation = randomUUID();
+    const archiveOperation = randomUUID();
+    const [update, archive] = await Promise.all([
+      authorizedPatch(access.a, fixture.customers.aConcurrent).send({
+        operationId: updateOperation,
+        expectedVersion: '1',
+        notes: 'Concurrent update winner',
+      }),
+      authorizedLifecycle(access.a, fixture.customers.aConcurrent, 'archive').send({
+        operationId: archiveOperation,
+        expectedVersion: '1',
+      }),
+    ]);
+    expect([update.status, archive.status].sort()).toEqual([200, 409]);
+    const updateArchiveLoser = update.status === 409 ? update : archive;
+    expect(['CUSTOMER_ARCHIVED', 'CUSTOMER_VERSION_CONFLICT']).toContain(
+      readErrorCode(updateArchiveLoser),
+    );
+    const updateArchiveRow = await readCustomer(fixture.customers.aConcurrent);
+    expect(updateArchiveRow?.version).toBe('2');
+    if (update.status === 200) {
+      expect(updateArchiveRow).toMatchObject({
+        status: 'active',
+        archivedAt: null,
+        notes: 'Concurrent update winner',
+        operationId: updateOperation,
+      });
+    } else {
+      expect(updateArchiveRow).toMatchObject({
+        status: 'archived',
+        notes: null,
+        operationId: archiveOperation,
+      });
+      expect(updateArchiveRow?.archivedAt).toBeInstanceOf(Date);
+    }
+
+    const archiveOperations = [randomUUID(), randomUUID()] as const;
+    const [archiveOne, archiveTwo] = await Promise.all([
+      authorizedLifecycle(access.a, fixture.customers.aRaceOne, 'archive').send({
+        operationId: archiveOperations[0],
+        expectedVersion: '1',
+      }),
+      authorizedLifecycle(access.a, fixture.customers.aRaceOne, 'archive').send({
+        operationId: archiveOperations[1],
+        expectedVersion: '1',
+      }),
+    ]);
+    expect([archiveOne.status, archiveTwo.status].sort()).toEqual([200, 409]);
+    const archiveLoser = archiveOne.status === 409 ? archiveOne : archiveTwo;
+    expect(archiveLoser.body).toMatchObject({ code: 'CUSTOMER_ARCHIVED' });
+    const archiveWinner = archiveOne.status === 200 ? archiveOne : archiveTwo;
+    const archiveWinnerBody = readMutation(archiveWinner);
+    if (!archiveWinnerBody.archivedAt) {
+      throw new Error('Expected the archive race winner timestamp.');
+    }
+    await expect(readCustomer(fixture.customers.aRaceOne)).resolves.toMatchObject({
+      status: 'archived',
+      archivedAt: new Date(archiveWinnerBody.archivedAt),
+      operationId: archiveWinnerBody.operationId,
+      version: '2',
+    });
+
+    const restoreOperations = [randomUUID(), randomUUID()] as const;
+    const [restoreOne, restoreTwo] = await Promise.all([
+      authorizedLifecycle(access.a, fixture.customers.aArchived, 'restore').send({
+        operationId: restoreOperations[0],
+        expectedVersion: '1',
+      }),
+      authorizedLifecycle(access.a, fixture.customers.aArchived, 'restore').send({
+        operationId: restoreOperations[1],
+        expectedVersion: '1',
+      }),
+    ]);
+    expect([restoreOne.status, restoreTwo.status].sort()).toEqual([200, 409]);
+    const restoreLoser = restoreOne.status === 409 ? restoreOne : restoreTwo;
+    expect(restoreLoser.body).toMatchObject({ code: 'CONFLICT' });
+    const restoreWinner = restoreOne.status === 200 ? restoreOne : restoreTwo;
+    const restoreWinnerBody = readMutation(restoreWinner);
+    await expect(readCustomer(fixture.customers.aArchived)).resolves.toMatchObject({
+      status: 'active',
+      archivedAt: null,
+      operationId: restoreWinnerBody.operationId,
+      version: '2',
+    });
+
+    await authorizedPatch(access.a, fixture.customers.aArchived)
+      .send({ operationId: randomUUID(), expectedVersion: '1', notes: 'Stale after restore' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ code: 'CUSTOMER_VERSION_CONFLICT' });
+      });
+    await authorizedPatch(access.a, fixture.customers.aArchived)
+      .send({ operationId: randomUUID(), expectedVersion: '2', notes: 'Current after restore' })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ notes: 'Current after restore', version: '3' });
+      });
+
+    const raceOperations = [
+      updateOperation,
+      archiveOperation,
+      ...archiveOperations,
+      ...restoreOperations,
+    ];
+    const operationStates = await adminPool.query<{ status: string; count: number }>(
+      `
+        select status, count(*)::integer as count
+        from sync.processed_operations
+        where store_id = $1 and operation_id = any($2::uuid[])
+        group by status
+        order by status
+      `,
+      [fixture.stores.a, raceOperations],
+    );
+    expect(operationStates.rows).toEqual([
+      { status: 'applied', count: 3 },
+      { status: 'rejected', count: 3 },
+    ]);
+  });
+
   it('executes protected writes as a non-owner runtime role under forced RLS', async () => {
     const runtimeState = await runtimeInspectionPool.query<{
       currentUser: string;
@@ -1134,6 +1865,59 @@ describe('Customer create and update API with real PostgreSQL', () => {
       ),
     ).rejects.toMatchObject({ code: '42501' });
 
+    const runtimeClient = await runtimeInspectionPool.connect();
+    try {
+      await runtimeClient.query('begin');
+      await runtimeClient.query(
+        `
+          select
+            set_config('app.store_id', $1, true),
+            set_config('app.user_id', $2, true),
+            set_config('app.device_id', $3, true),
+            set_config('app.request_id', $4, true)
+        `,
+        [fixture.stores.b, fixture.users.b, fixture.devices.b, randomUUID()],
+      );
+      const wrongTenant = await runtimeClient.query(
+        `
+          update ledger.customers
+          set status = 'archived', archived_at = clock_timestamp()
+          where id = $1
+          returning id
+        `,
+        [fixture.customers.aTarget],
+      );
+      expect(wrongTenant.rows).toEqual([]);
+      await runtimeClient.query('rollback');
+
+      await runtimeClient.query('begin');
+      await runtimeClient.query(
+        `
+          select
+            set_config('app.store_id', $1, true),
+            set_config('app.user_id', $2, true),
+            set_config('app.device_id', $3, true),
+            set_config('app.request_id', $4, true)
+        `,
+        [fixture.stores.a, fixture.users.a, fixture.devices.a, randomUUID()],
+      );
+      await expect(
+        runtimeClient.query(`update ledger.customers set store_id = $1 where id = $2`, [
+          fixture.stores.b,
+          fixture.customers.aTarget,
+        ]),
+      ).rejects.toMatchObject({ code: '42501' });
+      await runtimeClient.query('rollback');
+    } finally {
+      await runtimeClient.query('rollback').catch(() => undefined);
+      runtimeClient.release();
+    }
+    await expect(readCustomer(fixture.customers.aTarget)).resolves.toMatchObject({
+      storeId: fixture.stores.a,
+      status: 'active',
+      version: '1',
+    });
+
     const id = randomUUID();
     await authorizedPost(access.a)
       .send({ id, operationId: randomUUID(), name: 'RLS HTTP Create', phone: '0599 310 009' })
@@ -1141,5 +1925,11 @@ describe('Customer create and update API with real PostgreSQL', () => {
     await authorizedPatch(access.a, id)
       .send({ operationId: randomUUID(), expectedVersion: '1', notes: 'RLS HTTP Update' })
       .expect(200);
+    await authorizedLifecycle(access.a, id, 'archive')
+      .send({ operationId: randomUUID(), expectedVersion: '2' })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ id, status: 'archived', version: '3' });
+      });
   });
 });

@@ -27,6 +27,16 @@ export interface PreparedCustomerUpdate {
   requestHash: string;
 }
 
+export type CustomerLifecycleAction = 'archive' | 'restore';
+
+export interface PreparedCustomerLifecycle {
+  customerId: string;
+  operationId: string;
+  expectedVersion: bigint;
+  action: CustomerLifecycleAction;
+  requestHash: string;
+}
+
 export interface CustomerMutationRow extends CustomerDetailRow {
   operationId: string;
 }

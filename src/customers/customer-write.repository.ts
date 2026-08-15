@@ -14,6 +14,7 @@ import type {
   CustomerMutationResult,
   CustomerMutationRow,
   PreparedCustomerCreate,
+  PreparedCustomerLifecycle,
   PreparedCustomerUpdate,
 } from './customer-write.types';
 
@@ -73,7 +74,7 @@ interface MutationOperation {
   customerId: string;
   operationId: string;
   requestHash: string;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'archive' | 'restore';
   expectedVersion?: bigint;
 }
 
@@ -253,6 +254,92 @@ export class CustomerWriteRepository {
     });
   }
 
+  changeLifecycle(
+    context: TenantTransactionContext,
+    input: PreparedCustomerLifecycle,
+  ): Promise<CustomerMutationResult> {
+    return this.database.withBusinessWriteTransaction(context, async (transaction) => {
+      const operation: MutationOperation = {
+        customerId: input.customerId,
+        operationId: input.operationId,
+        requestHash: input.requestHash,
+        action: input.action,
+        expectedVersion: input.expectedVersion,
+      };
+      const replay = await this.claimOrReplay(transaction, context, operation);
+      if (replay) {
+        return replay;
+      }
+
+      const currentRows = await transaction
+        .select({ status: customers.status, version: customers.version })
+        .from(customers)
+        .where(and(eq(customers.storeId, context.storeId), eq(customers.id, input.customerId)))
+        .limit(1)
+        .for('update');
+      const current = currentRows[0];
+      const conflict = this.classifyLifecycleState(current, input);
+      if (conflict) {
+        await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
+        return conflict;
+      }
+
+      const updates =
+        input.action === 'archive'
+          ? {
+              status: 'archived' as const,
+              archivedAt: sql<Date>`clock_timestamp()`,
+              deviceId: context.deviceId,
+              operationId: input.operationId,
+            }
+          : {
+              status: 'active' as const,
+              archivedAt: null,
+              deviceId: context.deviceId,
+              operationId: input.operationId,
+            };
+
+      let rows: CustomerMutationRow[];
+      try {
+        rows = await transaction.transaction(async (savepoint) =>
+          savepoint
+            .update(customers)
+            .set(updates)
+            .where(
+              and(
+                eq(customers.storeId, context.storeId),
+                eq(customers.id, input.customerId),
+                eq(customers.status, input.action === 'archive' ? 'active' : 'archived'),
+                eq(customers.version, input.expectedVersion),
+              ),
+            )
+            .returning(customerMutationSelection),
+        );
+      } catch (error) {
+        const updateConflict = this.classifyUpdateConstraint(error);
+        if (!updateConflict) {
+          throw error;
+        }
+        await this.rejectOperation(
+          transaction,
+          context.storeId,
+          operation.operationId,
+          updateConflict,
+        );
+        return updateConflict;
+      }
+
+      const row = rows[0];
+      if (!row) {
+        throw new Error('Locked Customer lifecycle update did not return a row.');
+      }
+
+      const response = mapCustomerMutationResponse(row);
+      await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+      return { ok: true, response };
+    });
+  }
+
   private async claimOrReplay(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
@@ -414,6 +501,25 @@ export class CustomerWriteRepository {
     }
     if (isUniqueViolation(error, 'customers_store_id_operation_id_key')) {
       return failure('OPERATION_ID_CONFLICT');
+    }
+    return null;
+  }
+
+  private classifyLifecycleState(
+    current: { status: 'active' | 'archived'; version: bigint } | undefined,
+    input: PreparedCustomerLifecycle,
+  ): CustomerMutationResult | null {
+    if (!current) {
+      return failure('CUSTOMER_NOT_FOUND');
+    }
+    if (input.action === 'archive' && current.status === 'archived') {
+      return failure('CUSTOMER_ARCHIVED');
+    }
+    if (input.action === 'restore' && current.status === 'active') {
+      return failure('CONFLICT');
+    }
+    if (current.version !== input.expectedVersion) {
+      return failure('CUSTOMER_VERSION_CONFLICT');
     }
     return null;
   }
