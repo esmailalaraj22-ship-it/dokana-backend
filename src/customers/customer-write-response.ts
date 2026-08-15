@@ -1,4 +1,4 @@
-import { isUuid } from '../common/logging/request-id';
+import { isCustomerId, isCustomerOperationId } from './customer-identifiers';
 import type { CustomerMutationResponse, CustomerMutationRow } from './customer-write.types';
 
 const positiveDecimalPattern = /^[1-9]\d*$/;
@@ -35,7 +35,7 @@ export function parseStoredCustomerMutationResponse(value: unknown): CustomerMut
   const archivedAt = value.archivedAt;
   if (
     typeof value.id !== 'string' ||
-    !isUuid(value.id) ||
+    !isCustomerId(value.id) ||
     typeof value.name !== 'string' ||
     typeof value.phone !== 'string' ||
     (status !== 'active' && status !== 'archived') ||
@@ -46,7 +46,7 @@ export function parseStoredCustomerMutationResponse(value: unknown): CustomerMut
     typeof value.version !== 'string' ||
     !positiveDecimalPattern.test(value.version) ||
     typeof value.operationId !== 'string' ||
-    !isUuid(value.operationId)
+    !isCustomerOperationId(value.operationId)
   ) {
     throw new Error('Stored Customer mutation response is invalid.');
   }

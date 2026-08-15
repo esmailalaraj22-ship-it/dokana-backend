@@ -82,6 +82,17 @@ describe('CustomerReadService', () => {
     });
   });
 
+  it('rejects an explicitly supplied empty cursor instead of restarting pagination', async () => {
+    await expect(service.list(context, { cursor: '' })).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: 'VALIDATION_ERROR',
+        details: [{ field: 'cursor', constraints: ['customerCursor'] }],
+      },
+    });
+    expect(repository.list).not.toHaveBeenCalled();
+  });
+
   it('uses limit plus one results to return a bounded page and keyset cursor', async () => {
     repository.list.mockResolvedValue([firstRow, secondRow, extraRow]);
 
@@ -142,6 +153,21 @@ describe('CustomerReadService', () => {
     expect(result).not.toHaveProperty('normalizedPhone');
     expect(result).not.toHaveProperty('storeId');
     expect(result).not.toHaveProperty('operationId');
+  });
+
+  it('canonicalizes an accepted Customer route ID before repository lookup', async () => {
+    const lowercaseId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    repository.findById.mockResolvedValue({
+      ...firstRow,
+      id: lowercaseId,
+      notes: null,
+      createdAt: new Date('2026-08-01T08:00:00.000Z'),
+      version: 1n,
+    });
+
+    await service.getById(context, lowercaseId.toUpperCase());
+
+    expect(repository.findById).toHaveBeenCalledWith(context, lowercaseId);
   });
 
   it('translates absent and foreign-filtered rows to the same stable not-found exception', async () => {

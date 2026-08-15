@@ -99,6 +99,20 @@ describe('Customer read cursor v1', () => {
     expect(decodeCustomerCursor(encoded)).toEqual({ status: 'active', search, position });
   });
 
+  it.each([
+    ['nil', '00000000-0000-0000-0000-000000000000'],
+    ['maximum', 'ffffffff-ffff-ffff-ffff-ffffffffffff'],
+    ['uppercase', 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'],
+  ])('round-trips accepted %s Customer IDs canonically', (_category, id) => {
+    const encoded = encodeCustomerCursor({
+      status: 'active',
+      search,
+      position: { ...position, id },
+    });
+
+    expect(decodeCustomerCursor(encoded).position.id).toBe(id.toLowerCase());
+  });
+
   it('rejects malformed, oversized, and non-canonical base64url cursors', () => {
     for (const cursor of ['', 'not valid!', 'A'.repeat(2_049), 'e30=']) {
       expect(() => decodeCustomerCursor(cursor)).toThrow(CustomerReadQueryError);
@@ -121,6 +135,25 @@ describe('Customer read cursor v1', () => {
     expect(() => decodeCustomerCursor(encodedPayload({ ...base, storeId: position.id }))).toThrow(
       CustomerReadQueryError,
     );
+  });
+
+  it.each([
+    'not-a-uuid',
+    '10000000-0000-0000-8000-000000000001',
+    '10000000-0000-4000-7000-000000000001',
+  ])('rejects a cursor with an unsupported Customer ID value %s', (lastId) => {
+    expect(() =>
+      decodeCustomerCursor(
+        encodedPayload({
+          v: 1,
+          status: 'active',
+          searchName: null,
+          searchPhone: null,
+          lastName: 'ahmad',
+          lastId,
+        }),
+      ),
+    ).toThrow(CustomerReadQueryError);
   });
 
   it('binds continuation to status and canonical search scope without tenant data', () => {

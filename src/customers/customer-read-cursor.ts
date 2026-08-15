@@ -1,4 +1,4 @@
-import { isUuid } from '../common/logging/request-id';
+import { canonicalizeCustomerId, isCustomerId } from './customer-identifiers';
 import { CustomerReadQueryError } from './customer-read-query';
 import type {
   CustomerCursorPosition,
@@ -65,7 +65,7 @@ function parseCustomerCursorPayload(value: unknown): CustomerCursorPayload {
     record.lastName.length === 0 ||
     record.lastName.length > CUSTOMER_CURSOR_MAX_NAME_LENGTH ||
     typeof record.lastId !== 'string' ||
-    !isUuid(record.lastId)
+    !isCustomerId(record.lastId)
   ) {
     throw invalidCursor();
   }
@@ -84,7 +84,7 @@ export function encodeCustomerCursor(input: DecodedCustomerCursor): string {
     searchName: input.search?.normalizedNamePrefix ?? null,
     searchPhone: input.search?.canonicalPhone ?? null,
     lastName: input.position.normalizedName,
-    lastId: input.position.id,
+    lastId: canonicalizeCustomerId(input.position.id),
   };
   parseCustomerCursorPayload(payload);
 
@@ -143,7 +143,7 @@ export function decodeCustomerCursor(encoded: string): DecodedCustomerCursor {
           },
     position: {
       normalizedName: payload.lastName,
-      id: payload.lastId,
+      id: canonicalizeCustomerId(payload.lastId),
     },
   };
 }

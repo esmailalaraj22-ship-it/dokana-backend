@@ -529,6 +529,76 @@ describe('Customer read API with real PostgreSQL', () => {
       });
   });
 
+  it('distinguishes an omitted cursor from every supplied invalid cursor form', async () => {
+    const firstPage = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: 'Page', limit: 2 })
+        .expect(200),
+    );
+    if (!firstPage.nextCursor) {
+      throw new Error('Expected a valid Customer continuation cursor.');
+    }
+
+    for (const path of [
+      '/v1/customers?cursor',
+      '/v1/customers?cursor=',
+      '/v1/customers?cursor=%20',
+      '/v1/customers?cursor=not-valid',
+    ]) {
+      await authorizedGet(access.a, path)
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({
+            code: 'VALIDATION_ERROR',
+            details: [{ field: 'cursor', constraints: ['customerCursor'] }],
+          });
+        });
+    }
+
+    await authorizedGet(access.a, '/v1/customers')
+      .query({ search: 'Page', limit: 2, cursor: firstPage.nextCursor })
+      .expect(200);
+    await authorizedGet(access.a, '/v1/customers')
+      .query({ status: 'archived', search: 'Page', limit: 2, cursor: firstPage.nextCursor })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          code: 'VALIDATION_ERROR',
+          details: [{ field: 'cursor', constraints: ['customerCursorScope'] }],
+        });
+      });
+  });
+
+  it('rejects different and identical duplicate scalar query parameters', async () => {
+    const firstPage = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: 'Page', limit: 2 })
+        .expect(200),
+    );
+    if (!firstPage.nextCursor) {
+      throw new Error('Expected a valid Customer continuation cursor.');
+    }
+    const cursor = encodeURIComponent(firstPage.nextCursor);
+    const duplicateQueries = [
+      '/v1/customers?search=Page&search=Alice',
+      '/v1/customers?search=Page&search=Page',
+      '/v1/customers?status=active&status=archived',
+      '/v1/customers?status=active&status=active',
+      '/v1/customers?limit=10&limit=100',
+      '/v1/customers?limit=10&limit=10',
+      `/v1/customers?cursor=${cursor}&cursor=not-valid`,
+      `/v1/customers?cursor=${cursor}&cursor=${cursor}`,
+    ];
+
+    for (const path of duplicateQueries) {
+      await authorizedGet(access.a, path)
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ code: 'VALIDATION_ERROR' });
+        });
+    }
+  });
+
   it('lists only the trusted tenant and selected active or archived status', async () => {
     const aDefault = readList(await authorizedGet(access.a, '/v1/customers').expect(200));
     const bDefault = readList(await authorizedGet(access.b, '/v1/customers').expect(200));

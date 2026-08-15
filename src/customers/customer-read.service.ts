@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import type { TenantTransactionContext } from '../database/database.types';
+import { canonicalizeCustomerId } from './customer-identifiers';
 import {
   customerCursorMatchesScope,
   decodeCustomerCursor,
@@ -30,7 +31,7 @@ export class CustomerReadService {
       const status: CustomerStatus = query.status ?? 'active';
       const limit = query.limit ?? 50;
       const search = prepareCustomerSearchScope(query.search);
-      const cursor = query.cursor ? decodeCustomerCursor(query.cursor) : null;
+      const cursor = query.cursor === undefined ? null : decodeCustomerCursor(query.cursor);
 
       if (cursor && !customerCursorMatchesScope(cursor, status, search)) {
         throw new CustomerReadQueryError('cursor', 'customerCursorScope');
@@ -73,7 +74,7 @@ export class CustomerReadService {
     context: TenantTransactionContext,
     customerId: string,
   ): Promise<CustomerDetailResponse> {
-    const row = await this.repository.findById(context, customerId);
+    const row = await this.repository.findById(context, canonicalizeCustomerId(customerId));
     if (!row) {
       throw new NotFoundException({
         code: 'CUSTOMER_NOT_FOUND',

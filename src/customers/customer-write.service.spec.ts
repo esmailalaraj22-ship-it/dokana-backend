@@ -125,6 +125,67 @@ describe('CustomerWriteService', () => {
     expect(omitted?.requestHash).toBe(explicitNull?.requestHash);
   });
 
+  it('canonicalizes accepted UUID text forms before persistence and request hashing', async () => {
+    const lowercaseCustomerId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const lowercaseOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const uppercaseCustomerId = lowercaseCustomerId.toUpperCase();
+    const uppercaseOperationId = lowercaseOperationId.toUpperCase();
+
+    await service.create(context, {
+      id: uppercaseCustomerId,
+      operationId: uppercaseOperationId,
+      name: 'Semantic Customer',
+      phone: '0599 123 456',
+    });
+    await service.create(context, {
+      id: lowercaseCustomerId,
+      operationId: lowercaseOperationId,
+      name: 'Semantic Customer',
+      phone: '0599 123 456',
+    });
+    const uppercaseCreate = repository.create.mock.calls[0]?.[1];
+    const lowercaseCreate = repository.create.mock.calls[1]?.[1];
+    expect(uppercaseCreate).toMatchObject({
+      customerId: lowercaseCustomerId,
+      operationId: lowercaseOperationId,
+    });
+    expect(uppercaseCreate?.requestHash).toBe(lowercaseCreate?.requestHash);
+
+    await service.update(context, uppercaseCustomerId, {
+      operationId: uppercaseOperationId,
+      expectedVersion: '1',
+      notes: 'Canonical update',
+    });
+    await service.update(context, lowercaseCustomerId, {
+      operationId: lowercaseOperationId,
+      expectedVersion: '1',
+      notes: 'Canonical update',
+    });
+    const uppercaseUpdate = repository.update.mock.calls[0]?.[1];
+    const lowercaseUpdate = repository.update.mock.calls[1]?.[1];
+    expect(uppercaseUpdate).toMatchObject({
+      customerId: lowercaseCustomerId,
+      operationId: lowercaseOperationId,
+    });
+    expect(uppercaseUpdate?.requestHash).toBe(lowercaseUpdate?.requestHash);
+
+    await service.archive(context, uppercaseCustomerId, {
+      operationId: uppercaseOperationId,
+      expectedVersion: '1',
+    });
+    await service.archive(context, lowercaseCustomerId, {
+      operationId: lowercaseOperationId,
+      expectedVersion: '1',
+    });
+    const uppercaseLifecycle = repository.changeLifecycle.mock.calls[0]?.[1];
+    const lowercaseLifecycle = repository.changeLifecycle.mock.calls[1]?.[1];
+    expect(uppercaseLifecycle).toMatchObject({
+      customerId: lowercaseCustomerId,
+      operationId: lowercaseOperationId,
+    });
+    expect(uppercaseLifecycle?.requestHash).toBe(lowercaseLifecycle?.requestHash);
+  });
+
   it.each([
     { name: '   ', phone: '0599 123 456', field: 'name', code: 'CUSTOMER_DISPLAY_NAME_EMPTY' },
     { name: 'ـً', phone: '0599 123 456', field: 'name', code: 'CUSTOMER_NORMALIZED_NAME_EMPTY' },

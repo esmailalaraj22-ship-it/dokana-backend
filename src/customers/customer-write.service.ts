@@ -7,6 +7,7 @@ import {
 import { createHash } from 'node:crypto';
 
 import type { TenantTransactionContext } from '../database/database.types';
+import { canonicalizeCustomerId, canonicalizeCustomerOperationId } from './customer-identifiers';
 import {
   cleanCustomerDisplayName,
   cleanCustomerDisplayPhone,
@@ -42,14 +43,16 @@ export class CustomerWriteService {
   ): Promise<CustomerMutationResponse> {
     let input: PreparedCustomerCreate;
     try {
+      const customerId = canonicalizeCustomerId(dto.id);
+      const operationId = canonicalizeCustomerOperationId(dto.operationId);
       const name = cleanCustomerDisplayName(dto.name);
       const phone = cleanCustomerDisplayPhone(dto.phone);
       const normalizedName = normalizeCustomerName(name);
       const normalizedPhone = normalizeCustomerPhone(phone);
       const notes = dto.notes ?? null;
       input = {
-        customerId: dto.id,
-        operationId: dto.operationId,
+        customerId,
+        operationId,
         name,
         normalizedName,
         phone,
@@ -58,7 +61,7 @@ export class CustomerWriteService {
         requestHash: this.hashRequest({
           v: CUSTOMER_NORMALIZATION_VERSION,
           action: 'create',
-          customerId: dto.id,
+          customerId,
           name,
           normalizedName,
           phone,
@@ -83,6 +86,8 @@ export class CustomerWriteService {
     }
 
     const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+    const canonicalCustomerId = canonicalizeCustomerId(customerId);
+    const operationId = canonicalizeCustomerOperationId(dto.operationId);
 
     let input: PreparedCustomerUpdate;
     try {
@@ -93,8 +98,8 @@ export class CustomerWriteService {
       const canonicalPayload: Record<string, unknown> = {
         v: CUSTOMER_NORMALIZATION_VERSION,
         action: 'update',
-        customerId,
-        operationId: dto.operationId,
+        customerId: canonicalCustomerId,
+        operationId,
         expectedVersion: expectedVersion.toString(),
       };
       if (name !== undefined && normalizedName !== undefined) {
@@ -109,8 +114,8 @@ export class CustomerWriteService {
         canonicalPayload.notes = dto.notes;
       }
       input = {
-        customerId,
-        operationId: dto.operationId,
+        customerId: canonicalCustomerId,
+        operationId,
         expectedVersion,
         name,
         normalizedName,
@@ -149,16 +154,18 @@ export class CustomerWriteService {
     action: CustomerLifecycleAction,
   ): Promise<CustomerMutationResponse> {
     const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+    const canonicalCustomerId = canonicalizeCustomerId(customerId);
+    const operationId = canonicalizeCustomerOperationId(dto.operationId);
     const input: PreparedCustomerLifecycle = {
-      customerId,
-      operationId: dto.operationId,
+      customerId: canonicalCustomerId,
+      operationId,
       expectedVersion,
       action,
       requestHash: this.hashRequest({
         v: customerLifecycleCommandVersion,
         action,
-        customerId,
-        operationId: dto.operationId,
+        customerId: canonicalCustomerId,
+        operationId,
         expectedVersion: expectedVersion.toString(),
       }),
     };

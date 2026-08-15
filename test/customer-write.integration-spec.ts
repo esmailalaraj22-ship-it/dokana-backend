@@ -12,6 +12,7 @@ import type { Response } from 'supertest';
 import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
 import { AppConfigService } from '../src/config/app-config.service';
+import type { CustomerListResponse } from '../src/customers/customer-read.types';
 import type { CustomerMutationResponse } from '../src/customers/customer-write.types';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -112,6 +113,14 @@ function readMutation(response: Response): CustomerMutationResponse {
     throw new Error('Expected a Customer mutation response.');
   }
   return body as unknown as CustomerMutationResponse;
+}
+
+function readList(response: Response): CustomerListResponse {
+  const body: unknown = response.body;
+  if (!isRecord(body) || !Array.isArray(body.items)) {
+    throw new Error('Expected a Customer list response.');
+  }
+  return body as unknown as CustomerListResponse;
 }
 
 function readErrorCode(response: Response): string {
@@ -743,6 +752,187 @@ describe('Customer mutation API with real PostgreSQL', () => {
       [id, fixture.stores.a, operationId],
     );
     expect(effects.rows[0]).toEqual({ customers: 1, changes: 1, conflicts: 1 });
+  });
+
+  it('preserves accepted Customer UUID values and semantic text forms through replay and cursors', async () => {
+    const nilUuid = '00000000-0000-0000-0000-000000000000';
+    const maximumUuid = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+    const lowercaseCustomerId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const operationIds = {
+      create: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      update: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      archive: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      restore: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    };
+    const specialCreates = [
+      {
+        id: maximumUuid,
+        operationId: nilUuid,
+        name: 'Identifier A Maximum',
+        phone: '0599 310 021',
+      },
+      {
+        id: nilUuid,
+        operationId: maximumUuid,
+        name: 'Identifier B Nil',
+        phone: '0599 310 022',
+      },
+    ];
+
+    for (const payload of specialCreates) {
+      const first = await authorizedPost(access.a).send(payload).expect(201);
+      const replay = await authorizedPost(access.a).send(payload).expect(201);
+      expect(replay.body).toEqual(first.body);
+      expect(first.body).toMatchObject({ id: payload.id, operationId: payload.operationId });
+      await authorizedGet(access.a, `/v1/customers/${payload.id}`)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body).toMatchObject({ id: payload.id });
+        });
+    }
+
+    const uppercaseCreate = {
+      id: lowercaseCustomerId.toUpperCase(),
+      operationId: operationIds.create.toUpperCase(),
+      name: 'Identifier C Semantic',
+      phone: '0599 310 020',
+    };
+    const originalCreate = await authorizedPost(access.a).send(uppercaseCreate).expect(201);
+    expect(originalCreate.body).toMatchObject({
+      id: lowercaseCustomerId,
+      operationId: operationIds.create,
+      version: '1',
+    });
+    const immediateCreateReplay = await authorizedPost(access.a)
+      .send({
+        ...uppercaseCreate,
+        id: lowercaseCustomerId,
+        operationId: operationIds.create,
+      })
+      .expect(201);
+    expect(immediateCreateReplay.body).toEqual(originalCreate.body);
+
+    const updated = await authorizedPatch(access.a, lowercaseCustomerId.toUpperCase())
+      .send({
+        operationId: operationIds.update.toUpperCase(),
+        expectedVersion: '1',
+        notes: 'Canonical identifier update',
+      })
+      .expect(200);
+    expect(updated.body).toMatchObject({ operationId: operationIds.update, version: '2' });
+    const updateReplay = await authorizedPatch(access.a, lowercaseCustomerId)
+      .send({
+        operationId: operationIds.update,
+        expectedVersion: '1',
+        notes: 'Canonical identifier update',
+      })
+      .expect(200);
+    expect(updateReplay.body).toEqual(updated.body);
+
+    const archived = await authorizedLifecycle(
+      access.a,
+      lowercaseCustomerId.toUpperCase(),
+      'archive',
+    )
+      .send({ operationId: operationIds.archive.toUpperCase(), expectedVersion: '2' })
+      .expect(200);
+    expect(archived.body).toMatchObject({
+      operationId: operationIds.archive,
+      status: 'archived',
+      version: '3',
+    });
+    const archiveReplay = await authorizedLifecycle(access.a, lowercaseCustomerId, 'archive')
+      .send({ operationId: operationIds.archive, expectedVersion: '2' })
+      .expect(200);
+    expect(archiveReplay.body).toEqual(archived.body);
+
+    const restored = await authorizedLifecycle(
+      access.a,
+      lowercaseCustomerId.toUpperCase(),
+      'restore',
+    )
+      .send({ operationId: operationIds.restore.toUpperCase(), expectedVersion: '3' })
+      .expect(200);
+    expect(restored.body).toMatchObject({
+      operationId: operationIds.restore,
+      status: 'active',
+      version: '4',
+    });
+
+    const historicalArchiveReplay = await authorizedLifecycle(
+      access.a,
+      lowercaseCustomerId,
+      'archive',
+    )
+      .send({ operationId: operationIds.archive, expectedVersion: '2' })
+      .expect(200);
+    expect(historicalArchiveReplay.body).toEqual(archived.body);
+    const historicalCreateReplay = await authorizedPost(access.a)
+      .send({
+        ...uppercaseCreate,
+        id: lowercaseCustomerId,
+        operationId: operationIds.create,
+      })
+      .expect(201);
+    expect(historicalCreateReplay.body).toEqual(originalCreate.body);
+
+    await authorizedGet(access.a, `/v1/customers/${lowercaseCustomerId.toUpperCase()}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ id: lowercaseCustomerId, status: 'active', version: '4' });
+      });
+
+    const pageOne = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: 'Identifier', limit: 1 })
+        .expect(200),
+    );
+    if (!pageOne.nextCursor) {
+      throw new Error('Expected the first identifier continuation cursor.');
+    }
+    const pageTwo = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: 'Identifier', limit: 1, cursor: pageOne.nextCursor })
+        .expect(200),
+    );
+    if (!pageTwo.nextCursor) {
+      throw new Error('Expected the second identifier continuation cursor.');
+    }
+    const pageThree = readList(
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: 'Identifier', limit: 1, cursor: pageTwo.nextCursor })
+        .expect(200),
+    );
+    expect([pageOne.items[0]?.id, pageTwo.items[0]?.id, pageThree.items[0]?.id]).toEqual([
+      maximumUuid,
+      nilUuid,
+      lowercaseCustomerId,
+    ]);
+    expect(pageOne.nextCursor).not.toBeNull();
+    expect(pageTwo.nextCursor).not.toBeNull();
+    expect(pageThree.nextCursor).toBeNull();
+
+    const allOperationIds = [nilUuid, maximumUuid, ...Object.values(operationIds)];
+    const effects = await adminPool.query<{
+      customers: number;
+      processed: number;
+      changes: number;
+      conflicts: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from ledger.customers
+            where store_id = $1 and id = any($2::uuid[])) as customers,
+          (select count(*)::integer from sync.processed_operations
+            where store_id = $1 and operation_id = any($3::uuid[])) as processed,
+          (select count(*)::integer from sync.change_events
+            where store_id = $1 and operation_id = any($3::uuid[])) as changes,
+          (select count(*)::integer from sync.conflicts
+            where store_id = $1 and operation_id = any($3::uuid[])) as conflicts
+      `,
+      [fixture.stores.a, [nilUuid, maximumUuid, lowercaseCustomerId], allOperationIds],
+    );
+    expect(effects.rows[0]).toEqual({ customers: 3, processed: 6, changes: 6, conflicts: 0 });
   });
 
   it('converges concurrent identical create retries to one committed effect', async () => {
