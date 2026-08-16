@@ -1,13 +1,16 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   foreignKey,
   index,
+  integer,
   pgSchema,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -136,5 +139,154 @@ export const customers = ledgerSchema.table(
       table.normalizedName,
       table.normalizedPhone,
     ),
+  ],
+);
+
+export const products = ledgerSchema.table(
+  'products',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    sku: text('sku'),
+    barcode: text('barcode'),
+    description: text('description'),
+    measurementType: text('measurement_type')
+      .$type<'count' | 'weight' | 'volume' | 'length'>()
+      .notNull(),
+    trackInventory: boolean('track_inventory').notNull().default(true),
+    allowNegativeStockOverride: boolean('allow_negative_stock_override'),
+    lowStockThresholdMilli: bigint('low_stock_threshold_milli', { mode: 'bigint' }),
+    isPinned: boolean('is_pinned').notNull().default(false),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'products_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'products_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('products_store_id_id_key').on(table.storeId, table.id),
+    unique('products_store_id_id_measurement_type_key').on(
+      table.storeId,
+      table.id,
+      table.measurementType,
+    ),
+    unique('products_store_id_sku_key').on(table.storeId, table.sku),
+    unique('products_store_id_barcode_key').on(table.storeId, table.barcode),
+    unique('products_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('products_name_check', sql`length(trim(${table.name})) > 0`),
+    check('products_normalized_name_check', sql`length(trim(${table.normalizedName})) > 0`),
+    check(
+      'products_measurement_type_check',
+      sql`${table.measurementType} in ('count', 'weight', 'volume', 'length')`,
+    ),
+    check(
+      'products_low_stock_threshold_milli_check',
+      sql`${table.lowStockThresholdMilli} is null or ${table.lowStockThresholdMilli} >= 0`,
+    ),
+    check('products_status_check', sql`${table.status} in ('active', 'archived')`),
+    check(
+      'products_check',
+      sql`(${table.status} = 'archived' and ${table.archivedAt} is not null) or ${table.status} = 'active'`,
+    ),
+    check('products_version_check', sql`${table.version} >= 1`),
+    index('idx_products_search').on(
+      table.storeId,
+      table.status,
+      table.normalizedName,
+      table.barcode,
+      table.sku,
+      table.isPinned,
+    ),
+  ],
+);
+
+export const productUnits = ledgerSchema.table(
+  'product_units',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    measurementType: text('measurement_type')
+      .$type<'count' | 'weight' | 'volume' | 'length'>()
+      .notNull(),
+    unitName: text('unit_name').notNull(),
+    unitCode: text('unit_code'),
+    isBase: boolean('is_base').notNull().default(false),
+    factorNum: integer('factor_num').notNull(),
+    factorDen: integer('factor_den').notNull().default(1),
+    salePriceMinor: bigint('sale_price_minor', { mode: 'bigint' }),
+    purchasePriceMinor: bigint('purchase_price_minor', { mode: 'bigint' }),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'product_units_store_id_product_id_measurement_type_fkey',
+      columns: [table.storeId, table.productId, table.measurementType],
+      foreignColumns: [products.storeId, products.id, products.measurementType],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'product_units_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('product_units_store_id_id_key').on(table.storeId, table.id),
+    unique('product_units_store_id_product_id_id_key').on(table.storeId, table.productId, table.id),
+    unique('product_units_store_id_product_id_unit_name_key').on(
+      table.storeId,
+      table.productId,
+      table.unitName,
+    ),
+    unique('product_units_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check(
+      'product_units_measurement_type_check',
+      sql`${table.measurementType} in ('count', 'weight', 'volume', 'length')`,
+    ),
+    check('product_units_unit_name_check', sql`length(trim(${table.unitName})) > 0`),
+    check('product_units_factor_num_check', sql`${table.factorNum} > 0`),
+    check('product_units_factor_den_check', sql`${table.factorDen} > 0`),
+    check(
+      'product_units_sale_price_minor_check',
+      sql`${table.salePriceMinor} is null or ${table.salePriceMinor} >= 0`,
+    ),
+    check(
+      'product_units_purchase_price_minor_check',
+      sql`${table.purchasePriceMinor} is null or ${table.purchasePriceMinor} >= 0`,
+    ),
+    check('product_units_status_check', sql`${table.status} in ('active', 'archived')`),
+    check(
+      'product_units_check',
+      sql`(${table.isBase} = true and ${table.factorNum} = 1 and ${table.factorDen} = 1) or ${table.isBase} = false`,
+    ),
+    check('product_units_version_check', sql`${table.version} >= 1`),
+    uniqueIndex('uq_product_one_base_unit')
+      .on(table.storeId, table.productId)
+      .where(sql`${table.isBase} = true and ${table.status} = 'active'`),
   ],
 );
