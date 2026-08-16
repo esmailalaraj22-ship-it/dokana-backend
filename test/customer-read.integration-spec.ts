@@ -1,18 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
-import type { INestApplication } from '@nestjs/common';
+import { Controller, Get, Query, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { eq } from 'drizzle-orm';
-import { Logger } from 'nestjs-pino';
+import { Logger, PARAMS_PROVIDER_TOKEN } from 'nestjs-pino';
+import type { DestinationStream } from 'pino';
 import type { Pool } from 'pg';
 import request from 'supertest';
 import type { Response } from 'supertest';
 
 import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
+import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
+import { normalizeCustomerName } from '../src/customers/customer-normalization';
+import { decodeCustomerCursor } from '../src/customers/customer-read-cursor';
 import { CustomerReadRepository } from '../src/customers/customer-read.repository';
 import type { CustomerListResponse } from '../src/customers/customer-read.types';
 import { DatabaseService } from '../src/database/database.service';
@@ -91,6 +95,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+class SynchronousLogCapture implements DestinationStream {
+  private output = '';
+
+  write(message: string): void {
+    this.output += message;
+  }
+
+  clear(): void {
+    this.output = '';
+  }
+
+  flush(): string {
+    return this.output;
+  }
+
+  records(): Record<string, unknown>[] {
+    return this.output
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as unknown)
+      .filter(isRecord);
+  }
+}
+
+@Controller('privacy-probe')
+class PrivacyProbeController {
+  @Get('failure')
+  fail(@Query('search') search: unknown): never {
+    throw new Error(`Synthetic privacy probe failed for ${String(search)}`);
+  }
+}
+
 function readList(response: Response): CustomerListResponse {
   const body: unknown = response.body;
   if (!isRecord(body) || !Array.isArray(body.items)) {
@@ -119,6 +155,7 @@ function withoutTraceFields(body: unknown): unknown {
 }
 
 describe('Customer read API with real PostgreSQL', () => {
+  const logCapture = new SynchronousLogCapture();
   let app: INestApplication | undefined;
   let server: Server;
   let adminPool: Pool;
@@ -365,7 +402,7 @@ describe('Customer read API with real PostgreSQL', () => {
     }
 
     process.env.APP_ENV = 'test';
-    process.env.LOG_LEVEL = 'silent';
+    process.env.LOG_LEVEL = 'info';
     process.env.DATABASE_URL = environment.runtimeUrl;
     process.env.AUTH_DATABASE_URL = environment.authUrl;
 
@@ -461,7 +498,16 @@ describe('Customer read API with real PostgreSQL', () => {
     }
 
     const { AppModule } = await import('../src/app.module');
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({
+      imports: [AppModule],
+      controllers: [PrivacyProbeController],
+    })
+      .overrideProvider(PARAMS_PROVIDER_TOKEN)
+      .useFactory({
+        factory: (config: AppConfigService) => createLoggingParams(config, logCapture),
+        inject: [AppConfigService],
+      })
+      .compile();
     const nestApp = module.createNestApplication<NestExpressApplication>({ bodyParser: false });
     nestApp.useLogger(nestApp.get(Logger));
     configureApplication(nestApp, nestApp.get(AppConfigService));
@@ -481,6 +527,10 @@ describe('Customer read API with real PostgreSQL', () => {
       ),
     };
   }, 60_000);
+
+  beforeEach(() => {
+    logCapture.clear();
+  });
 
   afterAll(async () => {
     await app?.close();
@@ -733,6 +783,267 @@ describe('Customer read API with real PostgreSQL', () => {
 
     await authorizedGet(access.a, '/v1/customers').query({ limit: 1 }).expect(200);
     await authorizedGet(access.a, '/v1/customers').query({ limit: 100 }).expect(200);
+  });
+
+  it('omits sensitive Customer query state from the synchronous production logging pipeline', async () => {
+    const nameSearch = 'CUSTOMER_SEARCH_SECRET_S44H1';
+    const normalizedNameSearch = normalizeCustomerName(nameSearch);
+    const invalidPhoneSearch = 'CUSTOMER_PHONE_FALLBACK_SECRET_S44H1';
+    const normalizedInvalidPhoneSearch = normalizeCustomerName(invalidPhoneSearch);
+    const unicodeSearch = '\u062e\u0635\u0648\u0635\u064a\u0629 CUSTOMER_UNICODE_SECRET_S44H1';
+    const encodedUnicodeSearch = encodeURIComponent(unicodeSearch);
+    const normalizedUnicodeSearch = normalizeCustomerName(unicodeSearch);
+    const phoneSearch = '0599 123 456';
+    const canonicalPhone = '+970599123456';
+    const duplicateSearches = [
+      'CUSTOMER_DUPLICATE_SEARCH_SECRET_A',
+      'CUSTOMER_DUPLICATE_SEARCH_SECRET_B',
+    ] as const;
+    const overBudgetSearch = '\ufdfa'.repeat(21) + 'a'.repeat(7);
+    const normalizedOverBudgetSearch = normalizeCustomerName(overBudgetSearch);
+    const malformedCursor = 'CUSTOMER_CURSOR_SECRET_MALFORMED_S44H1';
+    const privacyCustomerIds = [randomUUID(), randomUUID()];
+
+    try {
+      await insertCustomer(
+        {
+          id: privacyCustomerIds[0] ?? '',
+          storeId: fixture.stores.a,
+          name: `${nameSearch} Alpha`,
+          normalizedName: `${normalizedNameSearch} alpha`,
+          phone: '0599 440 301',
+          normalizedPhone: '+970599440301',
+        },
+        9_001,
+      );
+      await insertCustomer(
+        {
+          id: privacyCustomerIds[1] ?? '',
+          storeId: fixture.stores.a,
+          name: `${nameSearch} Beta`,
+          normalizedName: `${normalizedNameSearch} beta`,
+          phone: '0599 440 302',
+          normalizedPhone: '+970599440302',
+        },
+        9_002,
+      );
+
+      const firstPage = readList(
+        await authorizedGet(access.a, '/v1/customers')
+          .query({ search: nameSearch, limit: 1 })
+          .expect(200),
+      );
+      if (!firstPage.nextCursor) {
+        throw new Error('Expected a privacy-test Customer continuation cursor.');
+      }
+      const decodedCursor = decodeCustomerCursor(firstPage.nextCursor);
+      const secondPage = readList(
+        await authorizedGet(access.a, '/v1/customers')
+          .query({ search: nameSearch, limit: 1, cursor: firstPage.nextCursor })
+          .expect(200),
+      );
+      expect([...firstPage.items, ...secondPage.items]).toHaveLength(2);
+      expect(secondPage.nextCursor).toBeNull();
+
+      await authorizedGet(access.a, '/v1/customers').query({ search: phoneSearch }).expect(200);
+      await authorizedGet(access.a, '/v1/customers')
+        .query({ search: invalidPhoneSearch })
+        .expect(200);
+      await authorizedGet(access.a, `/v1/customers?search=${encodedUnicodeSearch}`).expect(200);
+
+      const duplicateSearchResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?search=${encodeURIComponent(duplicateSearches[0])}&search=${encodeURIComponent(duplicateSearches[1])}`,
+      ).expect(400);
+      expect(duplicateSearchResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+      const identicalSearchResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?search=${encodeURIComponent(duplicateSearches[0])}&search=${encodeURIComponent(duplicateSearches[0])}`,
+      ).expect(400);
+      expect(identicalSearchResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+      await authorizedGet(access.a, '/v1/customers?search=').expect(200);
+
+      const overBudgetResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?search=${encodeURIComponent(overBudgetSearch)}`,
+      ).expect(400);
+      expect(overBudgetResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+
+      const malformedCursorResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?cursor=${encodeURIComponent(malformedCursor)}`,
+      ).expect(400);
+      expect(malformedCursorResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+      const emptyCursorResponse = await authorizedGet(access.a, '/v1/customers?cursor=').expect(
+        400,
+      );
+      expect(emptyCursorResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+
+      const encodedCursor = encodeURIComponent(firstPage.nextCursor);
+      const duplicateCursorResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?search=${encodeURIComponent(nameSearch)}&cursor=${encodedCursor}&cursor=${encodedCursor}`,
+      ).expect(400);
+      expect(duplicateCursorResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+      const differentCursorResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?search=${encodeURIComponent(nameSearch)}&cursor=${encodedCursor}&cursor=${encodeURIComponent(malformedCursor)}`,
+      ).expect(400);
+      expect(differentCursorResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+      const scopeMismatchResponse = await authorizedGet(
+        access.a,
+        `/v1/customers?status=archived&search=${encodeURIComponent(nameSearch)}&cursor=${encodedCursor}`,
+      ).expect(400);
+      expect(scopeMismatchResponse.body).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        path: '/v1/customers',
+      });
+
+      const capturedOutput = logCapture.flush();
+      const sensitiveRepresentations = new Set([
+        nameSearch,
+        encodeURIComponent(nameSearch),
+        normalizedNameSearch,
+        phoneSearch,
+        encodeURIComponent(phoneSearch),
+        canonicalPhone,
+        invalidPhoneSearch,
+        normalizedInvalidPhoneSearch,
+        unicodeSearch,
+        encodedUnicodeSearch,
+        normalizedUnicodeSearch,
+        ...duplicateSearches,
+        ...duplicateSearches.map(encodeURIComponent),
+        overBudgetSearch,
+        encodeURIComponent(overBudgetSearch),
+        normalizedOverBudgetSearch,
+        malformedCursor,
+        encodeURIComponent(malformedCursor),
+        firstPage.nextCursor,
+        encodedCursor,
+        decodedCursor.search?.normalizedNamePrefix ?? '',
+        decodedCursor.search?.canonicalPhone ?? '',
+        decodedCursor.position.normalizedName,
+        decodedCursor.position.id,
+      ]);
+      for (const sensitiveValue of sensitiveRepresentations) {
+        if (sensitiveValue.length > 0) {
+          expect(capturedOutput).not.toContain(sensitiveValue);
+        }
+      }
+
+      const requestRecords = logCapture.records().filter((record) => {
+        const loggedRequest = record.req;
+        return isRecord(loggedRequest) && loggedRequest.url === '/v1/customers';
+      });
+      expect(requestRecords.length).toBeGreaterThanOrEqual(14);
+      for (const record of requestRecords) {
+        const loggedRequest = record.req;
+        if (!isRecord(loggedRequest)) {
+          throw new Error('Expected a structured Customer request log.');
+        }
+        expect(loggedRequest).toMatchObject({ method: 'GET', url: '/v1/customers' });
+        expect(String(loggedRequest.url)).not.toContain('?');
+        expect(typeof record.requestId).toBe('string');
+        expect(typeof record.responseTime).toBe('number');
+        if (!isRecord(record.res)) {
+          throw new Error('Expected a structured Customer response log.');
+        }
+        expect(typeof record.res.statusCode).toBe('number');
+      }
+      expect(
+        requestRecords.some((record) => isRecord(record.res) && record.res.statusCode === 200),
+      ).toBe(true);
+      expect(
+        requestRecords.some((record) => isRecord(record.res) && record.res.statusCode === 400),
+      ).toBe(true);
+    } finally {
+      await adminPool.query(`delete from ledger.customers where id = any($1::uuid[])`, [
+        privacyCustomerIds,
+      ]);
+    }
+  });
+
+  it('keeps 5xx exception observability query-free without suppressing safe metadata', async () => {
+    const canary = 'CUSTOMER_EXCEPTION_QUERY_SECRET_S44H1';
+    const response = await request(server)
+      .get(`/v1/privacy-probe/failure?search=${encodeURIComponent(canary)}`)
+      .expect(500);
+
+    expect(response.body).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred.',
+      path: '/v1/privacy-probe/failure',
+    });
+    const capturedOutput = logCapture.flush();
+    expect(capturedOutput).not.toContain(canary);
+    expect(capturedOutput).not.toContain(encodeURIComponent(canary));
+
+    const failureRecord = logCapture.records().find((record) => record.event === 'request_failed');
+    expect(failureRecord).toMatchObject({
+      path: '/v1/privacy-probe/failure',
+      method: 'GET',
+      statusCode: 500,
+      code: 'INTERNAL_ERROR',
+      errorType: 'Error',
+    });
+    const accessRecord = logCapture.records().find((record) => {
+      const loggedRequest = record.req;
+      return isRecord(loggedRequest) && loggedRequest.url === '/v1/privacy-probe/failure';
+    });
+    if (!accessRecord) {
+      throw new Error('Expected a structured privacy-probe access log.');
+    }
+    expect(accessRecord).toMatchObject({
+      req: { method: 'GET', url: '/v1/privacy-probe/failure' },
+      res: { statusCode: 500 },
+    });
+    expect(typeof accessRecord.requestId).toBe('string');
+    expect(typeof accessRecord.responseTime).toBe('number');
+  });
+
+  it('preserves non-Customer access metadata while omitting its query string globally', async () => {
+    const canary = 'NON_CUSTOMER_QUERY_SECRET_S44H1';
+    await request(server)
+      .get(`/health/live?probe=${encodeURIComponent(canary)}`)
+      .expect(200);
+
+    const capturedOutput = logCapture.flush();
+    expect(capturedOutput).not.toContain(canary);
+    const accessRecord = logCapture.records().find((record) => {
+      const loggedRequest = record.req;
+      return isRecord(loggedRequest) && loggedRequest.url === '/health/live';
+    });
+    if (!accessRecord) {
+      throw new Error('Expected a structured liveness access log.');
+    }
+    expect(accessRecord).toMatchObject({
+      req: { method: 'GET', url: '/health/live' },
+      res: { statusCode: 200 },
+    });
+    expect(typeof accessRecord.requestId).toBe('string');
+    expect(typeof accessRecord.responseTime).toBe('number');
   });
 
   it('returns active and archived same-store detail with minimized lossless fields', async () => {

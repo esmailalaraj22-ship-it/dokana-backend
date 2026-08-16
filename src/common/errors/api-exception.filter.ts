@@ -8,6 +8,7 @@ import {
 import { PinoLogger } from 'nestjs-pino';
 import type { Request, Response } from 'express';
 
+import { requestPathForObservability } from '../logging/request-path';
 import type { ApiErrorResponse } from './api-error-response';
 
 interface ErrorPayload {
@@ -40,6 +41,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const payload = isHttpException ? exception.getResponse() : undefined;
     const parsedPayload = this.parsePayload(payload);
     const requestId = request.id;
+    const path = requestPathForObservability(request.originalUrl);
     const code =
       parsedPayload.code ??
       statusCodes[statusCode] ??
@@ -49,7 +51,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
       this.logger.error({
         event: 'request_failed',
         requestId,
-        path: request.originalUrl,
+        path,
         method: request.method,
         statusCode,
         code,
@@ -66,7 +68,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : (parsedPayload.message ?? 'The request could not be completed.'),
       requestId,
       timestamp: new Date().toISOString(),
-      path: request.originalUrl,
+      path,
     };
 
     if (statusCode < 500 && parsedPayload.details !== undefined) {

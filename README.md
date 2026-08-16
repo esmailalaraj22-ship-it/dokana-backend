@@ -161,6 +161,13 @@ and `OPERATION_ID_CONFLICT`. Applied replays return their stored historical
 response without re-executing or changing the Customer's current state. Hard
 Customer deletion is not implemented.
 
+Application-controlled HTTP observability records the request method,
+query-free path, response status, duration, and request ID. Customer `search`
+and `cursor` values, including normalized, canonical-phone, and decoded cursor
+forms, must not enter application logs. Error responses also use a query-free
+path. This application boundary does not assert control over external reverse
+proxy, CDN, or collector configuration.
+
 ## Commands
 
 | Command                                              | Purpose                                      |
