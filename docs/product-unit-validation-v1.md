@@ -14,17 +14,19 @@ authoritative.
 
 ## Rule Ownership
 
-| Concept                     | Pure value or cross-field validation in Task 5.2                 | Database-state precondition                   | Transaction-time invariant                        |
-| --------------------------- | ---------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------- |
-| Product and operation UUIDs | Established UUID domain; canonical lowercase text                | Referenced identity existence                 | Store identity and operation uniqueness           |
-| Product name                | Display canonicalization and Product Normalization v1 derivation | None                                          | None                                              |
-| SKU and barcode             | Nullable text canonicalization                                   | Current store-scoped availability             | Unique constraint and race handling               |
-| Measurement type            | Closed enum; same-payload Product/Unit equality                  | Parent Product state                          | Composite Product/Unit FK                         |
-| Product Unit label/code     | Approved text canonicalization                                   | Current Product-scoped Unit-name availability | Unique constraint and race handling               |
-| Conversion factors          | Positive PostgreSQL `int4`; base `1/1` cross-field rule          | Active base-unit lifecycle state              | Base-unit index and lifecycle transaction         |
-| Price and threshold         | Nullable nonnegative PostgreSQL `bigint`                         | None                                          | None                                              |
-| Negative-stock override     | Exact `null/false/true` domain                                   | Store default is consulted by inventory       | Future inventory transaction                      |
-| Lifecycle and version       | Structural persisted value domains only                          | Current related units and records             | Version check, archive/restore, final constraints |
+| Concept                     | Pure value or cross-field validation in Task 5.2                 | Database-state precondition                   | Transaction-time invariant                                     |
+| --------------------------- | ---------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
+| Product and operation UUIDs | Established UUID domain; canonical lowercase text                | Referenced identity existence                 | Store identity and operation uniqueness                        |
+| Product name                | Display canonicalization and Product Normalization v1 derivation | None                                          | None                                                           |
+| SKU and barcode             | Nullable text canonicalization                                   | Current store-scoped availability             | Unique constraint and race handling                            |
+| Measurement type            | Closed enum; same-payload Product/Unit equality                  | Parent Product state                          | Composite Product/Unit FK                                      |
+| Product Unit label/code     | Approved text canonicalization                                   | Current Product-scoped Unit-name availability | Unique constraint and race handling                            |
+| Conversion factors          | Positive PostgreSQL `int4`; base `1/1` cross-field rule          | None                                          | Persisted factor and base-ratio constraints                    |
+| Rule A: active conversion   | None                                                             | Required active base-unit structure           | Task 5.4 create/update and Task 5.5 restore/reactivation paths |
+| Rule B: active base removal | None                                                             | Active dependent conversion Units             | Task 5.5 archive/deactivate/removal/replacement paths          |
+| Price and threshold         | Nullable nonnegative PostgreSQL `bigint`                         | None                                          | None                                                           |
+| Negative-stock override     | Exact `null/false/true` domain                                   | Store default is consulted by inventory       | Future inventory transaction                                   |
+| Lifecycle and version       | Structural persisted value domains only                          | Current related units and records             | Version check, archive/restore, final constraints              |
 
 Pure validation never claims SKU/barcode/Unit-name availability, Product existence, active base-unit
 existence, archive eligibility, operation replay state, or optimistic-version success.
@@ -124,14 +126,29 @@ integer transport. Null, zero, false, and omitted fields remain distinct.
 
 ## Approved Future Base-Unit Lifecycle Policy
 
-The backend owner approved both future lifecycle rules:
+The backend owner approved both future lifecycle rules. Each is a database-state precondition and
+transaction-time invariant that must be enforced by every authoritative mutation transaction
+capable of creating or reintroducing a violating state.
 
-1. an active non-base/conversion Unit requires an active base-unit structure for its Product;
-2. an active base Unit cannot be archived while dependent active conversion Units remain.
+### Rule A: Required Active Base Structure
 
-These are database-state preconditions and transaction-time invariants. Actual enforcement belongs
-to Task 5.5 and may require a separately reviewed forward PostgreSQL migration. Task 5.2 does not
-query Unit state, implement archive/restore, or modify either database schema.
+An active non-base/conversion Unit requires an active base-unit structure for its Product. This is
+not exclusively a Task 5.5 concern. Future enforcement belongs to:
+
+- Task 5.4 create/update transactions that create an active conversion Unit or change a Unit in a
+  way that produces an active conversion relationship;
+- Task 5.5 restore/reactivation and other lifecycle transactions that reintroduce an active
+  conversion state.
+
+### Rule B: Base Removal or Archive
+
+An active base Unit cannot be archived, deactivated, removed, or replaced in a way that removes the
+required active base structure while dependent active conversion Units remain. Future enforcement
+belongs to Task 5.5 archive/deactivate/removal/replacement lifecycle transactions.
+
+Task 5.2 does not query Unit state or implement either rule. It adds no create/update, lifecycle,
+archive/restore, or database behavior. A separately reviewed forward PostgreSQL migration may be
+considered only if later architecture establishes that database-level enforcement is required.
 
 ## Validation Errors and Non-Scope
 
