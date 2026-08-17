@@ -1,0 +1,149 @@
+{
+  "validationContractVersion": 1,
+  "productNormalizationVersion": 1,
+  "approvedWhitespaceCodePoints": [
+    "U+0009..U+000D",
+    "U+0020",
+    "U+0085",
+    "U+00A0",
+    "U+1680",
+    "U+2000..U+200A",
+    "U+2028",
+    "U+2029",
+    "U+202F",
+    "U+205F",
+    "U+3000"
+  ],
+  "productNameCases": [
+    {
+      "id": "ordinary-latin",
+      "input": "Olive Oil",
+      "display": "Olive Oil",
+      "normalized": "olive oil",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "mixed-case-latin",
+      "input": "MiLk 1L",
+      "display": "MiLk 1L",
+      "normalized": "milk 1l",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "outer-and-internal-whitespace",
+      "input": "   Olive \t Oil 　",
+      "display": "Olive Oil",
+      "normalized": "olive oil",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "arabic-tatweel-and-diacritics",
+      "input": "  أحمــد   مُحَمَّد  ",
+      "display": "أحمــد مُحَمَّد",
+      "normalized": "احمد محمد",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "approved-alef-folds",
+      "input": "أرز إكليل آجال ٱخر",
+      "display": "أرز إكليل آجال ٱخر",
+      "normalized": "ارز اكليل اجال اخر",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "preserved-arabic-letters",
+      "input": "ة ى ؤ ئ",
+      "display": "ة ى ؤ ئ",
+      "normalized": "ة ى ؤ ئ",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "punctuation-preserved",
+      "input": "زيت-زيتون (1 لتر)!",
+      "display": "زيت-زيتون (1 لتر)!",
+      "normalized": "زيت-زيتون (1 لتر)!",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "nfkc-compatibility",
+      "input": "ＭＩＬＫ １Ｌ",
+      "display": "ＭＩＬＫ １Ｌ",
+      "normalized": "milk 1l",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "outside-approved-combining-set-preserved",
+      "input": "ب́ت",
+      "display": "ب́ت",
+      "normalized": "ب́ت",
+      "displayError": null,
+      "normalizedError": null
+    },
+    {
+      "id": "empty-approved-whitespace",
+      "input": "    ",
+      "display": null,
+      "normalized": null,
+      "displayError": "PRODUCT_DISPLAY_NAME_EMPTY",
+      "normalizedError": "PRODUCT_NORMALIZED_NAME_EMPTY"
+    },
+    {
+      "id": "normalized-empty-after-removal",
+      "input": "ـً",
+      "display": "ـً",
+      "normalized": null,
+      "displayError": null,
+      "normalizedError": "PRODUCT_NORMALIZED_NAME_EMPTY"
+    }
+  ],
+  "skuCases": [
+    { "id": "null", "input": null, "canonical": null },
+    { "id": "empty", "input": "", "canonical": null },
+    { "id": "approved-whitespace-only", "input": "    ", "canonical": null },
+    { "id": "outer-whitespace", "input": "  SKU-001 ", "canonical": "SKU-001" },
+    { "id": "case-preserved", "input": "AbC-9", "canonical": "AbC-9" },
+    { "id": "internal-text-preserved", "input": "A  B/1", "canonical": "A  B/1" },
+    { "id": "unicode-preserved", "input": " صنف-أ١ ", "canonical": "صنف-أ١" }
+  ],
+  "barcodeCases": [
+    { "id": "null", "input": null, "canonical": null },
+    { "id": "empty", "input": "", "canonical": null },
+    { "id": "approved-whitespace-only", "input": "    ", "canonical": null },
+    { "id": "leading-zeroes", "input": " 001234 ", "canonical": "001234" },
+    { "id": "alphanumeric", "input": " AbC-001/x ", "canonical": "AbC-001/x" },
+    { "id": "internal-text-preserved", "input": "00  12", "canonical": "00  12" }
+  ],
+  "unitNameCases": [
+    { "id": "simple", "input": "قطعة", "canonical": "قطعة", "error": null },
+    {
+      "id": "trim-and-collapse",
+      "input": "  كرتونة \t كبيرة 　",
+      "canonical": "كرتونة كبيرة",
+      "error": null
+    },
+    { "id": "case-preserved", "input": "Case-12", "canonical": "Case-12", "error": null },
+    { "id": "punctuation-preserved", "input": "لتر/عبوة", "canonical": "لتر/عبوة", "error": null },
+    {
+      "id": "empty-approved-whitespace",
+      "input": "    ",
+      "canonical": null,
+      "error": "PRODUCT_UNIT_NAME_EMPTY"
+    }
+  ],
+  "unitCodeCases": [
+    { "id": "null", "input": null, "canonical": null },
+    { "id": "empty", "input": "", "canonical": null },
+    { "id": "approved-whitespace-only", "input": "    ", "canonical": null },
+    { "id": "trim", "input": "  Pc/12 ", "canonical": "Pc/12" },
+    { "id": "internal-text-preserved", "input": "A  B", "canonical": "A  B" },
+    { "id": "unicode-preserved", "input": " كغ. ", "canonical": "كغ." }
+  ]
+}
