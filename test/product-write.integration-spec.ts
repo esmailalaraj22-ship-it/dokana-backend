@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Logger, PARAMS_PROVIDER_TOKEN } from 'nestjs-pino';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import request from 'supertest';
 import type { Response } from 'supertest';
 
@@ -206,7 +206,7 @@ describe('Product write API with real PostgreSQL', () => {
     adminPool = createTestPool(
       environment.adminUrl,
       'dokana-task54-admin',
-      1,
+      2,
       '-c session_replication_role=replica -c app.suppress_change_events=on',
     );
     poolsInitialized = true;
@@ -581,6 +581,64 @@ describe('Product write API with real PostgreSQL', () => {
     return result.rows[0]?.status;
   }
 
+  async function waitForBlockedOperationRequests(expected: number): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await adminPool.query<{ count: string }>(
+        `select count(*)::text as count
+         from pg_stat_activity
+         where datname = current_database()
+           and pid <> pg_backend_pid()
+           and wait_event_type = 'Lock'
+           and query ilike '%sync.processed_operations%'
+           and query not ilike '%pg_stat_activity%'`,
+      );
+      if (Number(result.rows[0]?.count ?? '0') >= expected) {
+        return;
+      }
+      await adminPool.query(`select pg_sleep(0.01)`);
+    }
+    throw new Error(
+      `Timed out waiting for ${String(expected)} blocked Product operation requests.`,
+    );
+  }
+
+  async function runBehindOperationBarrier<T>(work: () => Promise<T>): Promise<T> {
+    const blocker: PoolClient = await adminPool.connect();
+    let transactionOpen = false;
+    let pending: Promise<T> | undefined;
+    try {
+      await blocker.query('begin');
+      transactionOpen = true;
+      await blocker.query('lock table sync.processed_operations in access exclusive mode');
+      pending = work();
+      await waitForBlockedOperationRequests(2);
+      await blocker.query('commit');
+      transactionOpen = false;
+      return await pending;
+    } catch (error) {
+      if (transactionOpen) {
+        await blocker.query('rollback');
+      }
+      if (pending) {
+        await Promise.allSettled([pending]);
+      }
+      throw error;
+    } finally {
+      blocker.release();
+    }
+  }
+
+  async function changeEventSequenceValue(): Promise<bigint> {
+    const result = await adminPool.query<{ value: string }>(
+      `select last_value::text as value from sync.change_events_cursor_seq`,
+    );
+    const value = result.rows[0]?.value;
+    if (!value) {
+      throw new Error('The change-event cursor sequence did not return a value.');
+    }
+    return BigInt(value);
+  }
+
   async function insertAdminProduct(id: string, status: 'active' | 'archived'): Promise<void> {
     await adminPool.query(
       `insert into ledger.products
@@ -616,49 +674,86 @@ describe('Product write API with real PostgreSQL', () => {
 
   it('serializes concurrent identical create operations into a single business effect', async () => {
     const payload = createBody();
-    const [first, second] = await Promise.all([
-      post(access.a, '/v1/products').send(payload),
-      post(access.a, '/v1/products').send(payload),
-    ]);
+    const baseUnitId = (payload.initialBaseUnit as Record<string, unknown>).id as string;
+    const [first, second] = await runBehindOperationBarrier(() =>
+      Promise.all([
+        post(access.a, '/v1/products').send(payload),
+        post(access.a, '/v1/products').send(payload),
+      ]),
+    );
 
-    const statuses = [first.status, second.status];
-    expect(statuses.every((code) => code === 201 || code === 409)).toBe(true);
-    expect(statuses.filter((code) => code === 201).length).toBeGreaterThanOrEqual(1);
-    const successes = [first, second].filter((response) => response.status === 201);
-    if (successes.length === 2) {
-      expect(successes[0]?.body).toEqual(successes[1]?.body);
-    }
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect(body(first)).toEqual(body(second));
+    expect(body(first)).toMatchObject({
+      id: payload.id,
+      operationId: payload.operationId,
+      version: '1',
+    });
 
     expect(await count('ledger.products', 'id', payload.id as string)).toBe(1);
     expect(await count('ledger.product_units', 'product_id', payload.id as string)).toBe(1);
     const ops = await adminPool.query<{ status: string; c: string }>(
       `select status, count(*)::text as c from sync.processed_operations
-       where operation_id = $1 group by status`,
-      [payload.operationId as string],
+       where store_id = $1 and operation_id = $2 group by status`,
+      [fixture.stores.a, payload.operationId as string],
     );
     expect(ops.rows).toEqual([{ status: 'applied', c: '1' }]);
+    expect(await count('sync.change_events', 'entity_id', payload.id as string)).toBe(1);
+    expect(await count('audit.central_audit_logs', 'entity_id', payload.id as string)).toBe(1);
+    expect(await count('sync.change_events', 'entity_id', baseUnitId)).toBe(1);
+    expect(await count('audit.central_audit_logs', 'entity_id', baseUnitId)).toBe(1);
   });
 
   it('serializes concurrent identical updates without double version increment', async () => {
     const productId = randomUUID();
+    const baseUnitId = randomUUID();
     await post(access.a, '/v1/products')
-      .send(createBody({ id: productId, sku: 'CC-UPD' }))
+      .send(createBody({ id: productId, unitId: baseUnitId, sku: 'CC-UPD' }))
       .expect(201);
 
+    const productChangesBefore = await count('sync.change_events', 'entity_id', productId);
+    const productAuditsBefore = await count('audit.central_audit_logs', 'entity_id', productId);
+    const unitChangesBefore = await count('sync.change_events', 'entity_id', baseUnitId);
+    const unitAuditsBefore = await count('audit.central_audit_logs', 'entity_id', baseUnitId);
     const update = { operationId: randomUUID(), expectedVersion: '1', isPinned: true };
-    const [first, second] = await Promise.all([
-      patch(access.a, `/v1/products/${productId}`).send(update),
-      patch(access.a, `/v1/products/${productId}`).send(update),
-    ]);
-    const statuses = [first.status, second.status];
-    expect(statuses.every((code) => code === 200 || code === 409)).toBe(true);
-    expect(statuses.filter((code) => code === 200).length).toBeGreaterThanOrEqual(1);
+    const [first, second] = await runBehindOperationBarrier(() =>
+      Promise.all([
+        patch(access.a, `/v1/products/${productId}`).send(update),
+        patch(access.a, `/v1/products/${productId}`).send(update),
+      ]),
+    );
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(body(first)).toEqual(body(second));
+    expect(body(first)).toMatchObject({
+      id: productId,
+      operationId: update.operationId,
+      version: '2',
+      isPinned: true,
+    });
 
     const version = await adminPool.query<{ v: string }>(
       `select version::text as v from ledger.products where id = $1`,
       [productId],
     );
     expect(version.rows[0]?.v).toBe('2');
+    expect(await count('ledger.products', 'id', productId)).toBe(1);
+    expect(await count('ledger.product_units', 'product_id', productId)).toBe(1);
+    expect(await count('sync.change_events', 'entity_id', productId)).toBe(
+      productChangesBefore + 1,
+    );
+    expect(await count('audit.central_audit_logs', 'entity_id', productId)).toBe(
+      productAuditsBefore + 1,
+    );
+    expect(await count('sync.change_events', 'entity_id', baseUnitId)).toBe(unitChangesBefore);
+    expect(await count('audit.central_audit_logs', 'entity_id', baseUnitId)).toBe(unitAuditsBefore);
+    const operations = await adminPool.query<{ status: string; count: string }>(
+      `select status, count(*)::text as count
+       from sync.processed_operations
+       where store_id = $1 and operation_id = $2
+       group by status`,
+      [fixture.stores.a, update.operationId],
+    );
+    expect(operations.rows).toEqual([{ status: 'applied', count: '1' }]);
   });
 
   it('resolves concurrent optimistic updates with exactly one winner', async () => {
@@ -839,21 +934,104 @@ describe('Product write API with real PostgreSQL', () => {
     expect(nonBase.rows[0]?.c).toBe('2');
   });
 
-  it('atomically rolls back business writes while recording a deterministic rejection', async () => {
+  it('rolls back a Product insert and its triggers after a later base Unit conflict', async () => {
+    const fixtureProductId = randomUUID();
+    const conflictingBaseUnitId = randomUUID();
+    const fixtureOperationId = randomUUID();
     await post(access.a, '/v1/products')
-      .send(createBody({ sku: 'ATOMIC-SKU' }))
+      .send(
+        createBody({
+          id: fixtureProductId,
+          operationId: fixtureOperationId,
+          unitId: conflictingBaseUnitId,
+          sku: 'ATOMIC-SEED',
+        }),
+      )
       .expect(201);
 
-    const second = createBody({ sku: 'ATOMIC-SKU' });
-    const rejected = body(await post(access.a, '/v1/products').send(second).expect(409));
-    expect(rejected.code).toBe('PRODUCT_SKU_CONFLICT');
+    const fixtureUnitBefore = await adminPool.query<{
+      productId: string;
+      operationId: string;
+      status: string;
+      version: string;
+    }>(
+      `select product_id as "productId", operation_id as "operationId", status,
+              version::text as version
+       from ledger.product_units
+       where id = $1`,
+      [conflictingBaseUnitId],
+    );
+    const unitChangesBefore = await count('sync.change_events', 'entity_id', conflictingBaseUnitId);
+    const unitAuditsBefore = await count(
+      'audit.central_audit_logs',
+      'entity_id',
+      conflictingBaseUnitId,
+    );
+    const sequenceBefore = await changeEventSequenceValue();
 
-    expect(await count('ledger.products', 'id', second.id as string)).toBe(0);
-    const baseUnitId = (second.initialBaseUnit as Record<string, unknown>).id as string;
-    expect(await count('ledger.product_units', 'id', baseUnitId)).toBe(0);
-    expect(await operationStatus(second.operationId as string)).toBe('rejected');
-    expect(await count('sync.change_events', 'entity_id', second.id as string)).toBe(0);
-    expect(await count('audit.central_audit_logs', 'entity_id', second.id as string)).toBe(0);
+    const attempted = createBody({
+      id: randomUUID(),
+      operationId: randomUUID(),
+      unitId: conflictingBaseUnitId,
+      sku: 'ATOMIC-LATE-UNIT',
+    });
+    const rejected = body(await post(access.a, '/v1/products').send(attempted).expect(409));
+    expect(rejected.code).toBe('CONFLICT');
+
+    // The Product AFTER INSERT change trigger consumes this non-transactional sequence value.
+    // Its one-step advance proves the Product INSERT ran before the conflicting Unit INSERT
+    // rolled the nested business savepoint and both transactional trigger rows back.
+    expect((await changeEventSequenceValue()) - sequenceBefore).toBe(1n);
+    expect(await count('ledger.products', 'id', attempted.id as string)).toBe(0);
+    expect(await count('ledger.product_units', 'product_id', attempted.id as string)).toBe(0);
+    expect(await count('sync.change_events', 'entity_id', attempted.id as string)).toBe(0);
+    expect(await count('audit.central_audit_logs', 'entity_id', attempted.id as string)).toBe(0);
+    expect(await count('sync.change_events', 'entity_id', conflictingBaseUnitId)).toBe(
+      unitChangesBefore,
+    );
+    expect(await count('audit.central_audit_logs', 'entity_id', conflictingBaseUnitId)).toBe(
+      unitAuditsBefore,
+    );
+    const fixtureUnitAfter = await adminPool.query<{
+      productId: string;
+      operationId: string;
+      status: string;
+      version: string;
+    }>(
+      `select product_id as "productId", operation_id as "operationId", status,
+              version::text as version
+       from ledger.product_units
+       where id = $1`,
+      [conflictingBaseUnitId],
+    );
+    expect(fixtureUnitAfter.rows).toEqual(fixtureUnitBefore.rows);
+
+    const operation = await adminPool.query<{
+      status: string;
+      responseCode: number;
+      errorCode: string;
+      count: string;
+    }>(
+      `select status, response_code as "responseCode", error_code as "errorCode",
+              count(*) over ()::text as count
+       from sync.processed_operations
+       where store_id = $1 and operation_id = $2`,
+      [fixture.stores.a, attempted.operationId as string],
+    );
+    expect(operation.rows).toEqual([
+      { status: 'rejected', responseCode: 409, errorCode: 'CONFLICT', count: '1' },
+    ]);
+
+    const sequenceBeforeReplay = await changeEventSequenceValue();
+    const replay = body(await post(access.a, '/v1/products').send(attempted).expect(409));
+    expect(replay).toMatchObject({
+      code: rejected.code,
+      message: rejected.message,
+      path: rejected.path,
+      statusCode: rejected.statusCode,
+    });
+    expect(await changeEventSequenceValue()).toBe(sequenceBeforeReplay);
+    expect(await operationStatus(attempted.operationId as string)).toBe('rejected');
   });
 
   it('rejects a new Unit under an archived same-store parent Product (P54-D11)', async () => {
