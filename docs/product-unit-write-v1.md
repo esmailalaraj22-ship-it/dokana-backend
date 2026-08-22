@@ -4,7 +4,7 @@
 
 This document records Station 5 / Task 5.4 idempotent Product and ProductUnit **create and
 update**. It consumes the closed Task-5.1 persistence, Task-5.2 validation, and Task-5.3 read
-contracts and the explicit backend-owner decisions P54-D1 through P54-D10. It adds no archive,
+contracts and the explicit backend-owner decisions P54-D1 through P54-D11. It adds no archive,
 restore, reactivation, lifecycle removal, inventory, costing, accounting, sales, supplier, or Sync
 behavior, and no migration. PostgreSQL constraints, forced RLS, and database triggers remain
 authoritative.
@@ -70,12 +70,19 @@ persisted value, the update is a successful canonical no-op: no row mutation, no
 no row-update change event or audit effect. The operation still completes deterministically and is
 replayable.
 
-## ProductUnit Create and Update (P54-D5/D6/D9)
+## ProductUnit Create and Update (P54-D5/D6/D9/D11)
 
-Standalone Unit create is **non-base only**: `is_base` is server-forced `false`; the client cannot
-request a base Unit. The parent Product must exist, be visible in the trusted store, and be active;
-`measurement_type` is derived from the Product. Ratios use the exact Task-5.2 non-base contract
-(positive `int4`, non-base `1/1` allowed, no float, no GCD reduction).
+Standalone Unit create is **non-base only** (P54-D9): `is_base` is server-forced `false`; the client
+cannot request a base Unit.
+
+**Parent-state precondition (P54-D11):** standalone ProductUnit create requires the parent Product
+to be **active and visible in the trusted current store**. An archived same-store Product cannot
+accept a new ordinary active ProductUnit and is rejected with `PRODUCT_ARCHIVED` (no Unit inserted,
+no hidden restore/reactivation, no false completed operation). A missing or foreign-store parent is
+non-disclosing (`PRODUCT_NOT_FOUND`). Restore/reactivation of an archived Product remains Task 5.5;
+Task 5.4 never changes lifecycle status. `measurement_type` is derived from the Product. Ratios use
+the exact Task-5.2 non-base contract (positive `int4`, non-base `1/1` allowed, no float, no GCD
+reduction).
 
 - **Mutable Unit fields:** `unit_name`, `unit_code`, `sale_price_minor`, `purchase_price_minor`.
 - **Immutable after create (P54-D6):** `product_id`, `measurement_type`, `is_base`, `factor_num`,

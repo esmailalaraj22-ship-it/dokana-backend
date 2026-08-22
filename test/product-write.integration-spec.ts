@@ -201,6 +201,7 @@ describe('Product write API with real PostgreSQL', () => {
     process.env.LOG_LEVEL = 'info';
     process.env.DATABASE_URL = environment.runtimeUrl;
     process.env.AUTH_DATABASE_URL = environment.authUrl;
+    process.env.DB_POOL_MAX = '8';
 
     adminPool = createTestPool(
       environment.adminUrl,
@@ -560,6 +561,377 @@ describe('Product write API with real PostgreSQL', () => {
     } finally {
       await adminPool.query(`update ledger.stores set status = 'active' where id = $1`, [
         fixture.stores.flip,
+      ]);
+    }
+  });
+
+  async function count(table: string, column: string, value: string): Promise<number> {
+    const result = await adminPool.query<{ c: string }>(
+      `select count(*)::text as c from ${table} where ${column} = $1`,
+      [value],
+    );
+    return Number(result.rows[0]?.c ?? '0');
+  }
+
+  async function operationStatus(operationId: string): Promise<string | undefined> {
+    const result = await adminPool.query<{ status: string }>(
+      `select status from sync.processed_operations where operation_id = $1`,
+      [operationId],
+    );
+    return result.rows[0]?.status;
+  }
+
+  async function insertAdminProduct(id: string, status: 'active' | 'archived'): Promise<void> {
+    await adminPool.query(
+      `insert into ledger.products
+        (id, store_id, name, normalized_name, measurement_type, operation_id, status, archived_at)
+       values ($1, $2, 'Admin Product', 'admin product', 'count', $3, $4, $5)`,
+      [id, fixture.stores.a, randomUUID(), status, status === 'archived' ? new Date() : null],
+    );
+  }
+
+  async function insertAdminUnit(
+    id: string,
+    productId: string,
+    isBase: boolean,
+    status: 'active' | 'archived',
+  ): Promise<void> {
+    await adminPool.query(
+      `insert into ledger.product_units
+        (id, store_id, product_id, measurement_type, unit_name, is_base, factor_num, factor_den,
+         operation_id, status)
+       values ($1, $2, $3, 'count', $4, $5, $6, 1, $7, $8)`,
+      [
+        id,
+        fixture.stores.a,
+        productId,
+        `Unit ${id.slice(0, 8)}`,
+        isBase,
+        isBase ? 1 : 2,
+        randomUUID(),
+        status,
+      ],
+    );
+  }
+
+  it('serializes concurrent identical create operations into a single business effect', async () => {
+    const payload = createBody();
+    const [first, second] = await Promise.all([
+      post(access.a, '/v1/products').send(payload),
+      post(access.a, '/v1/products').send(payload),
+    ]);
+
+    const statuses = [first.status, second.status];
+    expect(statuses.every((code) => code === 201 || code === 409)).toBe(true);
+    expect(statuses.filter((code) => code === 201).length).toBeGreaterThanOrEqual(1);
+    const successes = [first, second].filter((response) => response.status === 201);
+    if (successes.length === 2) {
+      expect(successes[0]?.body).toEqual(successes[1]?.body);
+    }
+
+    expect(await count('ledger.products', 'id', payload.id as string)).toBe(1);
+    expect(await count('ledger.product_units', 'product_id', payload.id as string)).toBe(1);
+    const ops = await adminPool.query<{ status: string; c: string }>(
+      `select status, count(*)::text as c from sync.processed_operations
+       where operation_id = $1 group by status`,
+      [payload.operationId as string],
+    );
+    expect(ops.rows).toEqual([{ status: 'applied', c: '1' }]);
+  });
+
+  it('serializes concurrent identical updates without double version increment', async () => {
+    const productId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'CC-UPD' }))
+      .expect(201);
+
+    const update = { operationId: randomUUID(), expectedVersion: '1', isPinned: true };
+    const [first, second] = await Promise.all([
+      patch(access.a, `/v1/products/${productId}`).send(update),
+      patch(access.a, `/v1/products/${productId}`).send(update),
+    ]);
+    const statuses = [first.status, second.status];
+    expect(statuses.every((code) => code === 200 || code === 409)).toBe(true);
+    expect(statuses.filter((code) => code === 200).length).toBeGreaterThanOrEqual(1);
+
+    const version = await adminPool.query<{ v: string }>(
+      `select version::text as v from ledger.products where id = $1`,
+      [productId],
+    );
+    expect(version.rows[0]?.v).toBe('2');
+  });
+
+  it('resolves concurrent optimistic updates with exactly one winner', async () => {
+    const productId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'CC-OPT' }))
+      .expect(201);
+
+    const [first, second] = await Promise.all([
+      patch(access.a, `/v1/products/${productId}`).send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+        isPinned: true,
+      }),
+      patch(access.a, `/v1/products/${productId}`).send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+        lowStockThresholdMilli: '5',
+      }),
+    ]);
+
+    const statuses = [first.status, second.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const loser = [first, second].find((response) => response.status === 409);
+    expect(body(loser as Response).code).toBe('PRODUCT_VERSION_CONFLICT');
+
+    const version = await adminPool.query<{ v: string }>(
+      `select version::text as v from ledger.products where id = $1`,
+      [productId],
+    );
+    expect(version.rows[0]?.v).toBe('2');
+  });
+
+  it('replays and reuse-conflicts standalone ProductUnit create and update', async () => {
+    const productId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'PU-REPLAY' }))
+      .expect(201);
+
+    const unitId = randomUUID();
+    const createOp = randomUUID();
+    const createRequest = {
+      id: unitId,
+      operationId: createOp,
+      productId,
+      unitName: 'Carton',
+      factorNum: 12,
+      factorDen: 1,
+    };
+    const created = body(
+      await post(access.a, '/v1/products/units').send(createRequest).expect(201),
+    );
+    const createdReplay = body(
+      await post(access.a, '/v1/products/units').send(createRequest).expect(201),
+    );
+    expect(createdReplay).toEqual(created);
+    const createReuse = body(
+      await post(access.a, '/v1/products/units')
+        .send({ ...createRequest, unitName: 'Different' })
+        .expect(409),
+    );
+    expect(createReuse.code).toBe('OPERATION_ID_CONFLICT');
+    expect(await count('ledger.product_units', 'id', unitId)).toBe(1);
+
+    const updateOp = randomUUID();
+    const updateRequest = { operationId: updateOp, expectedVersion: '1', salePriceMinor: '500' };
+    const updated = body(
+      await patch(access.a, `/v1/products/units/${unitId}`).send(updateRequest).expect(200),
+    );
+    expect(updated.version).toBe('2');
+    const updatedReplay = body(
+      await patch(access.a, `/v1/products/units/${unitId}`).send(updateRequest).expect(200),
+    );
+    expect(updatedReplay).toEqual(updated);
+    const updateReuse = body(
+      await patch(access.a, `/v1/products/units/${unitId}`)
+        .send({ ...updateRequest, salePriceMinor: '999' })
+        .expect(409),
+    );
+    expect(updateReuse.code).toBe('OPERATION_ID_CONFLICT');
+
+    const version = await adminPool.query<{ v: string }>(
+      `select version::text as v from ledger.product_units where id = $1`,
+      [unitId],
+    );
+    expect(version.rows[0]?.v).toBe('2');
+  });
+
+  it('replays a completed operation after the resource later changes', async () => {
+    const productId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'REPLAY-VER' }))
+      .expect(201);
+
+    const originalOp = randomUUID();
+    const originalRequest = { operationId: originalOp, expectedVersion: '1', isPinned: true };
+    const original = body(
+      await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200),
+    );
+    expect(original.version).toBe('2');
+
+    await patch(access.a, `/v1/products/${productId}`)
+      .send({ operationId: randomUUID(), expectedVersion: '2', lowStockThresholdMilli: '9' })
+      .expect(200);
+
+    const replay = body(
+      await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200),
+    );
+    expect(replay).toEqual(original);
+    expect(replay.version).toBe('2');
+
+    const version = await adminPool.query<{ v: string }>(
+      `select version::text as v from ledger.products where id = $1`,
+      [productId],
+    );
+    expect(version.rows[0]?.v).toBe('3');
+  });
+
+  it('rejects Rule-A conversion Unit create when no active base structure exists', async () => {
+    const productId = randomUUID();
+    await insertAdminProduct(productId, 'active');
+    await insertAdminUnit(randomUUID(), productId, true, 'archived');
+
+    const unitId = randomUUID();
+    const operationId = randomUUID();
+    const rejected = body(
+      await post(access.a, '/v1/products/units')
+        .send({
+          id: unitId,
+          operationId,
+          productId,
+          unitName: 'Carton',
+          factorNum: 2,
+          factorDen: 1,
+        })
+        .expect(409),
+    );
+    expect(rejected.code).toBe('PRODUCT_BASE_UNIT_REQUIRED');
+    expect(await count('ledger.product_units', 'id', unitId)).toBe(0);
+    expect(await operationStatus(operationId)).toBe('rejected');
+    expect(await count('sync.change_events', 'entity_id', unitId)).toBe(0);
+    expect(await count('audit.central_audit_logs', 'entity_id', unitId)).toBe(0);
+  });
+
+  it('serializes concurrent conversion Unit creates on the Product structural lock', async () => {
+    // The Product row FOR UPDATE anchor serializes structural mutations. The complementary
+    // Base-invalidation half of the Rule-A/Rule-B race (archiving the base concurrently) is a
+    // Task-5.5 lifecycle capability and is not implemented in Task 5.4.
+    const productId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'RULEA-CC' }))
+      .expect(201);
+
+    const [first, second] = await Promise.all([
+      post(access.a, '/v1/products/units').send({
+        id: randomUUID(),
+        operationId: randomUUID(),
+        productId,
+        unitName: 'Carton',
+        factorNum: 12,
+        factorDen: 1,
+      }),
+      post(access.a, '/v1/products/units').send({
+        id: randomUUID(),
+        operationId: randomUUID(),
+        productId,
+        unitName: 'Pallet',
+        factorNum: 144,
+        factorDen: 1,
+      }),
+    ]);
+    expect([first.status, second.status]).toEqual([201, 201]);
+    const nonBase = await adminPool.query<{ c: string }>(
+      `select count(*)::text as c from ledger.product_units
+       where product_id = $1 and is_base = false`,
+      [productId],
+    );
+    expect(nonBase.rows[0]?.c).toBe('2');
+  });
+
+  it('atomically rolls back business writes while recording a deterministic rejection', async () => {
+    await post(access.a, '/v1/products')
+      .send(createBody({ sku: 'ATOMIC-SKU' }))
+      .expect(201);
+
+    const second = createBody({ sku: 'ATOMIC-SKU' });
+    const rejected = body(await post(access.a, '/v1/products').send(second).expect(409));
+    expect(rejected.code).toBe('PRODUCT_SKU_CONFLICT');
+
+    expect(await count('ledger.products', 'id', second.id as string)).toBe(0);
+    const baseUnitId = (second.initialBaseUnit as Record<string, unknown>).id as string;
+    expect(await count('ledger.product_units', 'id', baseUnitId)).toBe(0);
+    expect(await operationStatus(second.operationId as string)).toBe('rejected');
+    expect(await count('sync.change_events', 'entity_id', second.id as string)).toBe(0);
+    expect(await count('audit.central_audit_logs', 'entity_id', second.id as string)).toBe(0);
+  });
+
+  it('rejects a new Unit under an archived same-store parent Product (P54-D11)', async () => {
+    const productId = randomUUID();
+    await insertAdminProduct(productId, 'archived');
+    await insertAdminUnit(randomUUID(), productId, true, 'active');
+
+    const unitId = randomUUID();
+    const operationId = randomUUID();
+    const rejected = body(
+      await post(access.a, '/v1/products/units')
+        .send({
+          id: unitId,
+          operationId,
+          productId,
+          unitName: 'Carton',
+          factorNum: 2,
+          factorDen: 1,
+        })
+        .expect(409),
+    );
+    expect(rejected.code).toBe('PRODUCT_ARCHIVED');
+    expect(await count('ledger.product_units', 'id', unitId)).toBe(0);
+    expect(await operationStatus(operationId)).toBe('rejected');
+    const stillArchived = await adminPool.query<{ status: string }>(
+      `select status from ledger.products where id = $1`,
+      [productId],
+    );
+    expect(stillArchived.rows[0]?.status).toBe('archived');
+  });
+
+  it('enforces ProductUnit stale-version, foreign-target, and archived-target contracts', async () => {
+    const productId = randomUUID();
+    const unitId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, sku: 'PU-STATE' }))
+      .expect(201);
+    await post(access.a, '/v1/products/units')
+      .send({
+        id: unitId,
+        operationId: randomUUID(),
+        productId,
+        unitName: 'Carton',
+        factorNum: 6,
+        factorDen: 1,
+      })
+      .expect(201);
+
+    // Stale expectedVersion.
+    const stale = body(
+      await patch(access.a, `/v1/products/units/${unitId}`)
+        .send({ operationId: randomUUID(), expectedVersion: '2', salePriceMinor: '1' })
+        .expect(409),
+    );
+    expect(stale.code).toBe('PRODUCT_UNIT_VERSION_CONFLICT');
+
+    // Foreign store target is non-disclosing.
+    const foreign = body(
+      await patch(access.b, `/v1/products/units/${unitId}`)
+        .send({ operationId: randomUUID(), expectedVersion: '1', salePriceMinor: '1' })
+        .expect(404),
+    );
+    expect(foreign.code).toBe('PRODUCT_UNIT_NOT_FOUND');
+
+    // Archived Unit rejects ordinary update without any lifecycle change.
+    await adminPool.query(`update ledger.product_units set status = 'archived' where id = $1`, [
+      unitId,
+    ]);
+    try {
+      const archived = body(
+        await patch(access.a, `/v1/products/units/${unitId}`)
+          .send({ operationId: randomUUID(), expectedVersion: '1', salePriceMinor: '1' })
+          .expect(409),
+      );
+      expect(archived.code).toBe('PRODUCT_UNIT_ARCHIVED');
+    } finally {
+      await adminPool.query(`update ledger.product_units set status = 'active' where id = $1`, [
+        unitId,
       ]);
     }
   });
