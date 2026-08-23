@@ -5,7 +5,7 @@
 This document records Station 5 / Task 5.5 Product and ProductUnit **lifecycle safety**: archive
 and restore of Products and of base/conversion ProductUnits. It consumes the closed Task-5.1
 persistence, Task-5.2 validation, Task-5.3 read, and Task-5.4 write/idempotency contracts and the
-explicit backend-owner decisions **P55-D1 through P55-D4**. It adds no base replacement/re-basing, no
+explicit backend-owner decisions **P55-D1 through P55-D5**. It adds no base replacement/re-basing, no
 inventory, costing, accounting, sales, supplier, or money-movement behavior, no SQLite/mobile runtime
 or Sync behavior, and **no migration**. PostgreSQL constraints, forced RLS, the one-active-base
 partial unique index, and the `touch_mutable_row` version trigger remain authoritative.
@@ -38,34 +38,27 @@ the `:productId` parameter). Each request body carries exactly a client `operati
 `store_id`, `is_base`, factor, `product_id`, `archived_at`, version, or provenance. Responses reuse
 the Task-5.3 public representation plus `operationId`; server-internal fields are never exposed.
 
-## Persisted Lifecycle State vs Effective Operational Availability
+## Persisted Lifecycle State and Current-Scope Parent Gates
 
 **BACKEND-OWNER APPROVED (P55-D1):** Product archive/restore changes **Product status only** and does
 **not** cascade to ProductUnits. Consequently an archived Product may hold ProductUnits whose
 persisted `status` is still `active` (no child version increment, no child audit/change effect).
 
-The contract therefore distinguishes two things:
+The persisted child lifecycle state is the `product_units.status` row value, governed solely by
+explicit ProductUnit lifecycle commands. An `active` child under an `archived` Product therefore
+remains persisted as `active`; Task 5.5 does not silently rewrite that child state.
 
-- **Persisted child lifecycle state** — the `product_units.status` row value, governed solely by
-  explicit ProductUnit lifecycle commands.
-- **Effective operational availability** — whether a ProductUnit may be used for a **new** business
-  operation.
+**BACKEND-OWNER APPROVED (P55-D5) — narrow current-scope rule.** Task 5.5 does not define a global
+Product/ProductUnit eligibility rule for future Sales, Inventory, Costing, supplier, financial, or
+other business domains. An archived parent Product blocks only the current gates already approved:
 
-**Effective availability rule (derived from closed authority — Task-5.4 P54-D11 new-dependent gate,
-P55-D1, and lifecycle semantics):** a ProductUnit is operationally eligible for a **new** business
-operation only when
+- standalone ProductUnit creation under the closed Task-5.4 P54-D11 contract; and
+- ProductUnit restore/reactivation under P55-D3.
 
-```text
-Product.status = active
-AND ProductUnit.status = active
-AND any feature-specific structural requirement of the consuming domain
-```
-
-Thus an `active` child under an `archived` Product remains **persisted `active`** while its
-**effective operational availability is unavailable**. This is a necessary condition, stated
-conservatively: it never grants availability and never mutates child state; future
-Sales/Inventory/Costing domains may add further structural requirements but must honor this
-necessary condition. Historical and read visibility remain governed by the Task-5.3 read contract
+Eligibility for future business operations is deferred to each future domain's authoritative
+contract. Treatment of a business operation created while the Product was active, queued offline,
+and delivered after Product archival is also deferred to that domain and the applicable Sync/offline
+conflict policy. Historical and read visibility remain governed by the Task-5.3 read contract
 (Product detail still embeds active and archived Units and exposes each Unit status).
 
 ## Product Lifecycle State Machine
@@ -87,9 +80,10 @@ no-ops (see below).
 
 **ACTIVE → ARCHIVE.** Acquire the Product row `FOR UPDATE` first, then evaluate **Rule B**: if any
 active same-Product conversion Unit exists, reject; otherwise archive the base. The parent Product
-may be `active` or `archived` (**P55-D3**). Product status is unchanged; no replacement base is
-created (**P55-D2**: base archive does not force a replacement and leaves the Product active without
-an active base). Zero accounting/inventory effect.
+may be `active` or `archived` (**P55-D3**). Product status is unchanged: an active parent remains
+active, and an archived parent remains archived. No replacement base is created; under **P55-D2**,
+an active Product may therefore remain active without an active base. Zero accounting/inventory
+effect.
 
 **ARCHIVED → RESTORE.** Requires parent **Product = active**. Acquire the Product row `FOR UPDATE`
 first, restore the **same** base row, and require `expectedVersion` plus the one-active-base
@@ -200,8 +194,9 @@ independent processed-operation metadata still records the completed operation.
 | Different operations, same expectedVersion | row/version predicate                                              | one real mutation winner; the stale loser conflicts    |
 
 If a conversion restore commits before a Product archive, the Product may become `archived` while the
-conversion's persisted `status` remains `active`; this is governed by the Effective Operational
-Availability rule above and never mutates the Unit merely because the Product archived.
+conversion's persisted `status` remains `active` under P55-D1. Task 5.5 never mutates the Unit merely
+because the Product archived and, under P55-D5, does not decide the Unit's eligibility in future
+business domains.
 
 ## Accounting, Inventory, and Historical Integrity
 
@@ -210,9 +205,10 @@ transactions. They create **zero** revenue, expense, receivable, payable, cash/b
 supplier/customer payment, journal posting, inventory movement, stock adjustment, cost/COGS
 recognition, valuation, or settlement, and they never zero stock or create adjustments (no
 stock-balance precondition is introduced; inventory eligibility policy is left to future Inventory
-work). Lifecycle state changes affect operational eligibility only and never reinterpret past
-transactions. UUIDs, `product_id`, `measurement_type`, `is_base`, `factor_num`, `factor_den`,
-historical references, and stored historical snapshots/prices are preserved. There is no hard delete.
+work). Lifecycle state changes alter only master-data lifecycle state and the current create/restore
+gates defined here; they never reinterpret past transactions. UUIDs, `product_id`,
+`measurement_type`, `is_base`, `factor_num`, `factor_den`, historical references, and stored
+historical snapshots/prices are preserved. There is no hard delete.
 
 ## Error Contract
 
@@ -228,13 +224,12 @@ disclosed.
 
 ## archived_at, Migration, and PostgreSQL/SQLite Consistency
 
-The applied schema gives `products` an `archived_at` column and its
+The approved PostgreSQL reference and applied schema give `products` an `archived_at` column and its
 `(status = 'archived' ⇒ archived_at IS NOT NULL)` check; `product_units` has **no** `archived_at`, so
 ProductUnit lifecycle evidence uses `status`, `version`, timestamps/provenance, audit, change events,
 and processed operations. **No `product_units.archived_at` is added for symmetry and no migration is
-created.** (The PostgreSQL all-in-one _reference_ file carries an extra `archived_at` on
-`product_units`; this is a pre-existing reference-vs-applied delta recorded since Task 5.1 and is not
-changed here. The applied schema matches the SQLite reference, which also has no unit `archived_at`.)
+created.** The approved PostgreSQL reference, applied PostgreSQL schema, reviewed Drizzle mapping,
+and SQLite reference all omit that ProductUnit column; there is no reference-versus-applied drift.
 
 **Migration decision: NONE.** Rule A and Rule B are enforced safely at the PostgreSQL
 backend-transaction level with Product-first locking, as already proven for Rule A in Task 5.4; no
@@ -253,7 +248,8 @@ runtime and Sync reconciliation are deferred and must align their local enforcem
 Base replacement / re-basing (selecting another Unit as base, changing `is_base`, changing or
 reinterpreting factors, converting a conversion Unit into a base, replacement-base workflows);
 inventory, stock, costing, accounting, sales, supplier, and money-movement workflows and their
-operational-eligibility policies; the SQLite/mobile runtime, Sync, and multi-device conflict
-resolution; Station-5 query-privacy/documentation closure (Task 5.6). A separately reviewed forward
-PostgreSQL migration for database-level Rule-A/Rule-B enforcement may be considered later only if a
-future authoritative design requires it.
+operational-eligibility policies; delayed offline operations delivered after Product archival; the
+SQLite/mobile runtime, Sync, and multi-device conflict resolution; Station-5
+query-privacy/documentation closure (Task 5.6). A separately reviewed forward PostgreSQL migration
+for database-level Rule-A/Rule-B enforcement may be considered later only if a future authoritative
+design requires it.
