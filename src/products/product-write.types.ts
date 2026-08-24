@@ -74,6 +74,24 @@ export interface PreparedProductUnitUpdate {
   requestHash: string;
 }
 
+export type ProductLifecycleAction = 'archive' | 'restore';
+
+export interface PreparedProductLifecycle {
+  productId: string;
+  operationId: string;
+  expectedVersion: bigint;
+  action: ProductLifecycleAction;
+  requestHash: string;
+}
+
+export interface PreparedProductUnitLifecycle {
+  unitId: string;
+  operationId: string;
+  expectedVersion: bigint;
+  action: ProductLifecycleAction;
+  requestHash: string;
+}
+
 export type ProductMutationFailureCode =
   | 'CONFLICT'
   | 'PRODUCT_NOT_FOUND'

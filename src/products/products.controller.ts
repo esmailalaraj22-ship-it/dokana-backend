@@ -1,9 +1,22 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateProductUnitDto } from './dto/create-product-unit.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ProductLifecycleDto } from './dto/product-lifecycle.dto';
 import { ProductIdParamDto } from './dto/product-id-param.dto';
 import { ProductUnitIdParamDto } from './dto/product-unit-id-param.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -55,6 +68,66 @@ export class ProductsController {
       request.principal,
       request.tenantContext,
       params.unitId,
+      body,
+    );
+  }
+
+  @Post('units/:unitId/archive')
+  @HttpCode(HttpStatus.OK)
+  archiveUnit(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ProductUnitIdParamDto,
+    @Body() body: ProductLifecycleDto,
+  ): Promise<ProductUnitMutationResponse> {
+    return this.productWrites.archiveUnit(
+      request.principal,
+      request.tenantContext,
+      params.unitId,
+      body,
+    );
+  }
+
+  @Post('units/:unitId/restore')
+  @HttpCode(HttpStatus.OK)
+  restoreUnit(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ProductUnitIdParamDto,
+    @Body() body: ProductLifecycleDto,
+  ): Promise<ProductUnitMutationResponse> {
+    return this.productWrites.restoreUnit(
+      request.principal,
+      request.tenantContext,
+      params.unitId,
+      body,
+    );
+  }
+
+  @Post(':productId/archive')
+  @HttpCode(HttpStatus.OK)
+  archive(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ProductIdParamDto,
+    @Body() body: ProductLifecycleDto,
+  ): Promise<ProductMutationResponse> {
+    return this.productWrites.archiveProduct(
+      request.principal,
+      request.tenantContext,
+      params.productId,
+      body,
+    );
+  }
+
+  @Post(':productId/restore')
+  @HttpCode(HttpStatus.OK)
+  restore(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ProductIdParamDto,
+    @Body() body: ProductLifecycleDto,
+  ): Promise<ProductMutationResponse> {
+    return this.productWrites.restoreProduct(
+      request.principal,
+      request.tenantContext,
+      params.productId,
       body,
     );
   }

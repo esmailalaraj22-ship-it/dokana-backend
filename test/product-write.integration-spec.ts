@@ -16,6 +16,8 @@ import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-t
 
 const environment = readLocalPostgresTestEnvironment();
 
+jest.setTimeout(30_000);
+
 const fixture = {
   stores: {
     a: '55040000-0000-4000-8000-000000000001',
@@ -639,12 +641,16 @@ describe('Product write API with real PostgreSQL', () => {
     return BigInt(value);
   }
 
-  async function insertAdminProduct(id: string, status: 'active' | 'archived'): Promise<void> {
+  async function insertAdminProduct(
+    id: string,
+    status: 'active' | 'archived',
+    storeId = fixture.stores.a,
+  ): Promise<void> {
     await adminPool.query(
       `insert into ledger.products
         (id, store_id, name, normalized_name, measurement_type, operation_id, status, archived_at)
        values ($1, $2, 'Admin Product', 'admin product', 'count', $3, $4, $5)`,
-      [id, fixture.stores.a, randomUUID(), status, status === 'archived' ? new Date() : null],
+      [id, storeId, randomUUID(), status, status === 'archived' ? new Date() : null],
     );
   }
 
@@ -653,6 +659,7 @@ describe('Product write API with real PostgreSQL', () => {
     productId: string,
     isBase: boolean,
     status: 'active' | 'archived',
+    storeId = fixture.stores.a,
   ): Promise<void> {
     await adminPool.query(
       `insert into ledger.product_units
@@ -661,7 +668,7 @@ describe('Product write API with real PostgreSQL', () => {
        values ($1, $2, $3, 'count', $4, $5, $6, 1, $7, $8)`,
       [
         id,
-        fixture.stores.a,
+        storeId,
         productId,
         `Unit ${id.slice(0, 8)}`,
         isBase,
@@ -670,6 +677,98 @@ describe('Product write API with real PostgreSQL', () => {
         status,
       ],
     );
+  }
+
+  async function entityEffects(entityId: string): Promise<{ audits: number; changes: number }> {
+    return {
+      audits: await count('audit.central_audit_logs', 'entity_id', entityId),
+      changes: await count('sync.change_events', 'entity_id', entityId),
+    };
+  }
+
+  async function accountingInventoryEffects(storeId: string): Promise<Record<string, number>> {
+    const result = await adminPool.query<{
+      inventoryMovements: string;
+      moneyMovements: string;
+      purchaseItems: string;
+      saleItems: string;
+      stockBalances: string;
+    }>(
+      `select
+         (select count(*) from ledger.inventory_movements where store_id = $1)::text
+           as "inventoryMovements",
+         (select count(*) from ledger.stock_balances where store_id = $1)::text
+           as "stockBalances",
+         (select count(*) from ledger.money_movements where store_id = $1)::text
+           as "moneyMovements",
+         (select count(*) from ledger.sale_items where store_id = $1)::text as "saleItems",
+         (select count(*) from ledger.purchase_items where store_id = $1)::text as "purchaseItems"`,
+      [storeId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error('Accounting and inventory effect counts were not returned.');
+    }
+    return {
+      inventoryMovements: Number(row.inventoryMovements),
+      stockBalances: Number(row.stockBalances),
+      moneyMovements: Number(row.moneyMovements),
+      saleItems: Number(row.saleItems),
+      purchaseItems: Number(row.purchaseItems),
+    };
+  }
+
+  async function waitForBlockedProductLocks(expected: number): Promise<void> {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      const result = await adminPool.query<{ count: string }>(
+        `select count(*)::text as count
+         from pg_stat_activity
+         where datname = current_database()
+           and pid <> pg_backend_pid()
+           and wait_event_type = 'Lock'
+           and query ilike '%products%'
+           and query ilike '%for update%'
+           and query not ilike '%pg_stat_activity%'`,
+      );
+      if (Number(result.rows[0]?.count ?? '0') >= expected) {
+        return;
+      }
+      await adminPool.query(`select pg_sleep(0.01)`);
+    }
+    throw new Error(`Timed out waiting for ${String(expected)} blocked Product row locks.`);
+  }
+
+  async function runInProductLockOrder<T, U>(
+    productId: string,
+    first: () => Promise<T>,
+    second: () => Promise<U>,
+  ): Promise<[T, U]> {
+    const blocker = await adminPool.connect();
+    let transactionOpen = false;
+    let firstPending: Promise<T> | undefined;
+    let secondPending: Promise<U> | undefined;
+    try {
+      await blocker.query('begin');
+      transactionOpen = true;
+      await blocker.query(`select id from ledger.products where id = $1 for update`, [productId]);
+      firstPending = first();
+      await waitForBlockedProductLocks(1);
+      secondPending = second();
+      await waitForBlockedProductLocks(2);
+      await blocker.query('commit');
+      transactionOpen = false;
+      return await Promise.all([firstPending, secondPending]);
+    } catch (error) {
+      if (transactionOpen) {
+        await blocker.query('rollback');
+      }
+      await Promise.allSettled(
+        [firstPending, secondPending].filter((value) => value !== undefined),
+      );
+      throw error;
+    } finally {
+      blocker.release();
+    }
   }
 
   it('serializes concurrent identical create operations into a single business effect', async () => {
@@ -1112,5 +1211,684 @@ describe('Product write API with real PostgreSQL', () => {
         unitId,
       ]);
     }
+  });
+
+  it('implements Product archive, restore, replay, stale, no-op, and no-cascade semantics', async () => {
+    const productId = randomUUID();
+    const baseUnitId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, unitId: baseUnitId, sku: 'P55-PRODUCT' }))
+      .expect(201);
+    const nonLifecycleEffectsBefore = await accountingInventoryEffects(fixture.stores.a);
+
+    const unitBefore = await adminPool.query<{
+      status: string;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select status, updated_at as "updatedAt", version::text as version
+       from ledger.product_units where id = $1`,
+      [baseUnitId],
+    );
+    const effectsBefore = await entityEffects(productId);
+    const archiveRequest = { operationId: randomUUID(), expectedVersion: '1' };
+    const archived = body(
+      await post(access.a, `/v1/products/${productId}/archive`).send(archiveRequest).expect(200),
+    );
+    expect(archived).toMatchObject({
+      id: productId,
+      operationId: archiveRequest.operationId,
+      status: 'archived',
+      version: '2',
+    });
+    expect(typeof archived.archivedAt).toBe('string');
+    expect(await entityEffects(productId)).toEqual({
+      audits: effectsBefore.audits + 1,
+      changes: effectsBefore.changes + 1,
+    });
+    const unitAfterArchive = await adminPool.query<{
+      status: string;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select status, updated_at as "updatedAt", version::text as version
+       from ledger.product_units where id = $1`,
+      [baseUnitId],
+    );
+    expect(unitAfterArchive.rows).toEqual(unitBefore.rows);
+
+    const replay = body(
+      await post(access.a, `/v1/products/${productId}/archive`).send(archiveRequest).expect(200),
+    );
+    expect(replay).toEqual(archived);
+
+    const rowBeforeNoOp = await adminPool.query<{
+      archivedAt: Date;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select archived_at as "archivedAt", updated_at as "updatedAt", version::text as version
+       from ledger.products where id = $1`,
+      [productId],
+    );
+    const effectsBeforeNoOp = await entityEffects(productId);
+    const noOpId = randomUUID();
+    const noOp = body(
+      await post(access.a, `/v1/products/${productId}/archive`)
+        .send({ operationId: noOpId, expectedVersion: '2' })
+        .expect(200),
+    );
+    expect(noOp).toMatchObject({ status: 'archived', version: '2', operationId: noOpId });
+    const rowAfterNoOp = await adminPool.query<{
+      archivedAt: Date;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select archived_at as "archivedAt", updated_at as "updatedAt", version::text as version
+       from ledger.products where id = $1`,
+      [productId],
+    );
+    expect(rowAfterNoOp.rows).toEqual(rowBeforeNoOp.rows);
+    expect(await entityEffects(productId)).toEqual(effectsBeforeNoOp);
+    expect(await operationStatus(noOpId)).toBe('applied');
+
+    const staleId = randomUUID();
+    const stale = body(
+      await post(access.a, `/v1/products/${productId}/archive`)
+        .send({ operationId: staleId, expectedVersion: '1' })
+        .expect(409),
+    );
+    expect(stale.code).toBe('PRODUCT_VERSION_CONFLICT');
+    expect(await operationStatus(staleId)).toBe('rejected');
+
+    const actionReuse = body(
+      await post(access.a, `/v1/products/${productId}/restore`)
+        .send({ operationId: archiveRequest.operationId, expectedVersion: '2' })
+        .expect(409),
+    );
+    expect(actionReuse.code).toBe('OPERATION_ID_CONFLICT');
+
+    const restoreRequest = { operationId: randomUUID(), expectedVersion: '2' };
+    const restored = body(
+      await post(access.a, `/v1/products/${productId}/restore`).send(restoreRequest).expect(200),
+    );
+    expect(restored).toMatchObject({ status: 'active', version: '3' });
+    expect(restored.archivedAt).toBeNull();
+
+    const noUnitProductId = randomUUID();
+    await insertAdminProduct(noUnitProductId, 'active');
+    await post(access.a, `/v1/products/${noUnitProductId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+    const noUnitRestored = body(
+      await post(access.a, `/v1/products/${noUnitProductId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '2' })
+        .expect(200),
+    );
+    expect(noUnitRestored).toMatchObject({ status: 'active', version: '3', units: [] });
+    expect(await accountingInventoryEffects(fixture.stores.a)).toEqual(nonLifecycleEffectsBefore);
+  });
+
+  it('implements base Unit lifecycle and enforces archived-parent restore precedence (C1)', async () => {
+    const productId = randomUUID();
+    const baseUnitId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, unitId: baseUnitId, sku: 'P55-BASE' }))
+      .expect(201);
+
+    const archivedBase = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(200),
+    );
+    expect(archivedBase).toMatchObject({ status: 'archived', version: '2', isBase: true });
+    const restoredBase = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '2' })
+        .expect(200),
+    );
+    expect(restoredBase).toMatchObject({ status: 'active', version: '3', isBase: true });
+
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+
+    const activeNoOpRestoreId = randomUUID();
+    const activeNoOpRestore = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/restore`)
+        .send({ operationId: activeNoOpRestoreId, expectedVersion: '3' })
+        .expect(409),
+    );
+    expect(activeNoOpRestore.code).toBe('CONFLICT');
+    expect(await operationStatus(activeNoOpRestoreId)).toBe('rejected');
+
+    const archivedUnderArchivedParent = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '3' })
+        .expect(200),
+    );
+    expect(archivedUnderArchivedParent).toMatchObject({ status: 'archived', version: '4' });
+    const blockedRestore = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '4' })
+        .expect(409),
+    );
+    expect(blockedRestore.code).toBe('CONFLICT');
+
+    await post(access.a, `/v1/products/${productId}/restore`)
+      .send({ operationId: randomUUID(), expectedVersion: '2' })
+      .expect(200);
+    const finalRestore = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '4' })
+        .expect(200),
+    );
+    expect(finalRestore).toMatchObject({ status: 'active', version: '5' });
+  });
+
+  it('enforces Rule B and Rule A across base and conversion Unit lifecycle transitions', async () => {
+    const productId = randomUUID();
+    const baseUnitId = randomUUID();
+    const conversionId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, unitId: baseUnitId, sku: 'P55-RULES' }))
+      .expect(201);
+    await post(access.a, '/v1/products/units')
+      .send({
+        id: conversionId,
+        operationId: randomUUID(),
+        productId,
+        unitName: 'Carton',
+        factorNum: 12,
+        factorDen: 1,
+      })
+      .expect(201);
+
+    const baseEffects = await entityEffects(baseUnitId);
+    const blockedArchiveId = randomUUID();
+    const blockedArchive = body(
+      await post(access.a, `/v1/products/units/${baseUnitId}/archive`)
+        .send({ operationId: blockedArchiveId, expectedVersion: '1' })
+        .expect(409),
+    );
+    expect(blockedArchive.code).toBe('CONFLICT');
+    expect(await operationStatus(blockedArchiveId)).toBe('rejected');
+    expect(await entityEffects(baseUnitId)).toEqual(baseEffects);
+
+    await post(access.a, `/v1/products/units/${conversionId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+    await post(access.a, `/v1/products/units/${baseUnitId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+
+    const missingBase = body(
+      await post(access.a, `/v1/products/units/${conversionId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '2' })
+        .expect(409),
+    );
+    expect(missingBase.code).toBe('PRODUCT_BASE_UNIT_REQUIRED');
+
+    await post(access.a, `/v1/products/units/${baseUnitId}/restore`)
+      .send({ operationId: randomUUID(), expectedVersion: '2' })
+      .expect(200);
+    await post(access.a, `/v1/products/units/${conversionId}/restore`)
+      .send({ operationId: randomUUID(), expectedVersion: '2' })
+      .expect(200);
+
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+    const parentBlockedNoOp = body(
+      await post(access.a, `/v1/products/units/${conversionId}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '3' })
+        .expect(409),
+    );
+    expect(parentBlockedNoOp.code).toBe('CONFLICT');
+    const archivedConversion = body(
+      await post(access.a, `/v1/products/units/${conversionId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '3' })
+        .expect(200),
+    );
+    expect(archivedConversion).toMatchObject({ status: 'archived', version: '4' });
+
+    const invalidLegacyProduct = randomUUID();
+    const invalidLegacyBase = randomUUID();
+    const invalidLegacyConversion = randomUUID();
+    await insertAdminProduct(invalidLegacyProduct, 'active');
+    await insertAdminUnit(invalidLegacyBase, invalidLegacyProduct, true, 'archived');
+    await insertAdminUnit(invalidLegacyConversion, invalidLegacyProduct, false, 'active');
+    const structuralNoOp = body(
+      await post(access.a, `/v1/products/units/${invalidLegacyConversion}/restore`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(409),
+    );
+    expect(structuralNoOp.code).toBe('PRODUCT_BASE_UNIT_REQUIRED');
+  });
+
+  it('persists ProductUnit semantic no-ops without resource effects and isolates operation identity', async () => {
+    const productId = randomUUID();
+    const firstUnitId = randomUUID();
+    const secondUnitId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, unitId: firstUnitId, sku: 'P55-UNIT-IDEMP' }))
+      .expect(201);
+    await insertAdminUnit(secondUnitId, productId, true, 'archived');
+
+    const archiveRequest = { operationId: randomUUID(), expectedVersion: '1' };
+    const archived = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/archive`)
+        .send(archiveRequest)
+        .expect(200),
+    );
+    const replay = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/archive`)
+        .send(archiveRequest)
+        .expect(200),
+    );
+    expect(replay).toEqual(archived);
+
+    const rowBeforeNoOp = await adminPool.query<{
+      operationId: string;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select operation_id as "operationId", updated_at as "updatedAt", version::text as version
+       from ledger.product_units where id = $1`,
+      [firstUnitId],
+    );
+    const effectsBeforeNoOp = await entityEffects(firstUnitId);
+    const noOpId = randomUUID();
+    const noOp = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/archive`)
+        .send({ operationId: noOpId, expectedVersion: '2' })
+        .expect(200),
+    );
+    expect(noOp).toMatchObject({ status: 'archived', version: '2', operationId: noOpId });
+    const rowAfterNoOp = await adminPool.query<{
+      operationId: string;
+      updatedAt: Date;
+      version: string;
+    }>(
+      `select operation_id as "operationId", updated_at as "updatedAt", version::text as version
+       from ledger.product_units where id = $1`,
+      [firstUnitId],
+    );
+    expect(rowAfterNoOp.rows).toEqual(rowBeforeNoOp.rows);
+    expect(await entityEffects(firstUnitId)).toEqual(effectsBeforeNoOp);
+    expect(await operationStatus(noOpId)).toBe('applied');
+
+    const staleNoOp = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(409),
+    );
+    expect(staleNoOp.code).toBe('PRODUCT_UNIT_VERSION_CONFLICT');
+
+    const changedRequest = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/archive`)
+        .send({ operationId: archiveRequest.operationId, expectedVersion: '2' })
+        .expect(409),
+    );
+    expect(changedRequest.code).toBe('OPERATION_ID_CONFLICT');
+    const changedAction = body(
+      await post(access.a, `/v1/products/units/${firstUnitId}/restore`)
+        .send({ operationId: archiveRequest.operationId, expectedVersion: '2' })
+        .expect(409),
+    );
+    expect(changedAction.code).toBe('OPERATION_ID_CONFLICT');
+    const changedTarget = body(
+      await post(access.a, `/v1/products/units/${secondUnitId}/archive`)
+        .send({ operationId: archiveRequest.operationId, expectedVersion: '1' })
+        .expect(409),
+    );
+    expect(changedTarget.code).toBe('OPERATION_ID_CONFLICT');
+  });
+
+  it('enforces lifecycle authentication, owner authority, tenant privacy, strict DTOs, and read_only replay', async () => {
+    const productId = randomUUID();
+    const baseUnitId = randomUUID();
+    await post(access.a, '/v1/products')
+      .send(createBody({ id: productId, unitId: baseUnitId, sku: 'P55-SECURITY' }))
+      .expect(201);
+
+    await request(server)
+      .post(`/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(401);
+    const viewer = body(
+      await post(access.viewer, `/v1/products/${productId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(403),
+    );
+    expect(viewer.code).toBe('PRODUCT_WRITE_NOT_ALLOWED');
+
+    const foreignProduct = body(
+      await post(access.b, `/v1/products/${productId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(404),
+    );
+    expect(foreignProduct.code).toBe('PRODUCT_NOT_FOUND');
+    const foreignUnit = body(
+      await post(access.b, `/v1/products/units/${baseUnitId}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(404),
+    );
+    expect(foreignUnit.code).toBe('PRODUCT_UNIT_NOT_FOUND');
+
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1', storeId: fixture.stores.b })
+      .expect(400);
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1', status: 'archived' })
+      .expect(400);
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID() })
+      .expect(400);
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ expectedVersion: '1' })
+      .expect(400);
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: 'not-a-uuid', expectedVersion: '1' })
+      .expect(400);
+    await post(access.a, `/v1/products/${productId}/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '0' })
+      .expect(400);
+    await post(access.a, `/v1/products/not-a-uuid/archive`)
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(400);
+    await request(server)
+      .delete(`/v1/products/${productId}`)
+      .set('authorization', `Bearer ${access.a.accessToken}`)
+      .expect(404);
+
+    const readOnlyProduct = randomUUID();
+    await insertAdminProduct(readOnlyProduct, 'active', fixture.stores.readOnly);
+    const readOnly = body(
+      await post(access.readOnly, `/v1/products/${readOnlyProduct}/archive`)
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(403),
+    );
+    expect(readOnly.code).toBe('BUSINESS_WRITE_NOT_ALLOWED');
+
+    const flipProduct = randomUUID();
+    await post(access.flip, '/v1/products')
+      .send(createBody({ id: flipProduct, sku: 'P55-READ-ONLY-REPLAY' }))
+      .expect(201);
+    const archiveRequest = { operationId: randomUUID(), expectedVersion: '1' };
+    const first = body(
+      await post(access.flip, `/v1/products/${flipProduct}/archive`)
+        .send(archiveRequest)
+        .expect(200),
+    );
+    await adminPool.query(`update ledger.stores set status = 'read_only' where id = $1`, [
+      fixture.stores.flip,
+    ]);
+    try {
+      const replay = body(
+        await post(access.flip, `/v1/products/${flipProduct}/archive`)
+          .send(archiveRequest)
+          .expect(200),
+      );
+      expect(replay).toEqual(first);
+      const blocked = body(
+        await post(access.flip, `/v1/products/${flipProduct}/restore`)
+          .send({ operationId: randomUUID(), expectedVersion: '2' })
+          .expect(403),
+      );
+      expect(blocked.code).toBe('BUSINESS_WRITE_NOT_ALLOWED');
+    } finally {
+      await adminPool.query(`update ledger.stores set status = 'active' where id = $1`, [
+        fixture.stores.flip,
+      ]);
+    }
+  });
+
+  it('serializes conversion create versus base archive in both lock orders', async () => {
+    const createFirstProduct = randomUUID();
+    const createFirstBase = randomUUID();
+    await insertAdminProduct(createFirstProduct, 'active');
+    await insertAdminUnit(createFirstBase, createFirstProduct, true, 'active');
+    const conversionId = randomUUID();
+    const [created, blockedArchive] = await runInProductLockOrder(
+      createFirstProduct,
+      async () =>
+        await post(access.a, '/v1/products/units').send({
+          id: conversionId,
+          operationId: randomUUID(),
+          productId: createFirstProduct,
+          unitName: 'Create First',
+          factorNum: 2,
+          factorDen: 1,
+        }),
+      async () =>
+        await post(access.a, `/v1/products/units/${createFirstBase}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(created.status).toBe(201);
+    expect(blockedArchive.status).toBe(409);
+    expect(body(blockedArchive).code).toBe('CONFLICT');
+
+    const archiveFirstProduct = randomUUID();
+    const archiveFirstBase = randomUUID();
+    await insertAdminProduct(archiveFirstProduct, 'active');
+    await insertAdminUnit(archiveFirstBase, archiveFirstProduct, true, 'active');
+    const blockedConversionId = randomUUID();
+    const [archived, blockedCreate] = await runInProductLockOrder(
+      archiveFirstProduct,
+      async () =>
+        await post(access.a, `/v1/products/units/${archiveFirstBase}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, '/v1/products/units').send({
+          id: blockedConversionId,
+          operationId: randomUUID(),
+          productId: archiveFirstProduct,
+          unitName: 'Archive First',
+          factorNum: 2,
+          factorDen: 1,
+        }),
+    );
+    expect(archived.status).toBe(200);
+    expect(blockedCreate.status).toBe(409);
+    expect(body(blockedCreate).code).toBe('PRODUCT_BASE_UNIT_REQUIRED');
+    expect(await count('ledger.product_units', 'id', blockedConversionId)).toBe(0);
+  });
+
+  it('serializes conversion restore versus base archive in both lock orders', async () => {
+    const restoreFirstProduct = randomUUID();
+    const restoreFirstBase = randomUUID();
+    const restoreFirstConversion = randomUUID();
+    await insertAdminProduct(restoreFirstProduct, 'active');
+    await insertAdminUnit(restoreFirstBase, restoreFirstProduct, true, 'active');
+    await insertAdminUnit(restoreFirstConversion, restoreFirstProduct, false, 'archived');
+    const [restored, blockedArchive] = await runInProductLockOrder(
+      restoreFirstProduct,
+      async () =>
+        await post(access.a, `/v1/products/units/${restoreFirstConversion}/restore`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, `/v1/products/units/${restoreFirstBase}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(restored.status).toBe(200);
+    expect(blockedArchive.status).toBe(409);
+    expect(body(blockedArchive).code).toBe('CONFLICT');
+
+    const archiveFirstProduct = randomUUID();
+    const archiveFirstBase = randomUUID();
+    const archiveFirstConversion = randomUUID();
+    await insertAdminProduct(archiveFirstProduct, 'active');
+    await insertAdminUnit(archiveFirstBase, archiveFirstProduct, true, 'active');
+    await insertAdminUnit(archiveFirstConversion, archiveFirstProduct, false, 'archived');
+    const [archived, blockedRestore] = await runInProductLockOrder(
+      archiveFirstProduct,
+      async () =>
+        await post(access.a, `/v1/products/units/${archiveFirstBase}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, `/v1/products/units/${archiveFirstConversion}/restore`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(archived.status).toBe(200);
+    expect(blockedRestore.status).toBe(409);
+    expect(body(blockedRestore).code).toBe('PRODUCT_BASE_UNIT_REQUIRED');
+  });
+
+  it('serializes competing base restores and preserves one active base', async () => {
+    for (const reverse of [false, true]) {
+      const productId = randomUUID();
+      const firstBase = randomUUID();
+      const secondBase = randomUUID();
+      await insertAdminProduct(productId, 'active');
+      await insertAdminUnit(firstBase, productId, true, 'archived');
+      await insertAdminUnit(secondBase, productId, true, 'archived');
+      const firstTarget = reverse ? secondBase : firstBase;
+      const secondTarget = reverse ? firstBase : secondBase;
+      const [winner, loser] = await runInProductLockOrder(
+        productId,
+        async () =>
+          await post(access.a, `/v1/products/units/${firstTarget}/restore`).send({
+            operationId: randomUUID(),
+            expectedVersion: '1',
+          }),
+        async () =>
+          await post(access.a, `/v1/products/units/${secondTarget}/restore`).send({
+            operationId: randomUUID(),
+            expectedVersion: '1',
+          }),
+      );
+      expect(winner.status).toBe(200);
+      expect(loser.status).toBe(409);
+      expect(body(loser).code).toBe('CONFLICT');
+      const activeBases = await adminPool.query<{ count: string }>(
+        `select count(*)::text as count from ledger.product_units
+         where product_id = $1 and is_base = true and status = 'active'`,
+        [productId],
+      );
+      expect(activeBases.rows[0]?.count).toBe('1');
+    }
+  });
+
+  it('serializes Product archive versus Unit restore in both lock orders', async () => {
+    const restoreFirstProduct = randomUUID();
+    const restoreFirstBase = randomUUID();
+    const restoreFirstConversion = randomUUID();
+    await insertAdminProduct(restoreFirstProduct, 'active');
+    await insertAdminUnit(restoreFirstBase, restoreFirstProduct, true, 'active');
+    await insertAdminUnit(restoreFirstConversion, restoreFirstProduct, false, 'archived');
+    const [restored, archived] = await runInProductLockOrder(
+      restoreFirstProduct,
+      async () =>
+        await post(access.a, `/v1/products/units/${restoreFirstConversion}/restore`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, `/v1/products/${restoreFirstProduct}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(restored.status).toBe(200);
+    expect(archived.status).toBe(200);
+    const restoreFirstState = await adminPool.query<{ product: string; unit: string }>(
+      `select p.status as product, u.status as unit
+       from ledger.products p join ledger.product_units u on u.product_id = p.id
+       where p.id = $1 and u.id = $2`,
+      [restoreFirstProduct, restoreFirstConversion],
+    );
+    expect(restoreFirstState.rows).toEqual([{ product: 'archived', unit: 'active' }]);
+
+    const archiveFirstProduct = randomUUID();
+    const archiveFirstBase = randomUUID();
+    const archiveFirstConversion = randomUUID();
+    await insertAdminProduct(archiveFirstProduct, 'active');
+    await insertAdminUnit(archiveFirstBase, archiveFirstProduct, true, 'active');
+    await insertAdminUnit(archiveFirstConversion, archiveFirstProduct, false, 'archived');
+    const [productArchived, restoreBlocked] = await runInProductLockOrder(
+      archiveFirstProduct,
+      async () =>
+        await post(access.a, `/v1/products/${archiveFirstProduct}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, `/v1/products/units/${archiveFirstConversion}/restore`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(productArchived.status).toBe(200);
+    expect(restoreBlocked.status).toBe(409);
+    expect(body(restoreBlocked).code).toBe('CONFLICT');
+  });
+
+  it('serializes same-operation replay and distinct same-version lifecycle operations exactly', async () => {
+    const replayProduct = randomUUID();
+    await insertAdminProduct(replayProduct, 'active');
+    const requestBody = { operationId: randomUUID(), expectedVersion: '1' };
+    const effectsBefore = await entityEffects(replayProduct);
+    const [first, second] = await runBehindOperationBarrier(() =>
+      Promise.all([
+        post(access.a, `/v1/products/${replayProduct}/archive`).send(requestBody),
+        post(access.a, `/v1/products/${replayProduct}/archive`).send(requestBody),
+      ]),
+    );
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(body(first)).toEqual(body(second));
+    expect(await entityEffects(replayProduct)).toEqual({
+      audits: effectsBefore.audits + 1,
+      changes: effectsBefore.changes + 1,
+    });
+    expect(await operationStatus(requestBody.operationId)).toBe('applied');
+
+    const competingProduct = randomUUID();
+    await insertAdminProduct(competingProduct, 'active');
+    const [winner, staleLoser] = await runInProductLockOrder(
+      competingProduct,
+      async () =>
+        await post(access.a, `/v1/products/${competingProduct}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+      async () =>
+        await post(access.a, `/v1/products/${competingProduct}/archive`).send({
+          operationId: randomUUID(),
+          expectedVersion: '1',
+        }),
+    );
+    expect(winner.status).toBe(200);
+    expect(staleLoser.status).toBe(409);
+    expect(body(staleLoser).code).toBe('PRODUCT_VERSION_CONFLICT');
+    const finalVersion = await adminPool.query<{ version: string }>(
+      `select version::text as version from ledger.products where id = $1`,
+      [competingProduct],
+    );
+    expect(finalVersion.rows[0]?.version).toBe('2');
+  });
+
+  it('leaves no test-created idle-in-transaction PostgreSQL session', async () => {
+    const result = await adminPool.query<{ count: string }>(
+      `select count(*)::text as count
+       from pg_stat_activity
+       where datname = current_database()
+         and pid <> pg_backend_pid()
+         and state = 'idle in transaction'
+         and application_name like 'dokana-task54-%'`,
+    );
+    expect(result.rows[0]?.count).toBe('0');
   });
 });

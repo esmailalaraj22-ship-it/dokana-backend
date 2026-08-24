@@ -4,7 +4,9 @@ import type { TenantTransactionContext } from '../database/database.types';
 import { ProductWriteService } from './product-write.service';
 import type { ProductWriteRepository } from './product-write.repository';
 import type {
+  PreparedProductLifecycle,
   PreparedProductCreate,
+  PreparedProductUnitLifecycle,
   PreparedProductUnitCreate,
   PreparedProductUpdate,
   ProductMutationResponse,
@@ -13,6 +15,7 @@ import type {
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
 import type { CreateProductUnitDto } from './dto/create-product-unit.dto';
+import type { ProductLifecycleDto } from './dto/product-lifecycle.dto';
 import type { UpdateProductUnitDto } from './dto/update-product-unit.dto';
 
 const context: TenantTransactionContext = {
@@ -36,6 +39,8 @@ function buildService(): {
     updateProduct: jest.Mock;
     createUnit: jest.Mock;
     updateUnit: jest.Mock;
+    changeProductLifecycle: jest.Mock;
+    changeUnitLifecycle: jest.Mock;
   };
 } {
   const okProduct = { ok: true, response: {} as ProductMutationResponse };
@@ -45,6 +50,8 @@ function buildService(): {
     updateProduct: jest.fn().mockResolvedValue(okProduct),
     createUnit: jest.fn().mockResolvedValue(okUnit),
     updateUnit: jest.fn().mockResolvedValue(okUnit),
+    changeProductLifecycle: jest.fn().mockResolvedValue(okProduct),
+    changeUnitLifecycle: jest.fn().mockResolvedValue(okUnit),
   };
   const service = new ProductWriteService(repository as unknown as ProductWriteRepository);
   return { service, repository };
@@ -225,5 +232,76 @@ describe('ProductWriteService', () => {
     await expect(
       service.updateUnit(ownerPrincipal, context, baseCreateDto.initialBaseUnit.id, dto),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('prepares canonical and action-separated Product lifecycle requests', async () => {
+    const { service, repository } = buildService();
+    const dto: ProductLifecycleDto = {
+      operationId: 'EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEEEEEE',
+      expectedVersion: '7',
+    };
+
+    await service.archiveProduct(ownerPrincipal, context, baseCreateDto.id, dto);
+    await service.restoreProduct(ownerPrincipal, context, baseCreateDto.id, dto);
+
+    const archive = preparedArg(repository.changeProductLifecycle, 0) as PreparedProductLifecycle;
+    const restore = preparedArg(repository.changeProductLifecycle, 1) as PreparedProductLifecycle;
+    expect(archive).toMatchObject({
+      productId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      expectedVersion: 7n,
+      action: 'archive',
+    });
+    expect(archive.requestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(restore.action).toBe('restore');
+    expect(restore.requestHash).not.toBe(archive.requestHash);
+  });
+
+  it('prepares canonical and action-separated ProductUnit lifecycle requests', async () => {
+    const { service, repository } = buildService();
+    const dto: ProductLifecycleDto = {
+      operationId: 'EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEEEEEE',
+      expectedVersion: '9',
+    };
+
+    await service.archiveUnit(ownerPrincipal, context, baseCreateDto.initialBaseUnit.id, dto);
+    await service.restoreUnit(ownerPrincipal, context, baseCreateDto.initialBaseUnit.id, dto);
+
+    const archive = preparedArg(repository.changeUnitLifecycle, 0) as PreparedProductUnitLifecycle;
+    const restore = preparedArg(repository.changeUnitLifecycle, 1) as PreparedProductUnitLifecycle;
+    expect(archive).toMatchObject({
+      unitId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      operationId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      expectedVersion: 9n,
+      action: 'archive',
+    });
+    expect(archive.requestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(restore.action).toBe('restore');
+    expect(restore.requestHash).not.toBe(archive.requestHash);
+  });
+
+  it('enforces owner authorization for lifecycle writes', async () => {
+    const { service } = buildService();
+    const dto: ProductLifecycleDto = {
+      operationId: 'EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEEEEEE',
+      expectedVersion: '1',
+    };
+
+    await expect(
+      service.archiveProduct(
+        { ...ownerPrincipal, membershipRole: 'viewer' },
+        context,
+        baseCreateDto.id,
+        dto,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.restoreUnit(
+        { ...ownerPrincipal, storeId: '99999999-9999-4999-8999-999999999999' },
+        context,
+        baseCreateDto.initialBaseUnit.id,
+        dto,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

@@ -34,13 +34,17 @@ import type {
   ProductMutationResponse,
   ProductMutationResult,
   ProductUnitMutationResponse,
+  ProductLifecycleAction,
   PreparedProductCreate,
+  PreparedProductLifecycle,
   PreparedProductUnitCreate,
+  PreparedProductUnitLifecycle,
   PreparedProductUnitUpdate,
   PreparedProductUpdate,
 } from './product-write.types';
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { CreateProductUnitDto } from './dto/create-product-unit.dto';
+import type { ProductLifecycleDto } from './dto/product-lifecycle.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
 import type { UpdateProductUnitDto } from './dto/update-product-unit.dto';
 
@@ -354,6 +358,110 @@ export class ProductWriteService {
     }
 
     return this.unwrapUnit(await this.repository.updateUnit(context, input));
+  }
+
+  archiveProduct(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    productId: string,
+    dto: ProductLifecycleDto,
+  ): Promise<ProductMutationResponse> {
+    return this.changeProductLifecycle(principal, context, productId, dto, 'archive');
+  }
+
+  restoreProduct(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    productId: string,
+    dto: ProductLifecycleDto,
+  ): Promise<ProductMutationResponse> {
+    return this.changeProductLifecycle(principal, context, productId, dto, 'restore');
+  }
+
+  archiveUnit(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    unitId: string,
+    dto: ProductLifecycleDto,
+  ): Promise<ProductUnitMutationResponse> {
+    return this.changeUnitLifecycle(principal, context, unitId, dto, 'archive');
+  }
+
+  restoreUnit(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    unitId: string,
+    dto: ProductLifecycleDto,
+  ): Promise<ProductUnitMutationResponse> {
+    return this.changeUnitLifecycle(principal, context, unitId, dto, 'restore');
+  }
+
+  private async changeProductLifecycle(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    productId: string,
+    dto: ProductLifecycleDto,
+    action: ProductLifecycleAction,
+  ): Promise<ProductMutationResponse> {
+    this.assertAuthorized(principal, context);
+
+    let input: PreparedProductLifecycle;
+    try {
+      const canonicalProductId = canonicalizeProductUuid(productId, 'productId');
+      const operationId = canonicalizeProductUuid(dto.operationId, 'operationId');
+      const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+      input = {
+        productId: canonicalProductId,
+        operationId,
+        expectedVersion,
+        action,
+        requestHash: this.hashRequest({
+          v: PRODUCT_WRITE_REQUEST_VERSION,
+          action: `product.${action}`,
+          productId: canonicalProductId,
+          operationId,
+          expectedVersion: expectedVersion.toString(),
+        }),
+      };
+    } catch (error) {
+      this.rethrowValidationError(error);
+    }
+
+    return this.unwrap(await this.repository.changeProductLifecycle(context, input));
+  }
+
+  private async changeUnitLifecycle(
+    principal: ProductWritePrincipal,
+    context: TenantTransactionContext,
+    unitId: string,
+    dto: ProductLifecycleDto,
+    action: ProductLifecycleAction,
+  ): Promise<ProductUnitMutationResponse> {
+    this.assertAuthorized(principal, context);
+
+    let input: PreparedProductUnitLifecycle;
+    try {
+      const canonicalUnitId = canonicalizeProductUuid(unitId, 'id');
+      const operationId = canonicalizeProductUuid(dto.operationId, 'operationId');
+      const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+      input = {
+        unitId: canonicalUnitId,
+        operationId,
+        expectedVersion,
+        action,
+        requestHash: this.hashRequest({
+          v: PRODUCT_WRITE_REQUEST_VERSION,
+          action: `product_unit.${action}`,
+          unitId: canonicalUnitId,
+          operationId,
+          expectedVersion: expectedVersion.toString(),
+        }),
+      };
+    } catch (error) {
+      this.rethrowValidationError(error);
+    }
+
+    return this.unwrapUnit(await this.repository.changeUnitLifecycle(context, input));
   }
 
   private assertAuthorized(

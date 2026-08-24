@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 
 import { DatabaseService } from '../database/database.service';
 import { products, productUnits, stores } from '../database/schema';
@@ -18,7 +18,9 @@ import type {
   ProductMutationResult,
   ProductUnitMutationResponse,
   PreparedProductCreate,
+  PreparedProductLifecycle,
   PreparedProductUnitCreate,
+  PreparedProductUnitLifecycle,
   PreparedProductUnitUpdate,
   PreparedProductUpdate,
 } from './product-write.types';
@@ -127,7 +129,7 @@ interface MutationOperation {
   aggregateId: string;
   operationId: string;
   requestHash: string;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'archive' | 'restore';
   expectedVersion?: bigint;
 }
 
@@ -555,6 +557,280 @@ export class ProductWriteRepository {
       await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
       return { ok: true, response };
     });
+  }
+
+  changeProductLifecycle(
+    context: TenantTransactionContext,
+    input: PreparedProductLifecycle,
+  ): Promise<ProductMutationResult<ProductMutationResponse>> {
+    return this.database.withTenantTransaction(context, async (transaction) => {
+      const operation: MutationOperation = {
+        aggregateType: 'products',
+        aggregateId: input.productId,
+        operationId: input.operationId,
+        requestHash: input.requestHash,
+        action: input.action,
+        expectedVersion: input.expectedVersion,
+      };
+      const begun = await this.beginMutation(
+        transaction,
+        context,
+        operation,
+        parseStoredProductMutationResponse,
+      );
+      if (begun) {
+        return begun;
+      }
+
+      const currentRows = await transaction
+        .select(productSelection)
+        .from(products)
+        .where(and(eq(products.storeId, context.storeId), eq(products.id, input.productId)))
+        .limit(1)
+        .for('update');
+      const current = currentRows[0];
+      if (!current) {
+        const conflict = failure('PRODUCT_NOT_FOUND');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+      if (current.version !== input.expectedVersion) {
+        const conflict = failure('PRODUCT_VERSION_CONFLICT');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      const targetStatus = input.action === 'archive' ? 'archived' : 'active';
+      let product: ProductDetailRow = current;
+      if (current.status !== targetStatus) {
+        const rows = await transaction
+          .update(products)
+          .set({
+            status: targetStatus,
+            archivedAt: input.action === 'archive' ? sql`clock_timestamp()` : null,
+            deviceId: context.deviceId,
+            operationId: input.operationId,
+          })
+          .where(
+            and(
+              eq(products.storeId, context.storeId),
+              eq(products.id, input.productId),
+              eq(products.status, current.status),
+              eq(products.version, input.expectedVersion),
+            ),
+          )
+          .returning(productSelection);
+        const updated = rows[0];
+        if (!updated) {
+          throw new Error('Locked Product lifecycle update did not return a row.');
+        }
+        product = updated;
+      }
+
+      const units = await this.loadUnits(transaction, context, input.productId);
+      const response = mapProductMutationResponse(product, units, input.operationId);
+      await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+      return { ok: true, response };
+    });
+  }
+
+  changeUnitLifecycle(
+    context: TenantTransactionContext,
+    input: PreparedProductUnitLifecycle,
+  ): Promise<ProductMutationResult<ProductUnitMutationResponse>> {
+    return this.database.withTenantTransaction(context, async (transaction) => {
+      const operation: MutationOperation = {
+        aggregateType: 'product_units',
+        aggregateId: input.unitId,
+        operationId: input.operationId,
+        requestHash: input.requestHash,
+        action: input.action,
+        expectedVersion: input.expectedVersion,
+      };
+      const begun = await this.beginMutation(
+        transaction,
+        context,
+        operation,
+        parseStoredProductUnitMutationResponse,
+      );
+      if (begun) {
+        return begun;
+      }
+
+      const identityRows = await transaction
+        .select({ productId: productUnits.productId })
+        .from(productUnits)
+        .where(and(eq(productUnits.storeId, context.storeId), eq(productUnits.id, input.unitId)))
+        .limit(1);
+      const identity = identityRows[0];
+      if (!identity) {
+        const conflict = failure('PRODUCT_UNIT_NOT_FOUND');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      const productRows = await transaction
+        .select({ id: products.id, status: products.status })
+        .from(products)
+        .where(and(eq(products.storeId, context.storeId), eq(products.id, identity.productId)))
+        .limit(1)
+        .for('update');
+      const product = productRows[0];
+      if (!product) {
+        const conflict = failure('PRODUCT_UNIT_NOT_FOUND');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      const currentRows = await transaction
+        .select({ ...unitSelection, productId: productUnits.productId })
+        .from(productUnits)
+        .where(and(eq(productUnits.storeId, context.storeId), eq(productUnits.id, input.unitId)))
+        .limit(1)
+        .for('update');
+      const current = currentRows[0];
+      if (current?.productId !== product.id) {
+        const conflict = failure('PRODUCT_UNIT_NOT_FOUND');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+      if (current.version !== input.expectedVersion) {
+        const conflict = failure('PRODUCT_UNIT_VERSION_CONFLICT');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      // P55-D3 and C1: parent eligibility precedes semantic no-op classification.
+      if (input.action === 'restore' && product.status !== 'active') {
+        const conflict = failure('CONFLICT');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      const targetStatus = input.action === 'archive' ? 'archived' : 'active';
+      const structuralConflict = await this.classifyUnitLifecycleStructure(
+        transaction,
+        context,
+        current,
+        input.action,
+      );
+      if (structuralConflict) {
+        await this.rejectOperation(
+          transaction,
+          context.storeId,
+          input.operationId,
+          structuralConflict,
+        );
+        return structuralConflict;
+      }
+
+      if (current.status === targetStatus) {
+        const response = mapProductUnitMutationResponse(
+          current,
+          current.productId,
+          input.operationId,
+        );
+        await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+        return { ok: true, response };
+      }
+
+      let rows: ProductUnitRow[];
+      try {
+        rows = await transaction.transaction((savepoint) =>
+          savepoint
+            .update(productUnits)
+            .set({
+              status: targetStatus,
+              deviceId: context.deviceId,
+              operationId: input.operationId,
+            })
+            .where(
+              and(
+                eq(productUnits.storeId, context.storeId),
+                eq(productUnits.id, input.unitId),
+                eq(productUnits.status, current.status),
+                eq(productUnits.version, input.expectedVersion),
+              ),
+            )
+            .returning(unitSelection),
+        );
+      } catch (error) {
+        const conflict = this.classifyUnitConstraint(error);
+        if (!conflict) {
+          throw error;
+        }
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+      const unit = rows[0];
+      if (!unit) {
+        throw new Error('Locked Product Unit lifecycle update did not return a row.');
+      }
+
+      const response = mapProductUnitMutationResponse(unit, current.productId, input.operationId);
+      await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+      return { ok: true, response };
+    });
+  }
+
+  private async classifyUnitLifecycleStructure(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    current: ProductUnitRow & { productId: string },
+    action: 'archive' | 'restore',
+  ): Promise<FailureResult | null> {
+    if (action === 'archive') {
+      if (!current.isBase) {
+        return null;
+      }
+      const activeConversions = await transaction
+        .select({ id: productUnits.id })
+        .from(productUnits)
+        .where(
+          and(
+            eq(productUnits.storeId, context.storeId),
+            eq(productUnits.productId, current.productId),
+            eq(productUnits.isBase, false),
+            eq(productUnits.status, 'active'),
+          ),
+        )
+        .orderBy(productUnits.id)
+        .for('update');
+      return activeConversions.length > 0 ? failure('CONFLICT') : null;
+    }
+
+    if (current.isBase) {
+      const activeBases = await transaction
+        .select({ id: productUnits.id })
+        .from(productUnits)
+        .where(
+          and(
+            eq(productUnits.storeId, context.storeId),
+            eq(productUnits.productId, current.productId),
+            eq(productUnits.isBase, true),
+            eq(productUnits.status, 'active'),
+            ne(productUnits.id, current.id),
+          ),
+        )
+        .orderBy(productUnits.id)
+        .for('update');
+      return activeBases.length > 0 ? failure('CONFLICT') : null;
+    }
+
+    const activeBases = await transaction
+      .select({ id: productUnits.id })
+      .from(productUnits)
+      .where(
+        and(
+          eq(productUnits.storeId, context.storeId),
+          eq(productUnits.productId, current.productId),
+          eq(productUnits.isBase, true),
+          eq(productUnits.status, 'active'),
+        ),
+      )
+      .orderBy(productUnits.id)
+      .for('update');
+    return activeBases.length > 0 ? null : failure('PRODUCT_BASE_UNIT_REQUIRED');
   }
 
   private async beginMutation<T>(
