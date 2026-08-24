@@ -142,6 +142,59 @@ export const customers = ledgerSchema.table(
   ],
 );
 
+export const suppliers = ledgerSchema.table(
+  'suppliers',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    phone: text('phone'),
+    normalizedPhone: text('normalized_phone'),
+    notes: text('notes'),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'suppliers_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'suppliers_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('suppliers_store_id_id_key').on(table.storeId, table.id),
+    unique('suppliers_store_id_normalized_phone_key').on(table.storeId, table.normalizedPhone),
+    unique('suppliers_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('suppliers_name_check', sql`length(trim(${table.name})) > 0`),
+    check('suppliers_normalized_name_check', sql`length(trim(${table.normalizedName})) > 0`),
+    check('suppliers_status_check', sql`${table.status} in ('active', 'archived')`),
+    check(
+      'suppliers_check',
+      sql`(${table.status} = 'archived' and ${table.archivedAt} is not null) or ${table.status} = 'active'`,
+    ),
+    check('suppliers_version_check', sql`${table.version} >= 1`),
+    index('idx_suppliers_search').on(
+      table.storeId,
+      table.status,
+      table.normalizedName,
+      table.normalizedPhone,
+    ),
+  ],
+);
+
 export const products = ledgerSchema.table(
   'products',
   {
