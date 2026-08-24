@@ -3,8 +3,9 @@
 NestJS, TypeScript, Drizzle ORM, and PostgreSQL backend infrastructure for the
 Dokana offline-first SaaS application. The implemented foundation provides the
 migration ownership model, identity mappings, authentication database boundary,
-session/token lifecycle, membership authorization, device bootstrap, and the
-tenant-safe Customer read/create/update/archive/restore API.
+session/token lifecycle, membership authorization, device bootstrap, the
+tenant-safe Customer API, and Product/ProductUnit catalog APIs for read, create,
+update, archive, and restore workflows.
 
 Remaining business modules, synchronization processing, subscriptions,
 accounting, inventory, backup, and restore are not implemented yet.
@@ -167,6 +168,58 @@ and `cursor` values, including normalized, canonical-phone, and decoded cursor
 forms, must not enter application logs. Error responses also use a query-free
 path. This application boundary does not assert control over external reverse
 proxy, CDN, or collector configuration.
+
+## Product and Unit API
+
+All Product and ProductUnit routes require a verified bearer session. The server
+derives store, user, and device authority from that session; clients do not
+select the authoritative store context. The MVP routes require an active
+`owner` membership. Reads are available for `active` and `read_only` stores,
+while new catalog and lifecycle mutations require an `active` store. Missing and
+foreign-store resources use the same non-disclosing responses.
+
+| Method | Route                                | Purpose                                     |
+| ------ | ------------------------------------ | ------------------------------------------- |
+| GET    | `/v1/products`                       | List and search active or archived Products |
+| GET    | `/v1/products/:productId`            | Read a Product and its ProductUnits         |
+| POST   | `/v1/products`                       | Create a Product and initial Base Unit      |
+| PATCH  | `/v1/products/:productId`            | Update mutable Product metadata             |
+| POST   | `/v1/products/units`                 | Create a standalone conversion ProductUnit  |
+| PATCH  | `/v1/products/units/:unitId`         | Update mutable ProductUnit metadata/prices  |
+| POST   | `/v1/products/:productId/archive`    | Archive a Product                           |
+| POST   | `/v1/products/:productId/restore`    | Restore a Product                           |
+| POST   | `/v1/products/units/:unitId/archive` | Archive a ProductUnit                       |
+| POST   | `/v1/products/units/:unitId/restore` | Restore a ProductUnit                       |
+
+Product lists default to `status=active`; callers may explicitly select
+`active` or `archived`. Search matches a normalized Product-name prefix or an
+exact SKU or barcode, and pagination uses an opaque cursor bound to the current
+query scope. Same-store archived Products remain readable by detail. Product
+detail embeds its active and archived ProductUnits and their statuses; there is
+no global ProductUnit read endpoint.
+
+Product creation writes the Product and its initial Base Unit atomically.
+Product and ProductUnit PATCH routes update only their approved mutable fields:
+Product measurement/inventory modes and ProductUnit relationship, base role,
+measurement type, and conversion factors are not mutable through those routes.
+Status changes use only the dedicated archive/restore endpoints, not a generic
+status PATCH. Mutations use stable `operationId` values, and updates/lifecycle
+commands use lossless decimal-string `expectedVersion` values.
+
+API `bigint` values, including versions and applicable price or threshold
+values, are represented losslessly as decimal strings. Catalog operations create
+no accounting, inventory-posting, costing, Sales, supplier financial, or Sync
+effects. Eligibility in those future domains remains deferred to their own
+approved contracts.
+
+Authoritative Product and ProductUnit contracts:
+
+- [database mapping](docs/contracts/product-unit-database-contract.md)
+- [validation](docs/product-unit-validation-v1.md)
+- [reads and search](docs/product-unit-read-v1.md)
+- [create and update](docs/product-unit-write-v1.md)
+- [archive and restore](docs/product-unit-lifecycle-v1.md)
+- [Station 5 closure](docs/product-unit-station5-closure-v1.md)
 
 ## Commands
 
