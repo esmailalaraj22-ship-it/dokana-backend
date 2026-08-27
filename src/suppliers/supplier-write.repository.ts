@@ -10,6 +10,7 @@ import {
 } from './supplier-write-response';
 import type {
   PreparedSupplierCreate,
+  PreparedSupplierLifecycle,
   PreparedSupplierUpdate,
   SupplierMutationFailure,
   SupplierMutationFailureCode,
@@ -73,7 +74,7 @@ interface MutationOperation {
   supplierId: string;
   operationId: string;
   requestHash: string;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'archive' | 'restore';
   expectedVersion?: bigint;
 }
 
@@ -252,6 +253,74 @@ export class SupplierWriteRepository {
       }
 
       const response = mapSupplierMutationResponse(row, input.operationId);
+      await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+      return { ok: true, response };
+    });
+  }
+
+  changeLifecycle(
+    context: TenantTransactionContext,
+    input: PreparedSupplierLifecycle,
+  ): Promise<SupplierMutationResult> {
+    return this.database.withTenantTransaction(context, async (transaction) => {
+      const operation: MutationOperation = {
+        supplierId: input.supplierId,
+        operationId: input.operationId,
+        requestHash: input.requestHash,
+        action: input.action,
+        expectedVersion: input.expectedVersion,
+      };
+      const begun = await this.beginMutation(transaction, context, operation);
+      if (begun) {
+        return begun;
+      }
+
+      const currentRows = await transaction
+        .select(supplierSelection)
+        .from(suppliers)
+        .where(and(eq(suppliers.storeId, context.storeId), eq(suppliers.id, input.supplierId)))
+        .limit(1)
+        .for('update');
+      const current = currentRows[0];
+      if (!current) {
+        const conflict = failure('SUPPLIER_NOT_FOUND');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+      if (current.version !== input.expectedVersion) {
+        const conflict = failure('SUPPLIER_VERSION_CONFLICT');
+        await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+        return conflict;
+      }
+
+      const targetStatus = input.action === 'archive' ? 'archived' : 'active';
+      let supplier: SupplierMutationRow = current;
+      if (current.status !== targetStatus) {
+        const rows = await transaction
+          .update(suppliers)
+          .set({
+            status: targetStatus,
+            archivedAt: input.action === 'archive' ? sql<Date>`clock_timestamp()` : null,
+            deviceId: context.deviceId,
+            operationId: input.operationId,
+          })
+          .where(
+            and(
+              eq(suppliers.storeId, context.storeId),
+              eq(suppliers.id, input.supplierId),
+              eq(suppliers.status, current.status),
+              eq(suppliers.version, input.expectedVersion),
+            ),
+          )
+          .returning(supplierSelection);
+        const updated = rows[0];
+        if (!updated) {
+          throw new Error('Locked Supplier lifecycle update did not return a row.');
+        }
+        supplier = updated;
+      }
+
+      const response = mapSupplierMutationResponse(supplier, input.operationId);
       await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
       return { ok: true, response };
     });

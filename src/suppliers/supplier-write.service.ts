@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import type { AuthenticatedPrincipal } from '../auth/auth.types';
 import type { TenantTransactionContext } from '../database/database.types';
 import type { CreateSupplierDto } from './dto/create-supplier.dto';
+import type { SupplierLifecycleDto } from './dto/supplier-lifecycle.dto';
 import type { UpdateSupplierDto } from './dto/update-supplier.dto';
 import {
   canonicalizeSupplierName,
@@ -21,7 +22,9 @@ import {
 import { SupplierWriteRepository } from './supplier-write.repository';
 import type {
   PreparedSupplierCreate,
+  PreparedSupplierLifecycle,
   PreparedSupplierUpdate,
+  SupplierLifecycleAction,
   SupplierMutationFailure,
   SupplierMutationResponse,
   SupplierMutationResult,
@@ -134,6 +137,57 @@ export class SupplierWriteService {
     }
 
     return this.unwrap(await this.repository.update(context, input));
+  }
+
+  archive(
+    principal: SupplierWritePrincipal,
+    context: TenantTransactionContext,
+    supplierId: string,
+    dto: SupplierLifecycleDto,
+  ): Promise<SupplierMutationResponse> {
+    return this.changeLifecycle(principal, context, supplierId, dto, 'archive');
+  }
+
+  restore(
+    principal: SupplierWritePrincipal,
+    context: TenantTransactionContext,
+    supplierId: string,
+    dto: SupplierLifecycleDto,
+  ): Promise<SupplierMutationResponse> {
+    return this.changeLifecycle(principal, context, supplierId, dto, 'restore');
+  }
+
+  private async changeLifecycle(
+    principal: SupplierWritePrincipal,
+    context: TenantTransactionContext,
+    supplierId: string,
+    dto: SupplierLifecycleDto,
+    action: SupplierLifecycleAction,
+  ): Promise<SupplierMutationResponse> {
+    this.assertAuthorized(principal, context);
+
+    let input: PreparedSupplierLifecycle;
+    try {
+      const canonicalSupplierId = canonicalizeSupplierUuid(supplierId, 'id');
+      const operationId = canonicalizeSupplierUuid(dto.operationId, 'operationId');
+      const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
+      input = {
+        supplierId: canonicalSupplierId,
+        operationId,
+        expectedVersion,
+        action,
+        requestHash: this.hashRequest({
+          v: SUPPLIER_WRITE_REQUEST_VERSION,
+          action: `supplier.${action}`,
+          supplierId: canonicalSupplierId,
+          expectedVersion: expectedVersion.toString(),
+        }),
+      };
+    } catch (error) {
+      this.rethrowValidationError(error);
+    }
+
+    return this.unwrap(await this.repository.changeLifecycle(context, input));
   }
 
   private assertAuthorized(

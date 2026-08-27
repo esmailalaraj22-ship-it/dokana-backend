@@ -27,6 +27,16 @@ export interface PreparedSupplierUpdate {
   requestHash: string;
 }
 
+export type SupplierLifecycleAction = 'archive' | 'restore';
+
+export interface PreparedSupplierLifecycle {
+  supplierId: string;
+  operationId: string;
+  expectedVersion: bigint;
+  action: SupplierLifecycleAction;
+  requestHash: string;
+}
+
 export interface SupplierMutationRow extends SupplierDetailRow {
   normalizedPhone: string | null;
 }

@@ -112,6 +112,16 @@ interface SupplierEffects {
   auditLogs: number;
 }
 
+interface SupplierChangeEvent {
+  action: string;
+  operationId: string;
+}
+
+interface SupplierAuditEvent {
+  action: string;
+  operationId: string | null;
+}
+
 const storeIds = Object.values(fixture.stores);
 const userIds = Object.values(fixture.users);
 let phoneSequence = 100_000;
@@ -167,6 +177,24 @@ function createRequestHash(payload: Record<string, unknown>): string {
         phone,
         normalizedPhone,
         notes,
+      }),
+      'utf8',
+    )
+    .digest('hex');
+}
+
+function lifecycleRequestHash(
+  supplierId: string,
+  action: 'archive' | 'restore',
+  expectedVersion: string,
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        v: 1,
+        action: `supplier.${action}`,
+        supplierId: supplierId.toLowerCase(),
+        expectedVersion,
       }),
       'utf8',
     )
@@ -249,6 +277,12 @@ describe('Supplier write API with real PostgreSQL', () => {
   function patch(identity: AccessIdentity, supplierId: string) {
     return request(server)
       .patch(`/v1/suppliers/${supplierId}`)
+      .set('authorization', `Bearer ${identity.accessToken}`);
+  }
+
+  function lifecycle(identity: AccessIdentity, supplierId: string, action: 'archive' | 'restore') {
+    return request(server)
+      .post(`/v1/suppliers/${supplierId}/${action}`)
       .set('authorization', `Bearer ${identity.accessToken}`);
   }
 
@@ -354,6 +388,58 @@ describe('Supplier write API with real PostgreSQL', () => {
     return effects;
   }
 
+  async function readSupplierChangeEvents(
+    storeId: string,
+    supplierId: string,
+  ): Promise<SupplierChangeEvent[]> {
+    const result = await adminPool.query<SupplierChangeEvent>(
+      `
+        select action, operation_id as "operationId"
+        from sync.change_events
+        where store_id = $1 and entity_type = 'suppliers' and entity_id = $2
+        order by cursor
+      `,
+      [storeId, supplierId],
+    );
+    return result.rows;
+  }
+
+  async function readSupplierAuditEvents(
+    storeId: string,
+    supplierId: string,
+  ): Promise<SupplierAuditEvent[]> {
+    const result = await adminPool.query<SupplierAuditEvent>(
+      `
+        select action, new_values ->> 'operation_id' as "operationId"
+        from audit.central_audit_logs
+        where store_id = $1 and entity_type = 'ledger.suppliers' and entity_id = $2
+        order by id
+      `,
+      [storeId, supplierId],
+    );
+    return result.rows;
+  }
+
+  async function readAccountingInventoryEffects(storeId: string): Promise<number> {
+    const result = await adminPool.query<{ effects: number }>(
+      `
+        select (
+          (select count(*) from ledger.purchase_invoices where store_id = $1)
+          + (select count(*) from ledger.supplier_payments where store_id = $1)
+          + (select count(*) from ledger.supplier_ledger_entries where store_id = $1)
+          + (select count(*) from ledger.expenses where store_id = $1)
+          + (select count(*) from ledger.money_movements where store_id = $1)
+          + (select count(*) from ledger.goods_receipts where store_id = $1)
+          + (select count(*) from ledger.inventory_movements where store_id = $1)
+          + (select count(*) from ledger.stock_balances where store_id = $1)
+          + (select count(*) from ledger.stock_counts where store_id = $1)
+        )::integer as effects
+      `,
+      [storeId],
+    );
+    return result.rows[0]?.effects ?? -1;
+  }
+
   async function expectRejectedReplay(
     supplierId: string,
     payload: Record<string, unknown>,
@@ -400,6 +486,33 @@ describe('Supplier write API with real PostgreSQL', () => {
       !approvedDatabase.rows[0].isSuperuser
     ) {
       throw new Error('The local Supplier write fixture database is not approved.');
+    }
+
+    const safety = await adminPool.query<{
+      users: number;
+      stores: number;
+      businessRows: number;
+    }>(`
+      select
+        (select count(*)::integer from platform.users) as users,
+        (select count(*)::integer from ledger.stores) as stores,
+        (
+          (select count(*) from ledger.purchase_invoices)
+          + (select count(*) from ledger.supplier_payments)
+          + (select count(*) from ledger.supplier_ledger_entries)
+          + (select count(*) from ledger.expenses)
+          + (select count(*) from ledger.money_movements)
+          + (select count(*) from ledger.goods_receipts)
+          + (select count(*) from ledger.inventory_movements)
+          + (select count(*) from ledger.stock_balances)
+          + (select count(*) from ledger.stock_counts)
+        )::integer as "businessRows"
+    `);
+    const safetyState = safety.rows[0];
+    if (safetyState?.users !== 0 || safetyState.stores !== 0 || safetyState.businessRows !== 0) {
+      throw new Error(
+        'The local Supplier write fixture database contains persistent business data.',
+      );
     }
 
     await removeFixtures();
@@ -1081,6 +1194,764 @@ describe('Supplier write API with real PostgreSQL', () => {
     });
   });
 
+  it('enforces lifecycle authentication, owner authority, strict input, and the no-delete boundary', async () => {
+    const supplierId = await insertSupplier({ phone: nextPhone() });
+    const unauthenticatedOperation = randomUUID();
+    await request(server)
+      .post(`/v1/suppliers/${supplierId}/archive`)
+      .send({ operationId: unauthenticatedOperation, expectedVersion: '1' })
+      .expect(401);
+    expect(await readOperation(fixture.stores.a, unauthenticatedOperation)).toBeNull();
+
+    const deniedOperation = randomUUID();
+    const denied = body(
+      await lifecycle(access.viewer, supplierId, 'archive')
+        .send({ operationId: deniedOperation, expectedVersion: '1' })
+        .expect(403),
+    );
+    expect(denied.code).toBe('SUPPLIER_WRITE_NOT_ALLOWED');
+    expect(await readOperation(fixture.stores.viewer, deniedOperation)).toBeNull();
+
+    const readOnlySupplier = await insertSupplier({
+      storeId: fixture.stores.readOnly,
+      phone: nextPhone(),
+    });
+    const readOnlyOperation = randomUUID();
+    const readOnly = body(
+      await lifecycle(access.readOnly, readOnlySupplier, 'archive')
+        .send({ operationId: readOnlyOperation, expectedVersion: '1' })
+        .expect(403),
+    );
+    expect(readOnly.code).toBe('BUSINESS_WRITE_NOT_ALLOWED');
+    expect(await readOperation(fixture.stores.readOnly, readOnlyOperation)).toBeNull();
+
+    const invalidRequests: Record<string, unknown>[] = [
+      { operationId: randomUUID(), expectedVersion: '0' },
+      { operationId: randomUUID(), expectedVersion: '9223372036854775808' },
+      { operationId: randomUUID() },
+      { operationId: randomUUID(), expectedVersion: '1', status: 'archived' },
+      { operationId: randomUUID(), expectedVersion: '1', phone: nextPhone() },
+      { operationId: randomUUID(), expectedVersion: '1', storeId: fixture.stores.b },
+      { operationId: randomUUID(), expectedVersion: '1', deviceId: fixture.devices.b },
+    ];
+    for (const invalid of invalidRequests) {
+      await lifecycle(access.a, supplierId, 'archive').send(invalid).expect(400);
+      expect(await readOperation(fixture.stores.a, invalid.operationId as string)).toBeNull();
+    }
+
+    await lifecycle(access.a, 'not-a-uuid', 'archive')
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(400);
+    await request(server)
+      .delete(`/v1/suppliers/${supplierId}`)
+      .set('authorization', `Bearer ${access.a.accessToken}`)
+      .expect(404);
+    expect(await readSupplier(supplierId)).toMatchObject({ status: 'active', version: '1' });
+  });
+
+  it('archives one Supplier identity with database time and no accounting or inventory effect', async () => {
+    const phone = '+970 599 557 001';
+    const supplierId = await insertSupplier({
+      name: 'Lifecycle Archive Supplier',
+      phone,
+      normalizedPhone: '+970599557001',
+      notes: 'preserve archive data',
+    });
+    const before = await readSupplier(supplierId);
+    if (!before) {
+      throw new Error('Expected the archive Supplier fixture.');
+    }
+    const operationId = randomUUID();
+    const beforeEffects = await readSupplierEffects(fixture.stores.a, supplierId);
+    const accountingBefore = await readAccountingInventoryEffects(fixture.stores.a);
+    const startedAt = Date.now();
+    const archived = body(
+      await lifecycle(access.a, supplierId.toUpperCase(), 'archive')
+        .send({ operationId: operationId.toUpperCase(), expectedVersion: '1' })
+        .expect(200),
+    );
+    const finishedAt = Date.now();
+    const after = await readSupplier(supplierId);
+    if (!after?.archivedAt) {
+      throw new Error('Expected the archived Supplier state.');
+    }
+
+    expect(Object.keys(archived).sort()).toEqual(
+      [
+        'archivedAt',
+        'createdAt',
+        'id',
+        'name',
+        'notes',
+        'operationId',
+        'phone',
+        'status',
+        'updatedAt',
+        'version',
+      ].sort(),
+    );
+    expect(archived).toMatchObject({
+      id: supplierId,
+      operationId,
+      status: 'archived',
+      phone,
+      notes: before.notes,
+      version: '2',
+    });
+    expect(after).toMatchObject({
+      id: before.id,
+      name: before.name,
+      normalizedName: before.normalizedName,
+      phone: before.phone,
+      normalizedPhone: before.normalizedPhone,
+      notes: before.notes,
+      status: 'archived',
+      deviceId: access.a.deviceId,
+      operationId,
+      version: '2',
+    });
+    expect(after.createdAt).toEqual(before.createdAt);
+    expect(after.updatedAt).not.toEqual(before.updatedAt);
+    expect(after.archivedAt.getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(after.archivedAt.getTime()).toBeLessThanOrEqual(finishedAt);
+    expect(await readSupplierEffects(fixture.stores.a, supplierId)).toEqual({
+      changeEvents: beforeEffects.changeEvents + 1,
+      auditLogs: beforeEffects.auditLogs + 1,
+    });
+    expect(await readSupplierChangeEvents(fixture.stores.a, supplierId)).toEqual([
+      { action: 'archive', operationId },
+    ]);
+    expect(await readSupplierAuditEvents(fixture.stores.a, supplierId)).toEqual([
+      { action: 'update', operationId },
+    ]);
+    expect(await readOperation(fixture.stores.a, operationId)).toMatchObject({
+      status: 'applied',
+      responseCode: 200,
+      aggregateType: 'suppliers',
+      aggregateId: supplierId,
+      action: 'archive',
+      requestHash: lifecycleRequestHash(supplierId, 'archive', '1'),
+      completed: true,
+    });
+    expect(await readAccountingInventoryEffects(fixture.stores.a)).toBe(accountingBefore);
+
+    const duplicate = createBody({ phone: '0599557001' });
+    expect(body(await post(access.a).send(duplicate).expect(409)).code).toBe(
+      'SUPPLIER_PHONE_CONFLICT',
+    );
+  });
+
+  it('restores the same Supplier with generic update event and logical restore operation', async () => {
+    const supplierId = await insertSupplier({
+      name: 'Lifecycle Restore Supplier',
+      phone: '+970 599 557 101',
+      normalizedPhone: '+970599557101',
+      notes: 'preserve restore data',
+      status: 'archived',
+    });
+    const before = await readSupplier(supplierId);
+    if (!before?.archivedAt) {
+      throw new Error('Expected the restore Supplier fixture.');
+    }
+    const operationId = randomUUID();
+    const accountingBefore = await readAccountingInventoryEffects(fixture.stores.a);
+    const restored = body(
+      await lifecycle(access.a, supplierId, 'restore')
+        .send({ operationId, expectedVersion: '1' })
+        .expect(200),
+    );
+    const after = await readSupplier(supplierId);
+
+    expect(restored).toMatchObject({
+      id: supplierId,
+      operationId,
+      status: 'active',
+      archivedAt: null,
+      name: before.name,
+      phone: before.phone,
+      notes: before.notes,
+      version: '2',
+    });
+    expect(after).toMatchObject({
+      id: before.id,
+      name: before.name,
+      normalizedName: before.normalizedName,
+      phone: before.phone,
+      normalizedPhone: before.normalizedPhone,
+      notes: before.notes,
+      status: 'active',
+      archivedAt: null,
+      deviceId: access.a.deviceId,
+      operationId,
+      version: '2',
+    });
+    expect(after?.createdAt).toEqual(before.createdAt);
+    expect(after?.updatedAt).not.toEqual(before.updatedAt);
+    expect(await readSupplierChangeEvents(fixture.stores.a, supplierId)).toEqual([
+      { action: 'update', operationId },
+    ]);
+    expect(await readSupplierAuditEvents(fixture.stores.a, supplierId)).toEqual([
+      { action: 'update', operationId },
+    ]);
+    expect(await readOperation(fixture.stores.a, operationId)).toMatchObject({
+      status: 'applied',
+      action: 'restore',
+      requestHash: lifecycleRequestHash(supplierId, 'restore', '1'),
+      completed: true,
+    });
+    expect(await readAccountingInventoryEffects(fixture.stores.a)).toBe(accountingBefore);
+  });
+
+  it('applies P65-D1 same-state commands as replayable no-ops after version validation', async () => {
+    const activeId = await insertSupplier({ phone: nextPhone() });
+    const archivedId = await insertSupplier({ phone: nextPhone(), status: 'archived' });
+    const activeBefore = await readSupplier(activeId);
+    const archivedBefore = await readSupplier(archivedId);
+    const activeEffects = await readSupplierEffects(fixture.stores.a, activeId);
+    const archivedEffects = await readSupplierEffects(fixture.stores.a, archivedId);
+    const restoreOperation = randomUUID();
+    const archiveOperation = randomUUID();
+
+    const activeNoOp = body(
+      await lifecycle(access.a, activeId, 'restore')
+        .send({ operationId: restoreOperation, expectedVersion: '1' })
+        .expect(200),
+    );
+    const archivedNoOp = body(
+      await lifecycle(access.a, archivedId, 'archive')
+        .send({ operationId: archiveOperation, expectedVersion: '1' })
+        .expect(200),
+    );
+
+    expect(activeNoOp).toMatchObject({
+      status: 'active',
+      version: '1',
+      operationId: restoreOperation,
+    });
+    expect(archivedNoOp).toMatchObject({
+      status: 'archived',
+      archivedAt: archivedBefore?.archivedAt?.toISOString(),
+      version: '1',
+      operationId: archiveOperation,
+    });
+    expect(await readSupplier(activeId)).toEqual(activeBefore);
+    expect(await readSupplier(archivedId)).toEqual(archivedBefore);
+    expect(await readSupplierEffects(fixture.stores.a, activeId)).toEqual(activeEffects);
+    expect(await readSupplierEffects(fixture.stores.a, archivedId)).toEqual(archivedEffects);
+    expect(await readOperation(fixture.stores.a, restoreOperation)).toMatchObject({
+      status: 'applied',
+      action: 'restore',
+      completed: true,
+    });
+    expect(await readOperation(fixture.stores.a, archiveOperation)).toMatchObject({
+      status: 'applied',
+      action: 'archive',
+      completed: true,
+    });
+    expect(
+      body(
+        await lifecycle(access.a, activeId, 'restore')
+          .send({ operationId: restoreOperation, expectedVersion: '1' })
+          .expect(200),
+      ),
+    ).toEqual(activeNoOp);
+    expect(
+      body(
+        await lifecycle(access.a, archivedId, 'archive')
+          .send({ operationId: archiveOperation, expectedVersion: '1' })
+          .expect(200),
+      ),
+    ).toEqual(archivedNoOp);
+
+    for (const example of [
+      { id: activeId, action: 'restore' as const },
+      { id: archivedId, action: 'archive' as const },
+    ]) {
+      const operationId = randomUUID();
+      const first = body(
+        await lifecycle(access.a, example.id, example.action)
+          .send({ operationId, expectedVersion: '2' })
+          .expect(409),
+      );
+      const replay = body(
+        await lifecycle(access.a, example.id, example.action)
+          .send({ operationId, expectedVersion: '2' })
+          .expect(409),
+      );
+      expect(first.code).toBe('SUPPLIER_VERSION_CONFLICT');
+      expect(replay).toMatchObject({
+        code: first.code,
+        message: first.message,
+        statusCode: 409,
+      });
+      expect(await readOperation(fixture.stores.a, operationId)).toMatchObject({
+        status: 'rejected',
+        errorCode: 'SUPPLIER_VERSION_CONFLICT',
+        completed: true,
+      });
+    }
+  });
+
+  it('restores P65-D2 legacy phone states without validation, fabrication, or repair', async () => {
+    const nullPhoneId = await insertSupplier({
+      phone: null,
+      normalizedPhone: null,
+      status: 'archived',
+    });
+    const inconsistentPhoneId = await insertSupplier({
+      phone: '+970 599 557 201',
+      normalizedPhone: null,
+      status: 'archived',
+    });
+    const staleArchiveId = await insertSupplier({ phone: nextPhone(), status: 'active' });
+    await adminPool.query(
+      `update ledger.suppliers set archived_at = '2026-08-01T00:00:00Z' where id = $1`,
+      [staleArchiveId],
+    );
+    const staleArchiveBefore = await readSupplier(staleArchiveId);
+
+    const nullPhone = body(
+      await lifecycle(access.a, nullPhoneId, 'restore')
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(200),
+    );
+    const inconsistentPhone = body(
+      await lifecycle(access.a, inconsistentPhoneId, 'restore')
+        .send({ operationId: randomUUID(), expectedVersion: '1' })
+        .expect(200),
+    );
+    await lifecycle(access.a, staleArchiveId, 'restore')
+      .send({ operationId: randomUUID(), expectedVersion: '1' })
+      .expect(200);
+
+    expect(nullPhone).toMatchObject({ phone: null, status: 'active', version: '2' });
+    expect(await readSupplier(nullPhoneId)).toMatchObject({
+      phone: null,
+      normalizedPhone: null,
+      status: 'active',
+    });
+    expect(inconsistentPhone).toMatchObject({
+      phone: '+970 599 557 201',
+      status: 'active',
+      version: '2',
+    });
+    expect(await readSupplier(inconsistentPhoneId)).toMatchObject({
+      phone: '+970 599 557 201',
+      normalizedPhone: null,
+      status: 'active',
+    });
+    expect(await readSupplier(staleArchiveId)).toEqual(staleArchiveBefore);
+  });
+
+  it('exact-replays historical lifecycle snapshots after later opposing transitions', async () => {
+    const supplierId = await insertSupplier({ phone: nextPhone() });
+    const archiveOperation = randomUUID();
+    const restoreOperation = randomUUID();
+    const laterArchiveOperation = randomUUID();
+    const archivePayload = { operationId: archiveOperation, expectedVersion: '1' };
+    const restorePayload = { operationId: restoreOperation, expectedVersion: '2' };
+
+    const archived = body(
+      await lifecycle(access.a, supplierId, 'archive').send(archivePayload).expect(200),
+    );
+    expect(
+      body(await lifecycle(access.a, supplierId, 'archive').send(archivePayload).expect(200)),
+    ).toEqual(archived);
+    const restored = body(
+      await lifecycle(access.a, supplierId, 'restore').send(restorePayload).expect(200),
+    );
+    expect(
+      body(await lifecycle(access.a, supplierId, 'archive').send(archivePayload).expect(200)),
+    ).toEqual(archived);
+    const laterArchived = body(
+      await lifecycle(access.a, supplierId, 'archive')
+        .send({ operationId: laterArchiveOperation, expectedVersion: '3' })
+        .expect(200),
+    );
+    expect(laterArchived).toMatchObject({ status: 'archived', version: '4' });
+    expect(
+      body(await lifecycle(access.a, supplierId, 'restore').send(restorePayload).expect(200)),
+    ).toEqual(restored);
+    expect(restored).toMatchObject({ status: 'active', archivedAt: null, version: '3' });
+    expect(await readSupplier(supplierId)).toMatchObject({ status: 'archived', version: '4' });
+    expect(await readSupplierEffects(fixture.stores.a, supplierId)).toEqual({
+      changeEvents: 3,
+      auditLogs: 3,
+    });
+  });
+
+  it('stores deterministic lifecycle rejection snapshots even when target state later changes', async () => {
+    const missingId = randomUUID();
+    const missingOperation = randomUUID();
+    const missingPayload = { operationId: missingOperation, expectedVersion: '1' };
+    const missing = body(
+      await lifecycle(access.a, missingId, 'archive').send(missingPayload).expect(404),
+    );
+    expect(missing.code).toBe('SUPPLIER_NOT_FOUND');
+    await insertSupplier({ id: missingId, phone: nextPhone() });
+    expect(
+      body(await lifecycle(access.a, missingId, 'archive').send(missingPayload).expect(404)),
+    ).toMatchObject({ code: missing.code, message: missing.message, statusCode: 404 });
+    expect(await readSupplier(missingId)).toMatchObject({ status: 'active', version: '1' });
+
+    const staleId = await insertSupplier({ phone: nextPhone(), version: '5' });
+    const staleOperation = randomUUID();
+    const stalePayload = { operationId: staleOperation, expectedVersion: '4' };
+    const stale = body(
+      await lifecycle(access.a, staleId, 'restore').send(stalePayload).expect(409),
+    );
+    expect(stale.code).toBe('SUPPLIER_VERSION_CONFLICT');
+    await patch(access.a, staleId)
+      .send({ operationId: randomUUID(), expectedVersion: '5', notes: 'later state' })
+      .expect(200);
+    expect(
+      body(await lifecycle(access.a, staleId, 'restore').send(stalePayload).expect(409)),
+    ).toMatchObject({ code: stale.code, message: stale.message, statusCode: 409 });
+    expect(await readSupplier(staleId)).toMatchObject({
+      status: 'active',
+      notes: 'later state',
+      version: '6',
+    });
+  });
+
+  it('allows read-only lifecycle replay while denying new commands after replay resolution', async () => {
+    const supplierId = await insertSupplier({
+      storeId: fixture.stores.flip,
+      phone: nextPhone(),
+    });
+    const archiveOperation = randomUUID();
+    const archivePayload = { operationId: archiveOperation, expectedVersion: '1' };
+    const archived = body(
+      await lifecycle(access.flip, supplierId, 'archive').send(archivePayload).expect(200),
+    );
+    const missingId = randomUUID();
+    const rejectedPayload = { operationId: randomUUID(), expectedVersion: '1' };
+    const rejected = body(
+      await lifecycle(access.flip, missingId, 'restore').send(rejectedPayload).expect(404),
+    );
+
+    await adminPool.query(`update ledger.stores set status = 'read_only' where id = $1`, [
+      fixture.stores.flip,
+    ]);
+    try {
+      expect(
+        body(await lifecycle(access.flip, supplierId, 'archive').send(archivePayload).expect(200)),
+      ).toEqual(archived);
+      expect(
+        body(await lifecycle(access.flip, missingId, 'restore').send(rejectedPayload).expect(404)),
+      ).toMatchObject({ code: rejected.code, message: rejected.message, statusCode: 404 });
+      expect(
+        body(
+          await lifecycle(access.flip, supplierId, 'archive')
+            .send({ operationId: archiveOperation, expectedVersion: '2' })
+            .expect(409),
+        ).code,
+      ).toBe('OPERATION_ID_CONFLICT');
+
+      const newOperation = randomUUID();
+      expect(
+        body(
+          await lifecycle(access.flip, supplierId, 'restore')
+            .send({ operationId: newOperation, expectedVersion: '2' })
+            .expect(403),
+        ).code,
+      ).toBe('BUSINESS_WRITE_NOT_ALLOWED');
+      expect(await readOperation(fixture.stores.flip, newOperation)).toBeNull();
+    } finally {
+      await adminPool.query(`update ledger.stores set status = 'active' where id = $1`, [
+        fixture.stores.flip,
+      ]);
+    }
+  });
+
+  it('enforces lifecycle device binding and explicit processing without duplicate effects', async () => {
+    const supplierId = await insertSupplier({ phone: nextPhone() });
+    const operationId = randomUUID();
+    await lifecycle(access.a, supplierId, 'archive')
+      .send({ operationId, expectedVersion: '1' })
+      .expect(200);
+
+    await expect(
+      supplierWrites.archive(
+        {
+          membershipRole: 'owner',
+          storeId: fixture.stores.a,
+          userId: fixture.users.a,
+          deviceId: fixture.devices.aSecond,
+        },
+        {
+          storeId: fixture.stores.a,
+          userId: fixture.users.a,
+          deviceId: fixture.devices.aSecond,
+          requestId: randomUUID(),
+        },
+        supplierId,
+        { operationId, expectedVersion: '1' },
+      ),
+    ).rejects.toMatchObject({ response: { code: 'OPERATION_ID_CONFLICT' } });
+    expect(await readSupplierEffects(fixture.stores.a, supplierId)).toEqual({
+      changeEvents: 1,
+      auditLogs: 1,
+    });
+
+    const processingTarget = await insertSupplier({ phone: nextPhone() });
+    const processingOperation = randomUUID();
+    await adminPool.query(
+      `
+        insert into sync.processed_operations (
+          store_id, operation_id, device_id, aggregate_type, aggregate_id,
+          action, request_hash, status
+        ) values ($1, $2, $3, 'suppliers', $4, 'archive', $5, 'processing')
+      `,
+      [
+        fixture.stores.a,
+        processingOperation,
+        fixture.devices.a,
+        processingTarget,
+        lifecycleRequestHash(processingTarget, 'archive', '1'),
+      ],
+    );
+    expect(
+      body(
+        await lifecycle(access.a, processingTarget, 'archive')
+          .send({ operationId: processingOperation, expectedVersion: '1' })
+          .expect(409),
+      ).code,
+    ).toBe('OPERATION_IN_PROGRESS');
+    expect(await readSupplier(processingTarget)).toMatchObject({ status: 'active', version: '1' });
+    expect(await readSupplierEffects(fixture.stores.a, processingTarget)).toEqual({
+      changeEvents: 0,
+      auditLogs: 0,
+    });
+  });
+
+  it('keeps lifecycle target and operation namespaces tenant-private under forced RLS', async () => {
+    const foreignId = await insertSupplier({
+      storeId: fixture.stores.b,
+      name: 'Private Foreign Lifecycle Supplier',
+      phone: '+970 599 557 301',
+      normalizedPhone: '+970599557301',
+      status: 'archived',
+    });
+    const probeOperation = randomUUID();
+    const foreign = body(
+      await lifecycle(access.a, foreignId, 'restore')
+        .send({ operationId: probeOperation, expectedVersion: '1' })
+        .expect(404),
+    );
+    expect(foreign).toMatchObject({ code: 'SUPPLIER_NOT_FOUND' });
+    expect(JSON.stringify(foreign)).not.toContain('Private Foreign');
+    expect(await readSupplier(foreignId)).toMatchObject({ status: 'archived', version: '1' });
+    expect(await readOperation(fixture.stores.a, probeOperation)).toMatchObject({
+      status: 'rejected',
+      errorCode: 'SUPPLIER_NOT_FOUND',
+    });
+    expect(await readOperation(fixture.stores.b, probeOperation)).toBeNull();
+
+    const localId = await insertSupplier({ storeId: fixture.stores.a, phone: nextPhone() });
+    const secondForeignId = await insertSupplier({ storeId: fixture.stores.b, phone: nextPhone() });
+    const sharedOperation = randomUUID();
+    await Promise.all([
+      lifecycle(access.a, localId, 'archive').send({
+        operationId: sharedOperation,
+        expectedVersion: '1',
+      }),
+      lifecycle(access.b, secondForeignId, 'archive').send({
+        operationId: sharedOperation,
+        expectedVersion: '1',
+      }),
+    ]).then((responses) =>
+      expect(responses.map((response) => response.status)).toEqual([200, 200]),
+    );
+    expect(await readOperation(fixture.stores.a, sharedOperation)).toMatchObject({
+      aggregateId: localId,
+      status: 'applied',
+    });
+    expect(await readOperation(fixture.stores.b, sharedOperation)).toMatchObject({
+      aggregateId: secondForeignId,
+      status: 'applied',
+    });
+  });
+
+  it('serializes lifecycle and PATCH races without stale last-write-wins', async () => {
+    const archiveRace = await insertSupplier({ phone: nextPhone() });
+    const archiveResponses = await Promise.all([
+      lifecycle(access.a, archiveRace, 'archive').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, archiveRace, 'archive').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(archiveResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(archiveResponses.find((response) => response.status === 409)?.body).toMatchObject({
+      code: 'SUPPLIER_VERSION_CONFLICT',
+    });
+    expect(await readSupplier(archiveRace)).toMatchObject({ status: 'archived', version: '2' });
+    expect(await readSupplierEffects(fixture.stores.a, archiveRace)).toEqual({
+      changeEvents: 1,
+      auditLogs: 1,
+    });
+
+    const restoreRace = await insertSupplier({ phone: nextPhone(), status: 'archived' });
+    const restoreResponses = await Promise.all([
+      lifecycle(access.a, restoreRace, 'restore').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, restoreRace, 'restore').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(restoreResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(restoreResponses.find((response) => response.status === 409)?.body).toMatchObject({
+      code: 'SUPPLIER_VERSION_CONFLICT',
+    });
+    expect(await readSupplier(restoreRace)).toMatchObject({ status: 'active', version: '2' });
+
+    const archivePatchRace = await insertSupplier({
+      name: 'Archive Patch Before',
+      phone: nextPhone(),
+    });
+    const archivePatchResponses = await Promise.all([
+      lifecycle(access.a, archivePatchRace, 'archive').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      patch(access.a, archivePatchRace).send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+        name: 'Archive Patch Winner',
+      }),
+    ]);
+    expect(archivePatchResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(['SUPPLIER_ARCHIVED', 'SUPPLIER_VERSION_CONFLICT']).toContain(
+      body(archivePatchResponses.find((response) => response.status === 409) as Response).code,
+    );
+    const archivePatchState = await readSupplier(archivePatchRace);
+    expect(archivePatchState?.version).toBe('2');
+    expect(
+      (archivePatchState?.status === 'archived' &&
+        archivePatchState.name === 'Archive Patch Before') ||
+        (archivePatchState?.status === 'active' &&
+          archivePatchState.name === 'Archive Patch Winner'),
+    ).toBe(true);
+
+    const restorePatchRace = await insertSupplier({
+      name: 'Restore Patch Before',
+      phone: nextPhone(),
+      status: 'archived',
+    });
+    const restorePatchResponses = await Promise.all([
+      lifecycle(access.a, restorePatchRace, 'restore').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      patch(access.a, restorePatchRace).send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+        name: 'Forbidden Stale Patch',
+      }),
+    ]);
+    expect(restorePatchResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(['SUPPLIER_ARCHIVED', 'SUPPLIER_VERSION_CONFLICT']).toContain(
+      body(restorePatchResponses.find((response) => response.status === 409) as Response).code,
+    );
+    expect(await readSupplier(restorePatchRace)).toMatchObject({
+      name: 'Restore Patch Before',
+      status: 'active',
+      version: '2',
+    });
+  });
+
+  it('permits same-version semantic no-op ordering while allowing at most one real transition', async () => {
+    const activeId = await insertSupplier({ phone: nextPhone() });
+    const activeResponses = await Promise.all([
+      lifecycle(access.a, activeId, 'archive').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, activeId, 'restore').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(activeResponses.some((response) => response.status === 200)).toBe(true);
+    expect(activeResponses.every((response) => [200, 409].includes(response.status))).toBe(true);
+    expect(await readSupplier(activeId)).toMatchObject({ status: 'archived', version: '2' });
+    expect(await readSupplierEffects(fixture.stores.a, activeId)).toEqual({
+      changeEvents: 1,
+      auditLogs: 1,
+    });
+
+    const archivedId = await insertSupplier({ phone: nextPhone(), status: 'archived' });
+    const archivedResponses = await Promise.all([
+      lifecycle(access.a, archivedId, 'archive').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, archivedId, 'restore').send({
+        operationId: randomUUID(),
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(archivedResponses.some((response) => response.status === 200)).toBe(true);
+    expect(archivedResponses.every((response) => [200, 409].includes(response.status))).toBe(true);
+    expect(await readSupplier(archivedId)).toMatchObject({ status: 'active', version: '2' });
+    expect(await readSupplierEffects(fixture.stores.a, archivedId)).toEqual({
+      changeEvents: 1,
+      auditLogs: 1,
+    });
+  });
+
+  it('serializes same-operation lifecycle races into one authoritative result', async () => {
+    const identicalTarget = await insertSupplier({ phone: nextPhone() });
+    const identicalOperation = randomUUID();
+    const identicalResponses = await Promise.all([
+      lifecycle(access.a, identicalTarget, 'archive').send({
+        operationId: identicalOperation,
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, identicalTarget, 'archive').send({
+        operationId: identicalOperation,
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(identicalResponses.map((response) => response.status)).toEqual([200, 200]);
+    expect(body(identicalResponses[0])).toEqual(body(identicalResponses[1]));
+    expect(await readSupplierEffects(fixture.stores.a, identicalTarget)).toEqual({
+      changeEvents: 1,
+      auditLogs: 1,
+    });
+
+    const changedTarget = await insertSupplier({ phone: nextPhone() });
+    const changedOperation = randomUUID();
+    const changedResponses = await Promise.all([
+      lifecycle(access.a, changedTarget, 'archive').send({
+        operationId: changedOperation,
+        expectedVersion: '1',
+      }),
+      lifecycle(access.a, changedTarget, 'restore').send({
+        operationId: changedOperation,
+        expectedVersion: '1',
+      }),
+    ]);
+    expect(changedResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(changedResponses.find((response) => response.status === 409)?.body).toMatchObject({
+      code: 'OPERATION_ID_CONFLICT',
+    });
+    const changedEffects = await readSupplierEffects(fixture.stores.a, changedTarget);
+    expect(changedEffects.changeEvents).toBeLessThanOrEqual(1);
+    expect(changedEffects.auditLogs).toBeLessThanOrEqual(1);
+    expect(await readOperation(fixture.stores.a, changedOperation)).toMatchObject({
+      status: 'applied',
+      completed: true,
+    });
+  });
+
   it('rolls back Supplier, trigger, audit, and operation state when completion fails', async () => {
     if (!app) {
       throw new Error('Application is unavailable for fault injection.');
@@ -1104,5 +1975,32 @@ describe('Supplier write API with real PostgreSQL', () => {
       changeEvents: 0,
       auditLogs: 0,
     });
+  });
+
+  it('rolls back lifecycle state, trigger effects, audit, and claim when completion fails', async () => {
+    if (!app) {
+      throw new Error('Application is unavailable for lifecycle fault injection.');
+    }
+    const repository = app.get<{
+      applyOperation: (...arguments_: unknown[]) => Promise<void>;
+    }>(SupplierWriteRepository);
+    const supplierId = await insertSupplier({ phone: nextPhone() });
+    const before = await readSupplier(supplierId);
+    const beforeEffects = await readSupplierEffects(fixture.stores.a, supplierId);
+    const operationId = randomUUID();
+    const completion = jest
+      .spyOn(repository, 'applyOperation')
+      .mockRejectedValueOnce(new Error('Task 6.5 lifecycle completion fault'));
+    try {
+      await lifecycle(access.a, supplierId, 'archive')
+        .send({ operationId, expectedVersion: '1' })
+        .expect(500);
+    } finally {
+      completion.mockRestore();
+    }
+
+    expect(await readSupplier(supplierId)).toEqual(before);
+    expect(await readOperation(fixture.stores.a, operationId)).toBeNull();
+    expect(await readSupplierEffects(fixture.stores.a, supplierId)).toEqual(beforeEffects);
   });
 });

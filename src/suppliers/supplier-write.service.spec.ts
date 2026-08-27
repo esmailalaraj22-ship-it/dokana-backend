@@ -7,6 +7,7 @@ import type { SupplierWriteRepository } from './supplier-write.repository';
 import { SupplierWriteService } from './supplier-write.service';
 import type {
   PreparedSupplierCreate,
+  PreparedSupplierLifecycle,
   PreparedSupplierUpdate,
   SupplierMutationResponse,
 } from './supplier-write.types';
@@ -35,12 +36,13 @@ const createDto: CreateSupplierDto = {
 
 function buildService(): {
   service: SupplierWriteService;
-  repository: { create: jest.Mock; update: jest.Mock };
+  repository: { create: jest.Mock; update: jest.Mock; changeLifecycle: jest.Mock };
 } {
   const response = {} as SupplierMutationResponse;
   const repository = {
     create: jest.fn().mockResolvedValue({ ok: true, response }),
     update: jest.fn().mockResolvedValue({ ok: true, response }),
+    changeLifecycle: jest.fn().mockResolvedValue({ ok: true, response }),
   };
   return {
     service: new SupplierWriteService(repository as unknown as SupplierWriteRepository),
@@ -67,6 +69,23 @@ describe('SupplierWriteService', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('does not grant lifecycle authority through non-owner or platform-admin metadata', async () => {
+    const { service, repository } = buildService();
+    const platformAdministrator = {
+      ...ownerPrincipal,
+      membershipRole: 'viewer' as const,
+      platformAdministrator: true,
+    };
+
+    await expect(
+      service.archive(platformAdministrator, context, createDto.id, {
+        operationId: createDto.operationId,
+        expectedVersion: '1',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'SUPPLIER_WRITE_NOT_ALLOWED' } });
+    expect(repository.changeLifecycle).not.toHaveBeenCalled();
   });
 
   it('canonicalizes create fields, preserves UUIDs, and preserves notes exactly', async () => {
@@ -233,5 +252,50 @@ describe('SupplierWriteService', () => {
     const one = preparedArg(repository.update, 0) as PreparedSupplierUpdate;
     const two = preparedArg(repository.update, 1) as PreparedSupplierUpdate;
     expect(one.requestHash).not.toBe(two.requestHash);
+  });
+
+  it('prepares fixed lifecycle projections without operation ID or volatile state', async () => {
+    const { service, repository } = buildService();
+    const anotherOperationId = 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC';
+
+    await service.archive(ownerPrincipal, context, createDto.id, {
+      operationId: createDto.operationId,
+      expectedVersion: '9007199254740993',
+    });
+    await service.archive(ownerPrincipal, context, createDto.id, {
+      operationId: anotherOperationId,
+      expectedVersion: '9007199254740993',
+    });
+    await service.restore(ownerPrincipal, context, createDto.id, {
+      operationId: anotherOperationId,
+      expectedVersion: '9007199254740993',
+    });
+
+    const inputs = (repository.changeLifecycle.mock.calls as unknown[][]).map(
+      (call) => call[1] as PreparedSupplierLifecycle,
+    );
+    expect(inputs[0]).toMatchObject({
+      supplierId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      operationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      expectedVersion: 9007199254740993n,
+      action: 'archive',
+    });
+    expect(inputs[0]?.requestHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(inputs[0]?.requestHash).toBe(inputs[1]?.requestHash);
+    expect(inputs[0]?.requestHash).not.toBe(inputs[2]?.requestHash);
+    expect(Object.keys(inputs[0] ?? {}).sort()).toEqual(
+      ['action', 'expectedVersion', 'operationId', 'requestHash', 'supplierId'].sort(),
+    );
+  });
+
+  it('rejects lifecycle versions outside PostgreSQL bigint before persistence', async () => {
+    const { service, repository } = buildService();
+    await expect(
+      service.restore(ownerPrincipal, context, createDto.id, {
+        operationId: createDto.operationId,
+        expectedVersion: '9223372036854775808',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repository.changeLifecycle).not.toHaveBeenCalled();
   });
 });

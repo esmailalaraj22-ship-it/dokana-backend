@@ -3,6 +3,7 @@ import type { DatabaseTransaction, TenantTransactionContext } from '../database/
 import { SupplierWriteRepository } from './supplier-write.repository';
 import type {
   PreparedSupplierCreate,
+  PreparedSupplierLifecycle,
   PreparedSupplierUpdate,
   SupplierMutationRow,
 } from './supplier-write.types';
@@ -261,6 +262,102 @@ describe('SupplierWriteRepository', () => {
         name: 'Changed',
         normalizedName: 'changed',
         requestHash: 'd'.repeat(64),
+      }),
+    ).rejects.toBe(unexpected);
+    expect(harness.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('archives through the existing tenant transaction with database-owned archive time', async () => {
+    const harness = createHarness();
+    const archivedAt = new Date('2026-08-27T09:00:00.000Z');
+    arrangeNewOperation(harness);
+    harness.returningUpdate.mockResolvedValueOnce([
+      { ...row, status: 'archived', archivedAt, version: 2n },
+    ]);
+    harness.execute.mockResolvedValueOnce({ rows: [{ operationId }] });
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        supplierId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'archive',
+        requestHash: 'e'.repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: { status: 'archived', archivedAt: archivedAt.toISOString(), version: '2' },
+    });
+
+    expect(harness.database.withTenantTransaction).toHaveBeenCalledWith(
+      context,
+      expect.any(Function),
+    );
+    expect(harness.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'archived',
+        deviceId: context.deviceId,
+        operationId,
+      }),
+    );
+    const updates = (harness.updateSet.mock.calls as unknown[][])[0]?.[0] as
+      Record<string, unknown> | undefined;
+    expect(updates?.archivedAt).not.toBeInstanceOf(Date);
+  });
+
+  it('completes same-state lifecycle as an applied response without Supplier UPDATE', async () => {
+    const harness = createHarness();
+    arrangeNewOperation(harness);
+    harness.execute.mockResolvedValueOnce({ rows: [{ operationId }] });
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        supplierId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'restore',
+        requestHash: 'f'.repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      response: { status: 'active', archivedAt: null, version: '1', operationId },
+    });
+    expect(harness.update).not.toHaveBeenCalled();
+    expect(harness.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('validates lifecycle version before same-state no-op classification', async () => {
+    const harness = createHarness();
+    arrangeNewOperation(harness);
+    harness.execute.mockResolvedValueOnce({ rows: [{ operationId }] });
+    const input: PreparedSupplierLifecycle = {
+      supplierId,
+      operationId,
+      expectedVersion: 2n,
+      action: 'restore',
+      requestHash: '1'.repeat(64),
+    };
+
+    await expect(harness.repository.changeLifecycle(context, input)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'SUPPLIER_VERSION_CONFLICT' },
+    });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('does not complete lifecycle after an unexpected database failure', async () => {
+    const harness = createHarness();
+    const unexpected = new Error('unexpected Supplier lifecycle database failure');
+    arrangeNewOperation(harness);
+    harness.returningUpdate.mockRejectedValueOnce(unexpected);
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        supplierId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'archive',
+        requestHash: '2'.repeat(64),
       }),
     ).rejects.toBe(unexpected);
     expect(harness.execute).toHaveBeenCalledTimes(2);
