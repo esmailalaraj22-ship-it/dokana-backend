@@ -4,11 +4,12 @@ NestJS, TypeScript, Drizzle ORM, and PostgreSQL backend infrastructure for the
 Dokana offline-first SaaS application. The implemented foundation provides the
 migration ownership model, identity mappings, authentication database boundary,
 session/token lifecycle, membership authorization, device bootstrap, the
-tenant-safe Customer API, and Product/ProductUnit catalog APIs for read, create,
-update, archive, and restore workflows.
+tenant-safe Customer API, Product/ProductUnit catalog APIs, and the Supplier
+master-data API for read, create, update, archive, and restore workflows.
 
-Remaining business modules, synchronization processing, subscriptions,
-accounting, inventory, backup, and restore are not implemented yet.
+Remaining business modules — including Supplier invoices, payables, supplier
+payments, Goods Receipt, inventory, costing, synchronization processing,
+subscriptions, accounting, backup, and restore — are not implemented yet.
 
 ## Prerequisites
 
@@ -220,6 +221,63 @@ Authoritative Product and ProductUnit contracts:
 - [create and update](docs/product-unit-write-v1.md)
 - [archive and restore](docs/product-unit-lifecycle-v1.md)
 - [Station 5 closure](docs/product-unit-station5-closure-v1.md)
+
+## Supplier API
+
+All Supplier routes require a verified bearer session and derive store, user, and
+device identity from that session; clients do not select the authoritative store
+context. Normal Supplier runtime access is scoped to an active `owner` membership;
+there is no SaaS-administrator Store-Runtime shortcut. Reads are available for
+`active` and `read_only` stores, while new Supplier mutations require an `active`
+store. Missing and foreign-store Suppliers return the same non-disclosing
+responses under forced PostgreSQL RLS.
+
+| Method | Route                               | Purpose                                      |
+| ------ | ----------------------------------- | -------------------------------------------- |
+| GET    | `/v1/suppliers`                     | List and search active or archived Suppliers |
+| GET    | `/v1/suppliers/:supplierId`         | Read one tenant-visible Supplier             |
+| POST   | `/v1/suppliers`                     | Create an active Supplier                    |
+| PATCH  | `/v1/suppliers/:supplierId`         | Update active Supplier details               |
+| POST   | `/v1/suppliers/:supplierId/archive` | Archive one active Supplier                  |
+| POST   | `/v1/suppliers/:supplierId/restore` | Restore one archived Supplier                |
+
+A Supplier is shop-owned master data, and its `id` is durable business identity.
+Supplier lists default to `status=active`; callers may explicitly select `active`
+or `archived`. Search matches a normalized name prefix or an exact canonical
+phone, and pagination uses an opaque cursor bound to the current query scope.
+Same-store archived Suppliers remain readable by detail.
+
+Create accepts the client-generated Supplier `id`, a stable `operationId`,
+`name`, required `phone`, and optional nullable `notes`. PATCH accepts a new
+stable `operationId`, a required positive decimal-string `expectedVersion`, and
+at least one of `name`, `phone`, or nullable `notes`; it applies only to `active`
+Suppliers. Archive and restore accept only `operationId` and `expectedVersion`
+and update the same Supplier row using the trusted tenant/device context and
+database timestamp. Status changes use only the dedicated archive/restore
+endpoints, not a generic status PATCH; there is no Supplier hard-delete API.
+
+Archive and restore preserve the same row, the same durable UUID, all business
+fields, phone reservation, and historical references, advancing the
+database-managed `version` exactly once. Known conflicts use stable codes
+including `SUPPLIER_PHONE_CONFLICT`, `SUPPLIER_VERSION_CONFLICT`,
+`SUPPLIER_ARCHIVED`, `SUPPLIER_NOT_FOUND`, `OPERATION_ID_CONFLICT`, and
+`OPERATION_IN_PROGRESS`. Applied replays return their stored historical response
+without re-executing or changing the Supplier's current state. API `bigint`
+values, including versions, are represented losslessly as decimal strings.
+
+Supplier master-data operations create no accounting, payable, supplier payment,
+expense, money-movement, Goods Receipt, inventory, stock, costing, or COGS
+effects. Supplier invoices, payables, supplier payments, returns/credits, and
+inventory integration remain deferred to their own future approved contracts.
+
+Authoritative Supplier contracts:
+
+- [database mapping](docs/contracts/supplier-database-contract.md)
+- [validation](docs/contracts/supplier-validation-v1.md)
+- [reads and search](docs/contracts/supplier-read-v1.md)
+- [create and update](docs/contracts/supplier-write-v1.md)
+- [archive and restore](docs/contracts/supplier-lifecycle-v1.md)
+- [Station 6 closure](docs/supplier-station6-closure-v1.md)
 
 ## Commands
 
