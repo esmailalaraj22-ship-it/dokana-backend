@@ -5,7 +5,14 @@ import {
   APP_SETTINGS_DEVICE_LOCAL_FIELDS,
   APP_SETTINGS_MUTABLE_FIELDS,
   APP_SETTINGS_SERVER_ONLY_FIELDS,
+  type AppSettingsRow,
 } from './app-settings.types';
+
+// Compile-time proof that the hand-written physical row type stays structurally
+// equivalent to the Drizzle mapping in both directions. Any drift in a column
+// name, TypeScript type, or nullability fails the build rather than silently
+// diverging (resolves S7-DT-06).
+type InferredAppSettingsRow = typeof appSettings.$inferSelect;
 
 const tableConfig = getTableConfig(appSettings);
 
@@ -105,6 +112,12 @@ describe('app_settings Drizzle mapping foundation', () => {
     expect(classified.map(camelToSnake).sort()).toEqual(
       tableConfig.columns.map((column) => column.name).sort(),
     );
+  });
+
+  it('keeps the physical row type structurally equivalent to the Drizzle mapping', () => {
+    const rowMatchesMapping: InferredAppSettingsRow = {} as AppSettingsRow;
+    const mappingMatchesRow: AppSettingsRow = {} as InferredAppSettingsRow;
+    expect([rowMatchesMapping, mappingMatchesRow]).toHaveLength(2);
   });
 
   it('keeps server-only, device-local, and timezone/business-day fields out of the mutable set', () => {

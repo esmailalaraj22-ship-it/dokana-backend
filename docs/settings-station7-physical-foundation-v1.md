@@ -79,8 +79,23 @@ Foundations added now:
 
 - `AppSettingsRow` (physical) is separate from `AppSettingsReadModel` (public
   projection) and `AppSettingsUpdateCommand` / `AppSettingsUpdateInput`
-  (allowlisted mutation surface). The public and mutation types do not inherit
-  the physical shape.
+  (allowlisted mutable values). The public and mutation types do not inherit the
+  physical shape. A compile-time assertion pins `AppSettingsRow` to the Drizzle
+  `$inferSelect` shape in both directions so the two cannot drift.
+- `PreparedAppSettingsUpdate` is the complete mutation envelope for Task 7.4,
+  mirroring the Customer/Product/Supplier prepared-mutation pattern: it separates
+  the settings `values` to change from the operation metadata (`operationId`,
+  `expectedVersion`, canonical `requestHash`). Task 7.2 defines the type only; it
+  implements no write workflow.
+- Empty-command semantics are fixed (frozen contract Section 8.2, matching the
+  established pattern): a PATCH must supply at least one mutable field. An empty
+  command is structurally disallowed and rejected by the future write service, not
+  treated as a silent success. A canonical no-op is distinct — it supplies fields
+  whose values already equal persisted state and succeeds without a physical
+  `UPDATE`.
+- The MVP public timezone is the fixed literal type `MvpTimezone`
+  (`'Asia/Hebron'`) in the read model; the physical Drizzle column remains `text`.
+  Physical and Product types differ by design.
 - `APP_SETTINGS_MUTABLE_FIELDS` is the explicit eight-field write allowlist.
   `APP_SETTINGS_SERVER_ONLY_FIELDS` and `APP_SETTINGS_DEVICE_LOCAL_FIELDS`
   classify the rest. A unit test proves these three sets partition the physical
@@ -97,23 +112,39 @@ generic update.
 
 `export_directory_uri` and `attachments_directory_uri` are device-local (PRD
 FR-SET-02). They are excluded from the public read model and the mutation
-command. Controlled central initialization must insert them as NULL, and the
-settings update path must never write them. Because the central row keeps these
-columns NULL, the existing full-row `sync.capture_change_event` payload contains
-only null directory values and leaks no device path. Residual assumption: if a
-central row ever held a non-NULL URI it would appear in that row's raw
-change-event payload; at verification time no such row exists (zero rows, zero
-non-NULL URIs). This Task modifies no trigger and wipes no data.
+command, and controlled central initialization writes them as NULL; the settings
+update path must never write them. Accurate physical statement: the existing
+full-row `sync.capture_change_event()` trigger serializes the whole row with
+`to_jsonb(NEW)`, so an event **physically contains** the URI keys — but because
+central values are prohibited from being non-NULL, those keys carry only NULL and
+no device path is present. It is therefore inaccurate to say the URI fields are
+absent from change events; the correct rule is that URI **values** are prohibited
+from central application writes. This is the hard future application invariant:
+Station 7 and other central application paths must never populate these
+device-local PostgreSQL fields. Final shared-Sync payload sanitization is Station
+19 (S7-DT-03). If live inspection ever finds a non-NULL central URI, provisioning
+or write work must stop and report it rather than erasing it or altering the
+trigger. At verification time the table held zero rows and zero non-NULL URIs.
+This Task modifies no trigger and wipes no data. See Addendum A, Section B.
 
 ## G. Singleton Lifecycle Handoff (J1)
 
 `app_settings` is at most one row per Store (`store_id` PK). GET must never
 create; a `read_only` Store must never create; PATCH must not silently upsert.
-The future initialization primitive is `EnsureSettingsForStore` (typed contract
-only): `INSERT INTO ledger.app_settings (store_id) VALUES (:storeId) ON CONFLICT
-(store_id) DO NOTHING` inside a trusted tenant transaction — idempotent, never
-triggered by reads. Implementation and its provisioning wiring are deferred to a
-later Task; no migration and no backfill are used.
+The future initializer `EnsureSettingsForStore` (typed contract only) requires
+trusted tenant context **and** explicit application-owned
+`AppSettingsInitializationValues`; it must normalize and validate those values,
+then run `INSERT INTO ledger.app_settings (store_id, ...) VALUES (...) ON CONFLICT
+(store_id) DO NOTHING` inside the trusted tenant transaction. It must not adopt
+PostgreSQL physical policy defaults: a physical DB default is not an approved
+Product default. DB-managed values (`version`, `created_at`, `updated_at`) remain
+DB-managed; device-local URI columns are initialized NULL and are not
+initialization input; `timezone_name` and `business_day_mode` are supplied as the
+fixed MVP server constants (`Asia/Hebron`, `fixed_24h`). The preparatory
+`business_day_start_minutes`/`business_day_end_minutes` are inert under `fixed_24h`
+and carry no Product meaning, so they are not required policy input. Implementation
+and provisioning wiring are deferred to a later Task; no migration and no backfill
+are used.
 
 ## H. Legacy Credit Policy `allow` (J2)
 
@@ -131,12 +162,14 @@ service mistakes, most repository mistakes, and accidental generic update/delete
 use. They do **not** protect against a fully compromised backend process holding
 valid database credentials, or compromised PostgreSQL credentials: the runtime
 role retains `DELETE` and broad `UPDATE` on `ledger.stores` and
-`ledger.app_settings` (RLS-confined to the caller's own Store). Settings changes
-are recorded in the immutable `sync.change_events` feed and `processed_operations`
-rather than the compromise-proof `audit.central_audit_logs`; these are not
-equivalent. This residual is accepted for the MVP threat model (no direct client
-SQL access; single Shop Owner). Privilege/trigger hardening and any store-deletion
-lifecycle are deferred to S18.
+`ledger.app_settings` (RLS-confined to the caller's own Store). Per Addendum A
+Section A, Station 7 settings changes are audited by the immutable
+`sync.change_events` feed plus `sync.processed_operations` (and permitted
+application audit), which the owner accepts as MVP settings evidence; this is not
+claimed equivalent to the compromise-resistant `audit.central_audit_logs`. These
+residuals are accepted for the MVP threat model (no direct client SQL access;
+single Shop Owner) and recorded as `docs/technical-debt/Dokana_Deferred_Technical_Notes.md`
+S7-DT-01 (privilege hardening, S18) and S7-DT-02 (central settings audit).
 
 ## J. Task Boundaries
 

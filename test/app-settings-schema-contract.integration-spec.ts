@@ -52,6 +52,15 @@ function getMappedDefault(column: (typeof tableConfig.columns)[number]): string 
   throw new TypeError(`Unsupported mapped default for ${column.name}.`);
 }
 
+function mappedCheckSql(value: SQL): string {
+  return dialect
+    .sqlToQuery(value)
+    .sql.replaceAll('"ledger"."app_settings".', '')
+    .replaceAll('"', '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 describe('Store settings database contract', () => {
   let adminPool: Pool | undefined;
   let sqliteDatabase: DatabaseSync | undefined;
@@ -196,6 +205,63 @@ describe('Store settings database contract', () => {
     expect(tableConfig.checks.map((constraint) => constraint.name).sort()).toEqual(
       checkNames.rows.map((constraint) => constraint.name),
     );
+  });
+
+  it('validates CHECK semantics against the live catalog and the mapped expressions', async () => {
+    const catalogChecks = await pool().query<{ name: string; definition: string }>(`
+      select conname as name, pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid = 'ledger.app_settings'::regclass and contype = 'c'
+      order by conname
+    `);
+
+    // Independent evidence of the real physical CHECK semantics: integer bounds,
+    // the physical credit-policy domain (which still includes the legacy 'allow'
+    // value), the version/bigint floor, and the business-day mode and ranges.
+    // Hand-authored from the live catalog so the assertion is not derived from
+    // the Drizzle mapping under test.
+    expect(Object.fromEntries(catalogChecks.rows.map((row) => [row.name, row.definition]))).toEqual(
+      {
+        app_settings_backup_interval_hours_check: 'CHECK ((backup_interval_hours >= 1))',
+        app_settings_business_day_end_minutes_check:
+          'CHECK (((business_day_end_minutes >= 0) AND (business_day_end_minutes <= 1439)))',
+        app_settings_business_day_mode_check:
+          "CHECK ((business_day_mode = ANY (ARRAY['fixed_24h'::text, 'custom'::text])))",
+        app_settings_business_day_start_minutes_check:
+          'CHECK (((business_day_start_minutes >= 0) AND (business_day_start_minutes <= 1439)))',
+        app_settings_daily_report_time_minutes_check:
+          'CHECK (((daily_report_time_minutes >= 0) AND (daily_report_time_minutes <= 1439)))',
+        app_settings_debt_age_alert_days_check: 'CHECK ((debt_age_alert_days >= 0))',
+        app_settings_default_credit_limit_minor_check:
+          'CHECK (((default_credit_limit_minor IS NULL) OR (default_credit_limit_minor >= 0)))',
+        app_settings_default_credit_policy_check:
+          "CHECK ((default_credit_policy = ANY (ARRAY['allow'::text, 'warn'::text, 'block'::text])))",
+        app_settings_version_check: 'CHECK ((version >= 1))',
+      },
+    );
+
+    // The mapped Drizzle CHECK expressions, pinned to independent expectations so
+    // a future edit that keeps a name but changes the expression is detected.
+    expect(
+      Object.fromEntries(
+        tableConfig.checks.map((constraint) => [constraint.name, mappedCheckSql(constraint.value)]),
+      ),
+    ).toEqual({
+      app_settings_daily_report_time_minutes_check:
+        'daily_report_time_minutes >= 0 and daily_report_time_minutes <= 1439',
+      app_settings_default_credit_policy_check:
+        "default_credit_policy in ('allow', 'warn', 'block')",
+      app_settings_default_credit_limit_minor_check:
+        'default_credit_limit_minor is null or default_credit_limit_minor >= 0',
+      app_settings_debt_age_alert_days_check: 'debt_age_alert_days >= 0',
+      app_settings_backup_interval_hours_check: 'backup_interval_hours >= 1',
+      app_settings_version_check: 'version >= 1',
+      app_settings_business_day_start_minutes_check:
+        'business_day_start_minutes >= 0 and business_day_start_minutes <= 1439',
+      app_settings_business_day_end_minutes_check:
+        'business_day_end_minutes >= 0 and business_day_end_minutes <= 1439',
+      app_settings_business_day_mode_check: "business_day_mode in ('fixed_24h', 'custom')",
+    });
   });
 
   it('verifies forced RLS, tenant policy, and the settings trigger set', async () => {
