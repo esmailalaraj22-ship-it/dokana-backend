@@ -42,6 +42,77 @@ export const stores = ledgerSchema.table(
   ],
 );
 
+// Store operational settings singleton. Exactly one row per Store keyed by the
+// primary key store_id. The mapping models physical truth for every column,
+// including fields that are not publicly readable or client-mutable (timezone,
+// business-day preparation, and the device-local directory URIs). Mapping a
+// column here does not grant API exposure, client mutability, or Product policy.
+export const appSettings = ledgerSchema.table(
+  'app_settings',
+  {
+    storeId: uuid('store_id').primaryKey(),
+    dailyReportTimeMinutes: integer('daily_report_time_minutes').notNull().default(1200),
+    defaultCreditPolicy: text('default_credit_policy')
+      .$type<'allow' | 'warn' | 'block'>()
+      .notNull()
+      .default('warn'),
+    defaultCreditLimitMinor: bigint('default_credit_limit_minor', { mode: 'bigint' }),
+    allowNegativeStock: boolean('allow_negative_stock').notNull().default(false),
+    lowStockAlertEnabled: boolean('low_stock_alert_enabled').notNull().default(true),
+    debtAgeAlertDays: integer('debt_age_alert_days').notNull().default(90),
+    backupEnabled: boolean('backup_enabled').notNull().default(true),
+    backupIntervalHours: integer('backup_interval_hours').notNull().default(24),
+    exportDirectoryUri: text('export_directory_uri'),
+    attachmentsDirectoryUri: text('attachments_directory_uri'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+    timezoneName: text('timezone_name').notNull().default('Asia/Hebron'),
+    businessDayStartMinutes: integer('business_day_start_minutes').notNull().default(720),
+    businessDayEndMinutes: integer('business_day_end_minutes').notNull().default(720),
+    businessDayMode: text('business_day_mode')
+      .$type<'fixed_24h' | 'custom'>()
+      .notNull()
+      .default('fixed_24h'),
+  },
+  (table) => [
+    foreignKey({
+      name: 'app_settings_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('cascade'),
+    check(
+      'app_settings_daily_report_time_minutes_check',
+      sql`${table.dailyReportTimeMinutes} >= 0 and ${table.dailyReportTimeMinutes} <= 1439`,
+    ),
+    check(
+      'app_settings_default_credit_policy_check',
+      sql`${table.defaultCreditPolicy} in ('allow', 'warn', 'block')`,
+    ),
+    check(
+      'app_settings_default_credit_limit_minor_check',
+      sql`${table.defaultCreditLimitMinor} is null or ${table.defaultCreditLimitMinor} >= 0`,
+    ),
+    check('app_settings_debt_age_alert_days_check', sql`${table.debtAgeAlertDays} >= 0`),
+    check('app_settings_backup_interval_hours_check', sql`${table.backupIntervalHours} >= 1`),
+    check('app_settings_version_check', sql`${table.version} >= 1`),
+    check(
+      'app_settings_business_day_start_minutes_check',
+      sql`${table.businessDayStartMinutes} >= 0 and ${table.businessDayStartMinutes} <= 1439`,
+    ),
+    check(
+      'app_settings_business_day_end_minutes_check',
+      sql`${table.businessDayEndMinutes} >= 0 and ${table.businessDayEndMinutes} <= 1439`,
+    ),
+    check(
+      'app_settings_business_day_mode_check',
+      sql`${table.businessDayMode} in ('fixed_24h', 'custom')`,
+    ),
+  ],
+);
+
 export const devices = ledgerSchema.table(
   'devices',
   {
