@@ -1,8 +1,8 @@
 // Station 7 / Task 7.2 — Store settings physical foundation type boundary.
 //
-// This module defines the type separation that later Station 7 Tasks (7.3 read,
-// 7.4 write) must build upon. It intentionally contains no workflow, no HTTP
-// endpoint, no repository implementation, and no persistence access. Its purpose
+// This module defines the type separation used by Task 7.3 reads and required by
+// the future Task 7.4 write workflow. It intentionally contains no workflow,
+// HTTP endpoint, repository implementation, or persistence access. Its purpose
 // is to keep the physical storage model from silently becoming the public read
 // model or the mutation surface, and to keep PostgreSQL physical defaults from
 // silently becoming approved Product policy.
@@ -39,6 +39,8 @@ export type BusinessDayMode = 'fixed_24h' | 'custom';
  */
 export type MvpTimezone = 'Asia/Hebron';
 
+export const MVP_TIMEZONE_NAME: MvpTimezone = 'Asia/Hebron';
+
 /** The fixed MVP business-day mode. Physical storage remains `text`. */
 export type MvpBusinessDayMode = 'fixed_24h';
 
@@ -70,7 +72,7 @@ export interface AppSettingsRow {
 }
 
 /**
- * Public read projection returned by the future GET workflow. It excludes the
+ * Public read projection returned by the GET workflow. It excludes the
  * server-derived tenant key, the device-local directory URIs, and the
  * preparatory business-day cutoff fields. `bigint` values become lossless
  * decimal strings; timestamps become RFC 3339 UTC strings. Timezone is exposed
@@ -90,6 +92,25 @@ export interface AppSettingsReadModel {
   version: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Narrow physical projection used by the settings read repository. It contains
+ * only columns required to assemble the public read model.
+ */
+export interface AppSettingsReadRow {
+  dailyReportTimeMinutes: number;
+  defaultCreditPolicy: PersistedCreditPolicy;
+  defaultCreditLimitMinor: bigint | null;
+  allowNegativeStock: boolean;
+  lowStockAlertEnabled: boolean;
+  debtAgeAlertDays: number;
+  backupEnabled: boolean;
+  backupIntervalHours: number;
+  timezoneName: string;
+  version: bigint;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /**
