@@ -94,6 +94,11 @@ export interface AppSettingsReadModel {
   updatedAt: string;
 }
 
+/** Public PATCH response. The operation identity is included for offline retry correlation. */
+export interface AppSettingsMutationResponse extends AppSettingsReadModel {
+  operationId: string;
+}
+
 /**
  * Narrow physical projection used by the settings read repository. It contains
  * only columns required to assemble the public read model.
@@ -159,6 +164,22 @@ export interface PreparedAppSettingsUpdate {
   values: AppSettingsUpdateCommand;
   requestHash: string;
 }
+
+export type AppSettingsMutationFailureCode =
+  | 'SETTINGS_NOT_INITIALIZED'
+  | 'SETTINGS_VERSION_CONFLICT'
+  | 'OPERATION_ID_CONFLICT'
+  | 'OPERATION_IN_PROGRESS';
+
+export interface AppSettingsMutationFailure {
+  code: AppSettingsMutationFailureCode;
+  message: string;
+  statusCode: 404 | 409;
+}
+
+export type AppSettingsMutationResult =
+  | { ok: true; response: AppSettingsMutationResponse }
+  | { ok: false; error: AppSettingsMutationFailure };
 
 /**
  * Explicit, application-owned initial settings values that controlled Store

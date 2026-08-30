@@ -4,13 +4,23 @@ import { AuthenticationModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
 import { AppSettingsReadRepository } from './app-settings-read.repository';
 import { AppSettingsReadService } from './app-settings-read.service';
+import { AppSettingsInitializationService } from './app-settings-initialization.service';
+import { AppSettingsWriteRepository } from './app-settings-write.repository';
+import { AppSettingsWriteService } from './app-settings-write.service';
 import { OperationalTimeService } from './operational-time.service';
 import { SettingsController } from './settings.controller';
 
 @Module({
   imports: [AuthenticationModule, DatabaseModule],
   controllers: [SettingsController],
-  providers: [AppSettingsReadRepository, AppSettingsReadService, OperationalTimeService],
-  exports: [OperationalTimeService],
+  providers: [
+    AppSettingsReadRepository,
+    AppSettingsReadService,
+    AppSettingsWriteRepository,
+    AppSettingsWriteService,
+    AppSettingsInitializationService,
+    OperationalTimeService,
+  ],
+  exports: [AppSettingsInitializationService, OperationalTimeService],
 })
 export class SettingsModule {}
