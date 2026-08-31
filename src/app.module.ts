@@ -6,6 +6,7 @@ import { LoggingModule } from './common/logging/logging.module';
 import { ApplicationConfigModule } from './config/config.module';
 import { CustomersModule } from './customers/customers.module';
 import { HealthModule } from './health/health.module';
+import { MoneyAccountsModule } from './money-accounts/money-accounts.module';
 import { ProductsModule } from './products/products.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
@@ -17,6 +18,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     CommonModule,
     HealthModule,
     AuthenticationModule,
+    MoneyAccountsModule,
     CustomersModule,
     ProductsModule,
     SuppliersModule,
