@@ -414,3 +414,64 @@ export const productUnits = ledgerSchema.table(
       .where(sql`${table.isBase} = true and ${table.status} = 'active'`),
   ],
 );
+
+export const moneyAccounts = ledgerSchema.table(
+  'money_accounts',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    name: text('name').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    accountType: text('account_type').$type<'cash' | 'transfer' | 'external_party'>().notNull(),
+    availability: text('availability')
+      .$type<'available' | 'held_by_external_party'>()
+      .notNull()
+      .default('available'),
+    isDefault: boolean('is_default').notNull().default(false),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'money_accounts_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_accounts_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('money_accounts_store_id_id_key').on(table.storeId, table.id),
+    unique('money_accounts_store_id_normalized_name_key').on(table.storeId, table.normalizedName),
+    unique('money_accounts_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('money_accounts_name_check', sql`length(trim(${table.name})) > 0`),
+    check('money_accounts_normalized_name_check', sql`length(trim(${table.normalizedName})) > 0`),
+    check(
+      'money_accounts_account_type_check',
+      sql`${table.accountType} in ('cash', 'transfer', 'external_party')`,
+    ),
+    check(
+      'money_accounts_availability_check',
+      sql`${table.availability} in ('available', 'held_by_external_party')`,
+    ),
+    check('money_accounts_status_check', sql`${table.status} in ('active', 'archived')`),
+    check(
+      'money_accounts_check',
+      sql`(${table.status} = 'archived' and ${table.archivedAt} is not null) or ${table.status} = 'active'`,
+    ),
+    check('money_accounts_version_check', sql`${table.version} >= 1`),
+    uniqueIndex('uq_store_single_cash_account')
+      .on(table.storeId)
+      .where(sql`${table.accountType} = 'cash' and ${table.status} = 'active'`),
+  ],
+);
