@@ -241,7 +241,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S8 - Money Account Catalog Foundation
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW / BACKEND-OWNER CLOSURE.
 - **Purpose:** Establish valid money sources and destinations before money movement.
 - **Distinct boundary:** Account identity/lifecycle is separable from posting, balances,
   internal transfers, and owner funding.
@@ -256,6 +256,21 @@ invent opening-balance behavior or authorize implementation before orientation.
   orientation; no balance may be treated as authoritative from a mutable column.
 - **Start condition:** S3-S4 remain valid and S8 contract decisions are approved.
 - **Closure intent:** Stable account identifiers and lifecycle ready for S10 posting.
+- **Station 8 implementation:** COMPLETE — PENDING INDEPENDENT REVIEW /
+  BACKEND-OWNER CLOSURE.
+- **Formal Station 8 closure:** NOT PERFORMED.
+- **S9 handoff:** S9 is next and owns Accounting Periods and Posting Controls. No Money
+  Account behavior moves into S9.
+- **S10 handoff:** S10 consumes stable Money Account IDs/lifecycle and owns movements,
+  balances, transfers, opening balances, and owner-money posting. Posting must coordinate
+  with S8 lifecycle locking so it cannot race successfully against archive.
+- **S18 handoff:** Store/SaaS provisioning must invoke S8
+  `SystemCashProvisioningService.ensureForStore` during initial Store provisioning and
+  must not reimplement Cash identity, UUID ownership, type/default rules, or lifecycle.
+  The current production Store-provisioning caller is `NONE`; this is an approved future
+  S18 integration handoff, not an S8 blocker.
+- **S19 handoff:** S19 consumes stabilized Money Account IDs, versions, lifecycle,
+  idempotency, and change semantics without redefining Money Account business rules.
 
 ### S9 - Accounting Periods and Posting Controls
 
