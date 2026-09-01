@@ -2,19 +2,19 @@
 
 ## 1. Document Status and Governance
 
-| Field                    | Value                                                                |
-| ------------------------ | -------------------------------------------------------------------- |
-| Status                   | **PROPOSED - PENDING INDEPENDENT REVIEW AND BACKEND-OWNER APPROVAL** |
-| Repository               | `C:\Users\esmail\Desktop\Dokana`                                     |
-| Review branch            | `main`                                                               |
-| Review checkpoint        | `9844daba1e017af0e24afaedfd142ac02595241f`                           |
-| Closed execution history | Stations S0 through S6                                               |
-| Next candidate           | S7 - Store Operational Settings Foundation                           |
+| Field                    | Value                                        |
+| ------------------------ | -------------------------------------------- |
+| Status                   | **APPROVED - ACTIVE EXECUTION ROADMAP**      |
+| Repository               | `C:\Users\esmail\Desktop\Dokana`             |
+| Review branch            | `main`                                       |
+| Review checkpoint        | `43109e3dfb29af2239d4169f5986d110c2b39d64`   |
+| Closed execution history | Stations S0 through S8                       |
+| Next candidate           | S9 - Accounting Periods and Posting Controls |
 
-This document is a planning and execution-tracking proposal. It is not an approved
-product contract, does not authorize implementation, and does not start or freeze any
-future Station. Every future Station still requires orientation, contract review,
-verification, independent review where applicable, and backend-owner approval.
+This document is the approved execution-tracking roadmap. It is not a product contract,
+does not by itself authorize implementation, and does not start or freeze any future
+Station. Every future Station still requires orientation, contract review, verification,
+independent review where applicable, and backend-owner approval.
 
 The roadmap is subordinate to the authorities listed below. If it conflicts with a
 higher authority, the higher authority wins and the roadmap must be corrected through
@@ -61,60 +61,62 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| HEAD                            | `9844daba1e017af0e24afaedfd142ac02595241f` |
-| `origin/main`                   | `9844daba1e017af0e24afaedfd142ac02595241f` |
+| HEAD                            | `43109e3dfb29af2239d4169f5986d110c2b39d64` |
+| `origin/main`                   | `43109e3dfb29af2239d4169f5986d110c2b39d64` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 5 applied, 0 pending                       |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S6                                         |
-| Later Station started           | No                                         |
+| Last fully closed Station       | S8                                         |
+| Later Station started           | No; S9 remains not started                 |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S6
+## 5. Completed Stations S0-S8
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
 
-| Station                                              | Status | Delivered capability                                                                                                                | Historical coverage                                                | Evidence                                                                            |
-| ---------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| S0 - Repository and Reference Assessment             | CLOSED | Repository, baseline, SQLite, mapping, and test-reference assessment                                                                | Historical repository/reference assessment                         | Project history and reference package                                               |
-| S1 - PostgreSQL Runtime Validation                   | CLOSED | Real PostgreSQL baseline/runtime assessment and documented limitations                                                              | Historical PostgreSQL validation                                   | Reference runtime evidence and project history                                      |
-| S2 - NestJS Backend Infrastructure                   | CLOSED | Configuration, logging, health, database transaction context, and test infrastructure                                               | Historical NestJS infrastructure                                   | Git history and [README](../../README.md)                                           |
-| S3 - Authentication and Database Security Foundation | CLOSED | Controlled migration ledger/runner, role boundaries, auth API, sessions/tokens, membership and device bootstrap, RLS/security tests | Historical migration foundation and much of identity/platform core | [Station 3 architecture](../station-3-architecture.md) and migrations `0001`-`0005` |
-| S4 - Business Foundation and Customers               | CLOSED | Store business-write gate plus Customer database, validation, read, write, lifecycle, privacy, and idempotency contracts            | Customer portion of historical master data                         | Commits through `a6f567f` and Customer contracts                                    |
-| S5 - Product and Product Unit Catalog                | CLOSED | Product/unit mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                  | Product/unit portion of historical master data                     | [Station 5 closure](../product-unit-station5-closure-v1.md)                         |
-| S6 - Supplier Master Data Foundation                 | CLOSED | Supplier mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                      | Supplier-master portion of historical master data                  | [Station 6 closure](../supplier-station6-closure-v1.md)                             |
+| Station                                              | Status | Delivered capability                                                                                                                | Historical coverage                                                | Evidence                                                                                                                                                                              |
+| ---------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S0 - Repository and Reference Assessment             | CLOSED | Repository, baseline, SQLite, mapping, and test-reference assessment                                                                | Historical repository/reference assessment                         | Project history and reference package                                                                                                                                                 |
+| S1 - PostgreSQL Runtime Validation                   | CLOSED | Real PostgreSQL baseline/runtime assessment and documented limitations                                                              | Historical PostgreSQL validation                                   | Reference runtime evidence and project history                                                                                                                                        |
+| S2 - NestJS Backend Infrastructure                   | CLOSED | Configuration, logging, health, database transaction context, and test infrastructure                                               | Historical NestJS infrastructure                                   | Git history and [README](../../README.md)                                                                                                                                             |
+| S3 - Authentication and Database Security Foundation | CLOSED | Controlled migration ledger/runner, role boundaries, auth API, sessions/tokens, membership and device bootstrap, RLS/security tests | Historical migration foundation and much of identity/platform core | [Station 3 architecture](../station-3-architecture.md) and migrations `0001`-`0005`                                                                                                   |
+| S4 - Business Foundation and Customers               | CLOSED | Store business-write gate plus Customer database, validation, read, write, lifecycle, privacy, and idempotency contracts            | Customer portion of historical master data                         | Commits through `a6f567f` and Customer contracts                                                                                                                                      |
+| S5 - Product and Product Unit Catalog                | CLOSED | Product/unit mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                  | Product/unit portion of historical master data                     | [Station 5 closure](../product-unit-station5-closure-v1.md)                                                                                                                           |
+| S6 - Supplier Master Data Foundation                 | CLOSED | Supplier mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                      | Supplier-master portion of historical master data                  | [Station 6 closure](../supplier-station6-closure-v1.md)                                                                                                                               |
+| S7 - Store Operational Settings Foundation           | CLOSED | Settings mapping, operational-time context, tenant-safe reads, initialization, and idempotent owner-authorized mutations            | Operational settings portion of historical master data             | [S7 contract](../contracts/store-settings-operational-time-v1.md) and [S7.4 record](../settings-station7-safe-mutation-v1.md)                                                         |
+| S8 - Money Account Catalog Foundation                | CLOSED | Money Account mapping, validation, tenant-safe reads/writes, lifecycle, idempotency, and one-active-Cash invariants                 | Money Account portion of historical master data                    | [S8.2 record](../money-account-station8-physical-foundation-v1.md), [S8.3 record](../money-account-station8-read-v1.md), and [S8.4 record](../money-account-station8-lifecycle-v1.md) |
 
-The safe completed boundary does not include subscription lifecycle, store operational
-settings, money/accounting workflows, inventory, supplier financial workflows, sales,
-generic synchronization, reporting, or recovery.
+The safe completed boundary does not include subscription lifecycle, accounting periods,
+money posting or balances, inventory, supplier financial workflows, sales, generic
+synchronization, reporting, or recovery.
 
 ## 6. Historical Roadmap Reconciliation
 
-| Historical area                         | Current classification  | Already satisfied by                                  | Remaining work                                         | Proposed future owner |
-| --------------------------------------- | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------ | --------------------- |
-| Repository/reference assessment         | DONE                    | S0                                                    | None                                                   | None                  |
-| PostgreSQL runtime validation           | DONE                    | S1                                                    | Final release revalidation                             | S23                   |
-| NestJS infrastructure                   | DONE                    | S2                                                    | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S6                                                 | Incremental domain mappings and versioned migrations   | Respective Stations   |
-| Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                 | Subscription, licensing, store/device administration   | S18                   |
-| Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                     | Full subscription and offline-license lifecycle        | S18                   |
-| Master data                             | SPLIT, PARTIAL          | Customers S4, Products S5, Suppliers S6               | Operational settings and Money Accounts                | S7-S8                 |
-| Sales/receivables                       | SPLIT, STILL REQUIRED   | Prerequisites only                                    | Sale posting, receivables, collections                 | S14-S15               |
-| Supplier invoices/payables              | PARTIAL, SPLIT          | Supplier master prerequisite                          | Invoice/payable posting and settlement                 | S12-S13               |
-| Manual inventory/costing                | STILL REQUIRED          | Product prerequisite and physical baseline            | Inventory authority, projection, and costing           | S11                   |
-| Expenses/owner ledger                   | SPLIT, MOVED            | Physical baseline only                                | Owner/money foundation early, expenses later           | S10, S16              |
-| Returns/corrections/periods             | SPLIT, MOVED            | Physical baseline only                                | Period controls early, corrections later               | S9, S17               |
-| Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations | Generic push/pull/conflicts/bootstrap                  | S19                   |
-| Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                            | Business-data bootstrap with sync, recovery separately | S19, S22              |
-| Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                          | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
-| Final validation                        | STILL REQUIRED          | Per-Station verification                              | Cross-domain release gate                              | S23                   |
+| Historical area                         | Current classification  | Already satisfied by                                                    | Remaining work                                         | Proposed future owner |
+| --------------------------------------- | ----------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ | --------------------- |
+| Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
+| PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
+| NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S8                                                                   | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
+| Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
+| Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
+| Sales/receivables                       | SPLIT, STILL REQUIRED   | Prerequisites only                                                      | Sale posting, receivables, collections                 | S14-S15               |
+| Supplier invoices/payables              | PARTIAL, SPLIT          | Supplier master prerequisite                                            | Invoice/payable posting and settlement                 | S12-S13               |
+| Manual inventory/costing                | STILL REQUIRED          | Product prerequisite and physical baseline                              | Inventory authority, projection, and costing           | S11                   |
+| Expenses/owner ledger                   | SPLIT, MOVED            | Physical baseline only                                                  | Owner/money foundation early, expenses later           | S10, S16              |
+| Returns/corrections/periods             | SPLIT, MOVED            | Physical baseline only                                                  | Period controls early, corrections later               | S9, S17               |
+| Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
+| Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
+| Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
+| Final validation                        | STILL REQUIRED          | Per-Station verification                                                | Cross-domain release gate                              | S23                   |
 
 Historical numbering is discovery evidence, not a dependency constraint. The current
 sequence preserves full scope while moving foundations ahead of their consumers.
@@ -129,6 +131,10 @@ sequence preserves full scope while moving foundations ahead of their consumers.
   trusted tenant context.
 - Forced/fail-closed RLS and the shared store business-write transaction boundary.
 - Customer, Product/Product Unit, and Supplier master-data APIs and contracts.
+- Store settings, fixed `Asia/Hebron` operational-time context, and owner-authorized
+  settings reads and writes.
+- Money Account catalog reads, writes, lifecycle, deterministic Cash provisioning, and
+  one-active-Cash enforcement.
 - Domain mutation foundations using stable UUIDs, `operationId`, canonical request
   hashes, exact/rejected replay, versions, processed operations, audit effects, and
   change events.
@@ -144,10 +150,10 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 
 ### Still required
 
-Operational settings, Money Accounts, accounting periods, money posting, owner ledger,
-inventory/costing, supplier financial workflows, sales/receivables, collections,
-expenses, returns/corrections, platform lifecycle, generic synchronization, reports,
-notifications, attachments, backup/restore, and final release validation.
+Accounting periods, money posting, owner ledger, inventory/costing, supplier financial
+workflows, sales/receivables, collections, expenses, returns/corrections, platform
+lifecycle, generic synchronization, reports, notifications, attachments, backup/restore,
+and final release validation.
 
 ## 8. Remaining PRD Coverage and Completeness Map
 
@@ -158,8 +164,8 @@ notifications, attachments, backup/restore, and final release validation.
 | Customer master data                               | Implemented                          | S4; attachment support S21      |
 | Product and Product Unit catalog                   | Implemented                          | S5; attachment support S21      |
 | Supplier master data                               | Implemented                          | S6; financial workflows S12-S13 |
-| Store operational settings                         | Still required                       | S7                              |
-| Money Account catalog                              | Still required                       | S8                              |
+| Store operational settings                         | Implemented                          | S7 (closed)                     |
+| Money Account catalog                              | Implemented                          | S8 (closed)                     |
 | Accounting periods/posting controls                | Still required                       | S9                              |
 | Money movements/transfers/balances/owner ledger    | Still required                       | S10                             |
 | Manual inventory/stock projection/costing          | Still required                       | S11                             |
@@ -178,7 +184,7 @@ notifications, attachments, backup/restore, and final release validation.
 | Automatic or partial invoice goods receipt         | Superseded by approved design        | No future owner                 |
 | Flutter/Drift/SQLite mobile implementation         | Outside backend scope                | Mobile project                  |
 
-If S7-S23 are completed against their approved future contracts, every material backend
+If S9-S23 are completed against their approved future contracts, every material backend
 PRD capability has an execution owner. No material capability is intentionally orphaned.
 
 ## 9. Opening and Initial-State Ownership
@@ -195,7 +201,7 @@ Opening state is assigned to the Station that owns its authoritative ledger or m
 Future contracts must determine approved accounting details. This assignment does not
 invent opening-balance behavior or authorize implementation before orientation.
 
-## 10. Proposed Future Execution Roadmap S7-S23
+## 10. Execution Roadmap S7-S23
 
 | Station | Name                                                     | Primary dependency result                   |
 | ------- | -------------------------------------------------------- | ------------------------------------------- |
@@ -221,7 +227,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S7 - Store Operational Settings Foundation
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Establish trusted store-level operational time and policy context.
 - **Distinct boundary:** Settings are shared inputs to periods, inventory, credit,
   reports, notifications, and recovery rather than side effects of those domains.
@@ -235,13 +241,14 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **Coverage:** Remaining master-data/settings portion and PRD FR-SET policy controls.
 - **Known risks/migrations:** Reconcile PostgreSQL `ledger.app_settings` with the SQLite
   v1.2 settings patch without rewriting the reference package.
-- **Start condition:** Roadmap approval followed by S7 orientation and contract review.
+- **Closure evidence:** Tasks S7.1-S7.4 completed through `6486fae`; independent review,
+  remediation, and backend-owner closure completed.
 - **Closure intent:** A trusted, tested settings contract that dependent Stations can
   consume without inventing time or policy semantics.
 
 ### S8 - Money Account Catalog Foundation
 
-- **Status:** IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW / BACKEND-OWNER CLOSURE.
+- **Status:** CLOSED.
 - **Purpose:** Establish valid money sources and destinations before money movement.
 - **Distinct boundary:** Account identity/lifecycle is separable from posting, balances,
   internal transfers, and owner funding.
@@ -256,9 +263,9 @@ invent opening-balance behavior or authorize implementation before orientation.
   orientation; no balance may be treated as authoritative from a mutable column.
 - **Start condition:** S3-S4 remain valid and S8 contract decisions are approved.
 - **Closure intent:** Stable account identifiers and lifecycle ready for S10 posting.
-- **Station 8 implementation:** COMPLETE — PENDING INDEPENDENT REVIEW /
-  BACKEND-OWNER CLOSURE.
-- **Formal Station 8 closure:** NOT PERFORMED.
+- **Station 8 implementation:** COMPLETE at `43109e3`.
+- **Formal Station 8 closure:** COMPLETE; the independent closure review approved S8
+  with no blocking findings, and the backend owner authorized formal closure.
 - **S9 handoff:** S9 is next and owns Accounting Periods and Posting Controls. No Money
   Account behavior moves into S9.
 - **S10 handoff:** S10 consumes stable Money Account IDs/lifecycle and owns movements,
@@ -600,8 +607,6 @@ its required foundation.
 
 | Deferred capability                      | Reason                                              | Future owner |
 | ---------------------------------------- | --------------------------------------------------- | ------------ |
-| Settings                                 | First unimplemented operational foundation          | S7           |
-| Money Accounts                           | Separate catalog and security boundary              | S8           |
 | Period controls                          | Required before posting                             | S9           |
 | Money/owner ledger/opening balances      | Requires accounts and periods                       | S10          |
 | Inventory/costing/opening stock          | Requires Products, settings, and periods            | S11          |
@@ -681,10 +686,10 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S6 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S8 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations remain proposed until the backend owner approves this roadmap and later
-  approves each Station's orientation.
+- Future Stations S9-S23 remain proposed until the backend owner approves each Station's
+  orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
   dependency review, independent review, and backend-owner approval.
@@ -698,14 +703,14 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                                 | Current position                                                            |
-| ------------------------------------- | --------------------------------------------------------------------------- |
-| Last fully closed Station             | S6 - Supplier Master Data Foundation                                        |
-| Last closed checkpoint                | `9844daba1e017af0e24afaedfd142ac02595241f`                                  |
-| Safe completed capabilities           | S0-S6 boundaries documented above                                           |
-| First unimplemented hard dependency   | Trusted store operational settings, timezone, and operational-day semantics |
-| Next candidate if roadmap is approved | S7 - Store Operational Settings Foundation                                  |
-| S7 current status                     | PROPOSED - NOT STARTED                                                      |
+| Field                                 | Current position                             |
+| ------------------------------------- | -------------------------------------------- |
+| Last fully closed Station             | S8 - Money Account Catalog Foundation        |
+| Last closed implementation checkpoint | `43109e3dfb29af2239d4169f5986d110c2b39d64`   |
+| Safe completed capabilities           | S0-S8 boundaries documented above            |
+| First unimplemented hard dependency   | Accounting periods and posting controls      |
+| Next candidate                        | S9 - Accounting Periods and Posting Controls |
+| S9 current status                     | PROPOSED - NOT STARTED                       |
 
-Do not start S7 from this document. The next permitted action after materialization is an
-independent read-only roadmap review followed by an explicit backend-owner decision.
+Do not start S9 implementation from this document. The next permitted action is the
+explicitly approved S9.1 contract freeze followed by its independent review.
