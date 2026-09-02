@@ -316,9 +316,16 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** IN PROGRESS. S10.1 IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW;
+  S10.2-S10.5 NOT STARTED.
 - **Purpose:** Establish authoritative money movements, projections, transfers, and
   owner funding semantics.
+- **S10.1 contract:** [Money Posting Contract v1](../contracts/money-posting-v1.md)
+  (zero-database-change; freezes money source of truth, bigint safety, `postingDate =
+  businessDate(occurredAt)` compatibility with the existing `occurred_at` period trigger,
+  S9 reuse, opening-balance and owner classifications, deferred profit withdrawal, negative
+  balance, deterministic fact identity, application immutability, transfer invariant,
+  canonical account/transaction order, and the reversal/replacement boundary).
 - **Distinct boundary:** Supplier/customer settlements and expenses consume this
   authority; they must not invent their own balance mechanics.
 - **Hard dependencies:** S8 Money Accounts and S9 posting controls.
@@ -727,8 +734,8 @@ decision does not authorize an implementer to invent policy.
 | Last closed implementation checkpoint | `85ab494ac9383e6e31cba266a5b0d3749dee7740`           |
 | Safe completed capabilities           | S0-S9 boundaries documented above                    |
 | First incomplete release dependency   | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| Next candidate                        | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| S9 current status                     | CLOSED                                               |
+| Next candidate                        | S10.1 independent contract review                    |
+| S10 current status                    | IN PROGRESS - S10.1 pending independent review       |
 
 Do not start S10 from this document. S10 requires its own orientation, contract, and
 explicit backend-owner approval before implementation.
