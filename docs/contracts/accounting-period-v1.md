@@ -2,9 +2,9 @@
 
 ## 1. Status and Authority
 
-This document freezes Dokana Station 9 / Task 9.1 for independent review. It is a
-backend-owner-approved contract record, not an implementation record. S9 application
-code, APIs, Drizzle mapping, migrations, database changes, and tests remain not started.
+This document froze Dokana Station 9 / Task 9.1 for independent review. It is a
+backend-owner-approved contract record, not an implementation-status record. Current
+implementation status is tracked in the Backend Execution Roadmap and Task records.
 
 The contract is subordinate to current backend-owner decisions, root
 [`AGENTS.md`](../../AGENTS.md), the

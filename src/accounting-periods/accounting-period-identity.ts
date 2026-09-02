@@ -6,6 +6,14 @@ export const ACCOUNTING_PERIOD_UUID_NAMESPACE = '2c9aa30a-c026-5003-93f8-8e2e921
 
 const POSTGRESQL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export function canonicalizeAccountingPeriodId(value: string): string {
+  if (!POSTGRESQL_UUID_PATTERN.test(value)) {
+    throw new TypeError('Invalid Accounting Period ID.');
+  }
+
+  return value.toLowerCase();
+}
+
 export function deriveAccountingPeriodId(
   storeId: string,
   periodYear: number,

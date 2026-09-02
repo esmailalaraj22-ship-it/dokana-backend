@@ -78,6 +78,6 @@ function or trigger:     0
 reference-package change: 0
 ```
 
-S9.2 is implementation-complete and awaits independent foundation review. S9.3 tenant-safe period
-reads, S9.4 provisioning/lifecycle, S9.5 posting-context and close-vs-post control, and every S10+
-workflow remain not started.
+S9.2 is closed after its independent foundation review approved the mapping and runtime evidence.
+S9.3 consumes this foundation for tenant-safe reads. S9.4 provisioning/lifecycle, S9.5
+posting-context and close-vs-post control, and every S10+ workflow remain not started.

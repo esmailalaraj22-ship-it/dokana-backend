@@ -7,9 +7,9 @@
 | Status                   | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository               | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch            | `main`                                     |
-| Review checkpoint        | `43109e3dfb29af2239d4169f5986d110c2b39d64` |
+| Review checkpoint        | `9a7945033d351359b0117e4aeee7969991a8f0e0` |
 | Closed execution history | Stations S0 through S8                     |
-| Next candidate           | S9.2 independent foundation review         |
+| Next candidate           | S9.4 monthly period provisioning/lifecycle |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -58,18 +58,18 @@ backend owner before implementation.
 
 The roadmap was reconstructed against this verified state:
 
-| Check                           | Verified state                               |
-| ------------------------------- | -------------------------------------------- |
-| Branch                          | `main`                                       |
-| HEAD                            | `43109e3dfb29af2239d4169f5986d110c2b39d64`   |
-| `origin/main`                   | `43109e3dfb29af2239d4169f5986d110c2b39d64`   |
-| Ahead/behind                    | `0/0`                                        |
-| Working tree                    | Clean                                        |
-| Migrations                      | 5 applied, 0 pending                         |
-| Migration checksum verification | Pass                                         |
-| Reference SHA-256 verification  | 11 files checked, 0 mismatches               |
-| Last fully closed Station       | S8                                           |
-| Later Station started           | S9.2 implementation complete; review pending |
+| Check                           | Verified state                                 |
+| ------------------------------- | ---------------------------------------------- |
+| Branch                          | `main`                                         |
+| HEAD                            | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
+| `origin/main`                   | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
+| Ahead/behind                    | `0/0`                                          |
+| Working tree                    | Clean                                          |
+| Migrations                      | 5 applied, 0 pending                           |
+| Migration checksum verification | Pass                                           |
+| Reference SHA-256 verification  | 11 files checked, 0 mismatches                 |
+| Last fully closed Station       | S8                                             |
+| Later Station started           | S9.3 implementation complete; S9.4 not started |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -281,8 +281,8 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S9 - Accounting Periods and Posting Controls
 
-- **Status:** S9.1 CLOSED; S9.2 IMPLEMENTATION COMPLETE - PENDING INDEPENDENT FOUNDATION
-  REVIEW; S9.3, S9.4, AND S9.5 NOT STARTED.
+- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 IMPLEMENTATION COMPLETE; S9.4 AND S9.5
+  NOT STARTED.
 - **Purpose:** Establish posting-date resolution and open/closed period authority.
 - **Distinct boundary:** Period eligibility is a cross-domain accounting control that
   must exist before any posted financial or inventory workflow.
@@ -298,10 +298,13 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **S9.1 contract:** [Accounting Period Contract v1](../contracts/accounting-period-v1.md).
 - **S9.2 foundation:**
   [Accounting Period Station 9 Physical Foundation v1](../accounting-period-station9-physical-foundation-v1.md).
+- **S9.3 reads:**
+  [Accounting Period Station 9 Read Contract v1](../accounting-period-station9-read-v1.md).
 - **Task plan:** S9.1 contract; S9.2 physical/Drizzle mapping; S9.3 tenant-safe reads;
   S9.4 on-demand provisioning/lifecycle; S9.5 posting context and close-vs-post control.
-- **Start condition:** S7 is closed, S9.1 was independently approved, and the backend owner
-  authorized S9.2. S9.3 must not begin before S9.2 independent review and owner progression.
+- **Progression:** S9.2 passed independent foundation review and is closed. S9.3 is
+  implementation complete under the approved no-separate-review gate. S9.4 remains not
+  started pending backend-owner progression.
 - **Closure intent:** Reusable posting controls that every later posting Station invokes.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
@@ -711,14 +714,14 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                                 | Current position                             |
-| ------------------------------------- | -------------------------------------------- |
-| Last fully closed Station             | S8 - Money Account Catalog Foundation        |
-| Last closed implementation checkpoint | `43109e3dfb29af2239d4169f5986d110c2b39d64`   |
-| Safe completed capabilities           | S0-S8 boundaries documented above            |
-| First unimplemented hard dependency   | Accounting periods and posting controls      |
-| Next candidate                        | S9.2 independent foundation review           |
-| S9 current status                     | S9.2 IMPLEMENTATION COMPLETE; REVIEW PENDING |
+| Field                                 | Current position                               |
+| ------------------------------------- | ---------------------------------------------- |
+| Last fully closed Station             | S8 - Money Account Catalog Foundation          |
+| Last closed implementation checkpoint | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
+| Safe completed capabilities           | S0-S8 plus S9.1-S9.3 foundations documented    |
+| First unimplemented hard dependency   | Period provisioning and lifecycle              |
+| Next candidate                        | S9.4 monthly period provisioning/lifecycle     |
+| S9 current status                     | S9.3 IMPLEMENTATION COMPLETE; S9.4 NOT STARTED |
 
-Do not start S9.3 from this document. The next permitted action is the S9.2 independent
-foundation review followed by an explicit backend-owner progression decision.
+Do not start S9.4 from this document. The next permitted action is explicit backend-owner
+progression after the verified S9.3 handoff.
