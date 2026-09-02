@@ -7,9 +7,9 @@
 | Status                   | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository               | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch            | `main`                                     |
-| Review checkpoint        | `9a7945033d351359b0117e4aeee7969991a8f0e0` |
-| Closed execution history | Stations S0 through S8                     |
-| Next candidate           | S9.4 monthly period provisioning/lifecycle |
+| Review checkpoint        | `85ab494ac9383e6e31cba266a5b0d3749dee7740` |
+| Closed execution history | Stations S0 through S9                     |
+| Next candidate           | S10 - Money Posting, Opening Balances, and Owner Ledger |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,22 +61,22 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                                 |
 | ------------------------------- | ---------------------------------------------- |
 | Branch                          | `main`                                         |
-| HEAD                            | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
-| `origin/main`                   | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
+| HEAD                            | `85ab494ac9383e6e31cba266a5b0d3749dee7740`     |
+| `origin/main`                   | `85ab494ac9383e6e31cba266a5b0d3749dee7740`     |
 | Ahead/behind                    | `0/0`                                          |
 | Working tree                    | Clean                                          |
 | Migrations                      | 5 applied, 0 pending                           |
 | Migration checksum verification | Pass                                           |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches                 |
-| Last fully closed Station       | S8                                             |
-| Later Station started           | S9.3 implementation complete; S9.4 not started |
+| Last fully closed Station       | S9                                             |
+| Later Station started           | No; S10 remains not started                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S8
+## 5. Completed Stations S0-S9
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -92,10 +92,11 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S6 - Supplier Master Data Foundation                 | CLOSED | Supplier mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                      | Supplier-master portion of historical master data                  | [Station 6 closure](../supplier-station6-closure-v1.md)                                                                                                                               |
 | S7 - Store Operational Settings Foundation           | CLOSED | Settings mapping, operational-time context, tenant-safe reads, initialization, and idempotent owner-authorized mutations            | Operational settings portion of historical master data             | [S7 contract](../contracts/store-settings-operational-time-v1.md) and [S7.4 record](../settings-station7-safe-mutation-v1.md)                                                         |
 | S8 - Money Account Catalog Foundation                | CLOSED | Money Account mapping, validation, tenant-safe reads/writes, lifecycle, idempotency, and one-active-Cash invariants                 | Money Account portion of historical master data                    | [S8.2 record](../money-account-station8-physical-foundation-v1.md), [S8.3 record](../money-account-station8-read-v1.md), and [S8.4 record](../money-account-station8-lifecycle-v1.md) |
+| S9 - Accounting Periods and Posting Controls         | CLOSED | Monthly period mapping/identity, boundaries, non-overlap, tenant-safe reads, on-demand provisioning, terminal owner close, idempotency, and posting-context/close-vs-post control | Accounting-period portion historically deferred with corrections   | [S9.1 contract](../contracts/accounting-period-v1.md), [S9.2 record](../accounting-period-station9-physical-foundation-v1.md), [S9.3 record](../accounting-period-station9-read-v1.md), and [S9.4 record](../accounting-period-station9-provisioning-lifecycle-v1.md) |
 
-The safe completed boundary does not include subscription lifecycle, accounting periods,
-money posting or balances, inventory, supplier financial workflows, sales, generic
-synchronization, reporting, or recovery.
+The safe completed boundary does not include subscription lifecycle, money posting or
+balances, inventory, supplier financial workflows, sales, generic synchronization,
+reporting, or recovery.
 
 ## 6. Historical Roadmap Reconciliation
 
@@ -112,7 +113,7 @@ synchronization, reporting, or recovery.
 | Supplier invoices/payables              | PARTIAL, SPLIT          | Supplier master prerequisite                                            | Invoice/payable posting and settlement                 | S12-S13               |
 | Manual inventory/costing                | STILL REQUIRED          | Product prerequisite and physical baseline                              | Inventory authority, projection, and costing           | S11                   |
 | Expenses/owner ledger                   | SPLIT, MOVED            | Physical baseline only                                                  | Owner/money foundation early, expenses later           | S10, S16              |
-| Returns/corrections/periods             | SPLIT, MOVED            | Physical baseline only                                                  | Period controls early, corrections later               | S9, S17               |
+| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 (closed)                                             | Corrections later                                      | S17                   |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
 | Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
@@ -166,7 +167,7 @@ and final release validation.
 | Supplier master data                               | Implemented                          | S6; financial workflows S12-S13 |
 | Store operational settings                         | Implemented                          | S7 (closed)                     |
 | Money Account catalog                              | Implemented                          | S8 (closed)                     |
-| Accounting periods/posting controls                | Still required                       | S9                              |
+| Accounting periods/posting controls                | Implemented                          | S9 (closed)                     |
 | Money movements/transfers/balances/owner ledger    | Still required                       | S10                             |
 | Manual inventory/stock projection/costing          | Still required                       | S11                             |
 | Supplier invoices/payables                         | Still required; legacy conflict      | S12                             |
@@ -266,7 +267,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **Station 8 implementation:** COMPLETE at `43109e3`.
 - **Formal Station 8 closure:** COMPLETE; the independent closure review approved S8
   with no blocking findings, and the backend owner authorized formal closure.
-- **S9 handoff:** S9 is next and owns Accounting Periods and Posting Controls. No Money
+- **S9 handoff:** S9 owns Accounting Periods and Posting Controls. No Money
   Account behavior moves into S9.
 - **S10 handoff:** S10 consumes stable Money Account IDs/lifecycle and owns movements,
   balances, transfers, opening balances, and owner-money posting. Posting must coordinate
@@ -281,8 +282,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S9 - Accounting Periods and Posting Controls
 
-- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 COMPLETE; S9.4 CLOSED;
-  S9.5 IMPLEMENTATION COMPLETE; Station 9 pending full independent review.
+- **Status:** CLOSED.
 - **Purpose:** Establish posting-date resolution and open/closed period authority.
 - **Distinct boundary:** Period eligibility is a cross-domain accounting control that
   must exist before any posted financial or inventory workflow.
@@ -304,10 +304,14 @@ invent opening-balance behavior or authorize implementation before orientation.
   [Accounting Period Station 9 Provisioning and Lifecycle v1](../accounting-period-station9-provisioning-lifecycle-v1.md).
 - **Task plan:** S9.1 contract; S9.2 physical/Drizzle mapping; S9.3 tenant-safe reads;
   S9.4 on-demand provisioning/lifecycle; S9.5 posting context and close-vs-post control.
-- **Progression:** S9.2 passed independent foundation review and is closed. S9.3 is
-  complete under the approved no-separate-review gate. S9.4 is closed. S9.5 implementation
-  is complete; Station 9 closure requires the full independent Station review and
-  backend-owner approval.
+- **Progression:** S9.1-S9.4 closed during execution; S9.5 completed the posting-context
+  and close-vs-post control. The full independent Station 9 review approved closure with no
+  blocking findings.
+- **Station 9 implementation:** COMPLETE at `85ab494`.
+- **Formal Station 9 closure:** COMPLETE; the independent Station review approved S9 with no
+  blocking findings, and the backend owner authorized formal closure.
+- **S10 handoff:** S10 and every later posting Station consume the S9 posting-context
+  authority and must not reimplement period identity, provisioning, lifecycle, or eligibility.
 - **Closure intent:** Reusable posting controls that every later posting Station invokes.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
@@ -691,8 +695,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Station 9 implementation is complete and pending
-its required full independent Station review.
+No roadmap-level owner decision is open. Station 9 is closed; S10 is the next candidate and
+remains not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -700,7 +704,7 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S8 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S9 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
 - Future Stations S9-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
@@ -719,12 +723,12 @@ decision does not authorize an implementer to invent policy.
 
 | Field                                 | Current position                                     |
 | ------------------------------------- | ---------------------------------------------------- |
-| Last fully closed Station             | S8 - Money Account Catalog Foundation                |
-| Last closed implementation checkpoint | `d7d9e5e65ed8aaca7266de4b95a257044505c037`           |
-| Safe completed capabilities           | S0-S8 plus S9.1-S9.5 implementation                  |
-| First incomplete release dependency   | Station 9 independent review and owner closure       |
-| Next candidate                        | Full Station 9 independent review                    |
-| S9 current status                     | IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW |
+| Last fully closed Station             | S9 - Accounting Periods and Posting Controls         |
+| Last closed implementation checkpoint | `85ab494ac9383e6e31cba266a5b0d3749dee7740`           |
+| Safe completed capabilities           | S0-S9 boundaries documented above                    |
+| First incomplete release dependency   | S10 - Money Posting, Opening Balances, and Owner Ledger |
+| Next candidate                        | S10 - Money Posting, Opening Balances, and Owner Ledger |
+| S9 current status                     | CLOSED                                               |
 
-Do not start S10 from this document. The next permitted action is the full independent
-Station 9 review followed by explicit backend-owner closure and progression.
+Do not start S10 from this document. S10 requires its own orientation, contract, and
+explicit backend-owner approval before implementation.
