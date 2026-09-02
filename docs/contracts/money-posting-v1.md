@@ -87,27 +87,75 @@ trusted Store write-eligibility
 -> processed-operation lookup/claim
 -> derive postingDate = businessDate(occurredAt)
 -> S9 resolveForWrite (provisions/loads canonical period, holds period FOR SHARE)
--> resolve/validate Money Account(s)
--> deterministic account locking (multi-account commands only)
--> command-specific validation
+-> resolve affected Money Account identity/identities
+-> lock EVERY affected Money Account row FOR UPDATE
+   (single- and multi-account commands alike; multiple accounts in canonical
+   order per D10-P13)
+-> revalidate account lifecycle/write eligibility and perform all account-dependent
+   validation UNDER the lock
 -> insert immutable accounting facts
 -> build response snapshot
 -> complete processed operation
 -> commit / rollback
 ```
 
-S10 must not reimplement month calculation, period identity, provisioning, OPEN/CLOSED
-checks, or close-vs-post locking.
+The period `FOR SHARE` lock (step 4) is always acquired **before** the Money Account
+`FOR UPDATE` locks (step 6); account locks are held until the caller transaction commits
+or rolls back. S10 must not reimplement month calculation, period identity, provisioning,
+OPEN/CLOSED checks, or close-vs-post locking.
+
+### D10-P4a — Money Account serialization (mandatory for every posting command)
+Every new posting-capable S10 command — opening balance, owner contribution, owner loan,
+owner reimbursement, owner withdrawal, internal transfer, and any reversal/replacement that
+posts a Money Account effect — must acquire an **exclusive `FOR UPDATE` row lock on each
+affected `money_accounts` row** (the same row S8 lifecycle locks), then **revalidate account
+lifecycle/write eligibility and run all account-dependent validation while the lock is held**,
+holding the lock through commit. This is not limited to transfers; single-account commands
+lock their one account. "Account-dependent validation" (validation that depends on mutable
+account state, and must therefore occur under the lock) includes: account is active/available
+for new posting, account belongs to the trusted Store, account type is valid for the command,
+**no original opening balance already exists** (D10-P5), `source ≠ destination` and both
+accounts remain eligible for a transfer. Account locking exists for lifecycle/invariant
+serialization only — it does **not** introduce balance non-negativity (D10-P8). Required
+proofs (all via the existing `money_accounts` row lock; no new constraint or lock table):
+
+```text
+Opening uniqueness — two distinct overlapping opening operations on account X:
+  A locks X FOR UPDATE -> sees no original opening -> inserts opening -> commits
+  B waits for X -> acquires after A -> re-checks -> sees the original opening -> rejects
+  => at most one success.
+
+Posting-first / archive-second:
+  S10 locks X FOR UPDATE -> revalidates eligible -> inserts fact -> commits
+  S8 archive waits for X -> acquires after commit -> evaluates archive against the new state
+  => no posting occurs after an archive decision made on stale ACTIVE state.
+
+Archive-first / posting-second:
+  S8 archive locks X FOR UPDATE -> archives -> commits
+  S10 waits for X -> acquires later -> revalidates -> sees archived/unavailable -> rejects
+  => no new money fact is posted on a pre-lock ACTIVE read.
+```
+
+This serialization is required purely for backend transactional correctness under realistically
+overlapping HTTP requests (including retries and foreground/background overlap from the **single
+primary MVP device**). It introduces no multi-device architecture, distributed locking, queueing,
+conflict-resolution, or S19 sync behavior. It reuses the existing PostgreSQL row lock, the
+existing business-write transaction, and the existing S8 lifecycle semantics only. Lock order is
+non-cyclic: S10 posting takes period `FOR SHARE` then account `FOR UPDATE`; S8 archive takes only
+account `FOR UPDATE`; S9 close takes period `FOR UPDATE` and no account lock — so no transaction
+acquires a conflicting pair in reverse order.
 
 ### D10-P5 — Opening balance
 Opening balance is money already present when Dokana's accounting history begins. It is
 represented as a single `money_movements` row with `movement_type = 'opening_balance'` under
 the normal S10 posting / S9-eligibility path. It does **not** auto-create owner equity or
 liability (pre-Dokana composition is not authoritatively reconstructable). Rules:
-at most **one** original opening-balance operation per Money Account (application-enforced —
-no new DB constraint); a zero amount creates **no** fact; a posted opening balance is never
-edited or deleted; an archived/unavailable account cannot receive a new opening posting;
-correction is via the D10-P15 reversal/replacement model.
+at most **one** original opening-balance operation per Money Account, enforced in application
+under the account `FOR UPDATE` lock per D10-P4a (the "does an original opening already exist?"
+check is an account-dependent validation and must occur after the lock is held — a pre-check
+then later insert is unsafe; no new DB constraint); a zero amount creates **no** fact; a posted
+opening balance is never edited or deleted; an archived/unavailable account cannot receive a new
+opening posting; correction is via the D10-P15 reversal/replacement model.
 
 ### D10-P6 — Owner accounting classification
 Owner money events are never revenue or expense. Each is represented by `owner_ledger_entries`
@@ -174,11 +222,16 @@ transfer-destination id=45685b8c-4f79-5a4f-b5be-1d0e4c16aea8  op=26a66f60-c2b7-5
 transfer-header      id=4bff13e7-f520-5287-b0aa-3581510bbc5f  op=07cde60a-d459-5a96-94f2-8762d78f4106
 ```
 
-### D10-P10 — Application immutability
-Posted `money_movements` and `owner_ledger_entries` are immutable. S10 exposes **no**
-UPDATE / PATCH / DELETE / destructive-cancellation path for posted facts. The runtime role's
-broader `UPDATE`/`DELETE` SQL privilege is **deferred defense-in-depth**, not product
-permission, and must never be used to rewrite money history. Correction is reversal/replacement.
+### D10-P10 — Immutability (physical + application)
+Posted `money_movements` and `owner_ledger_entries` are immutable. This is **already enforced
+physically**: the existing triggers `trg_money_movements_no_mutation` and
+`trg_owner_ledger_no_mutation` run `ledger.prevent_mutation()` `BEFORE UPDATE OR DELETE` and
+raise `55000` ("… is append-only. Create a reversal entry instead."), so any UPDATE/DELETE of a
+posted money or owner fact is rejected **regardless of the runtime role's SQL grants**.
+Independently of that guard, S10 exposes **no** UPDATE / PATCH / DELETE /
+destructive-cancellation path for posted facts. Correction is reversal/replacement (D10-P15).
+Narrowing the runtime role's broad `UPDATE`/`DELETE` grant remains optional defense-in-depth
+(the trigger already prevents the mutation), not a correctness requirement.
 
 ### D10-P11 — Transfer accounting invariant
 An internal transfer is one command → one atomic transaction producing a source movement
@@ -195,11 +248,12 @@ as product transitions. A posted transfer is **never** flipped `posted -> cancel
 its effect; correction is via reversal (D10-P15). No API mutates transfer state to bypass
 financial reversal.
 
-### D10-P13 — Canonical multi-account order
-When a command locks more than one Money Account, accounts are processed and locked in
-**ascending lowercase canonical UUID string order**, independent of business
-source/destination direction, so concurrent `A→B` and `B→A` transfers cannot form a lock
-cycle.
+### D10-P13 — Canonical account order
+A single-account command locks its one account (D10-P4a). When a command affects more than one
+Money Account, all accounts are locked in **ascending lowercase canonical UUID string order**,
+independent of business source/destination direction, so concurrent `A→B` and `B→A` transfers
+acquire the same pair of locks in the same order and cannot form a lock cycle. Canonical
+ordering is the multi-account rule; it does **not** mean locking is required only for transfers.
 
 ### D10-P14 — Store / account eligibility and replay
 Store `active` → new posting allowed; `read_only` → historical reads and exact completed
@@ -244,7 +298,11 @@ provenance) but implements no S19 sync mechanism.
 
 The following are physically desirable but intentionally **deferred** under the frozen-database
 directive and are handled by application invariants above; none blocks S10 correctness:
-runtime `UPDATE`/`DELETE` privilege on immutable facts; absence of DB-level no-delete/finalized
-triggers on `money_movements`/`owner_ledger_entries`; absence of central-audit and
-sync change-event triggers on those two tables; optional `money_transfers` CHECK hardening
+narrowing the runtime role's broad `UPDATE`/`DELETE` grant on the immutable fact tables (already
+physically append-only via `prevent_mutation`, so this is pure defense-in-depth); absence of
+central-audit (`audit.capture_row_change`) and sync change-event (`sync.capture_change_event`)
+triggers on `money_movements`/`owner_ledger_entries`; optional `money_transfers` CHECK hardening
 (posted ⇒ both movement links); DB-level duplicate-reversal uniqueness.
+
+Note: posted-fact append-only immutability is **not** deferred — it is already enforced
+physically by `trg_money_movements_no_mutation` / `trg_owner_ledger_no_mutation` (D10-P10).

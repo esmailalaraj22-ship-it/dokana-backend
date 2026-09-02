@@ -316,8 +316,8 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
 
-- **Status:** IN PROGRESS. S10.1 IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW;
-  S10.2-S10.5 NOT STARTED.
+- **Status:** IN PROGRESS. S10.1 IMPLEMENTATION COMPLETE - PENDING TARGETED INDEPENDENT
+  RE-REVIEW (F1/F2/F3 remediated); S10.2-S10.5 NOT STARTED.
 - **Purpose:** Establish authoritative money movements, projections, transfers, and
   owner funding semantics.
 - **S10.1 contract:** [Money Posting Contract v1](../contracts/money-posting-v1.md)
@@ -331,8 +331,10 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **Hard dependencies:** S8 Money Accounts and S9 posting controls.
 - **Soft dependencies:** S7 reporting and operational settings.
 - **Primary deliverables:** Money movement authority; protected balance projections;
-  internal transfers; approved money openings; owner capital, loan, reimbursement,
-  personal/profit/capital withdrawal flows; atomic reversal/replacement.
+  internal transfers; approved money openings; owner capital, loan, reimbursement, and
+  personal/capital withdrawal flows; atomic reversal/replacement. Authoritative
+  profit-withdrawal classification is deferred until server-authoritative profit
+  information exists (later accounting domains); the physical enum value stays dormant.
 - **Explicit non-scope:** Supplier payments, customer collections, sale posting, and
   expense recognition.
 - **Coverage:** PRD money movement, transfer, owner ledger, and money-opening needs.
@@ -734,8 +736,8 @@ decision does not authorize an implementer to invent policy.
 | Last closed implementation checkpoint | `85ab494ac9383e6e31cba266a5b0d3749dee7740`           |
 | Safe completed capabilities           | S0-S9 boundaries documented above                    |
 | First incomplete release dependency   | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| Next candidate                        | S10.1 independent contract review                    |
-| S10 current status                    | IN PROGRESS - S10.1 pending independent review       |
+| Next candidate                        | S10.1 targeted re-review (F1/F2/F3)                  |
+| S10 current status                    | IN PROGRESS - S10.1 pending targeted re-review       |
 
 Do not start S10 from this document. S10 requires its own orientation, contract, and
 explicit backend-owner approval before implementation.
