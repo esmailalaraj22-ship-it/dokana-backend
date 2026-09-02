@@ -281,8 +281,8 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S9 - Accounting Periods and Posting Controls
 
-- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 IMPLEMENTATION COMPLETE; S9.4 AND S9.5
-  NOT STARTED.
+- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 COMPLETE; S9.4 IMPLEMENTATION COMPLETE;
+  S9.5 NOT STARTED.
 - **Purpose:** Establish posting-date resolution and open/closed period authority.
 - **Distinct boundary:** Period eligibility is a cross-domain accounting control that
   must exist before any posted financial or inventory workflow.
@@ -300,11 +300,13 @@ invent opening-balance behavior or authorize implementation before orientation.
   [Accounting Period Station 9 Physical Foundation v1](../accounting-period-station9-physical-foundation-v1.md).
 - **S9.3 reads:**
   [Accounting Period Station 9 Read Contract v1](../accounting-period-station9-read-v1.md).
+- **S9.4 provisioning/lifecycle:**
+  [Accounting Period Station 9 Provisioning and Lifecycle v1](../accounting-period-station9-provisioning-lifecycle-v1.md).
 - **Task plan:** S9.1 contract; S9.2 physical/Drizzle mapping; S9.3 tenant-safe reads;
   S9.4 on-demand provisioning/lifecycle; S9.5 posting context and close-vs-post control.
 - **Progression:** S9.2 passed independent foundation review and is closed. S9.3 is
-  implementation complete under the approved no-separate-review gate. S9.4 remains not
-  started pending backend-owner progression.
+  complete under the approved no-separate-review gate. S9.4 implementation is complete;
+  formal closure remains a backend-owner/project-governance decision. S9.5 has not started.
 - **Closure intent:** Reusable posting controls that every later posting Station invokes.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger

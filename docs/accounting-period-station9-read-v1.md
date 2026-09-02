@@ -61,10 +61,11 @@ audit state after reads.
 
 ```text
 S9.2: CLOSED
-S9.3: IMPLEMENTATION COMPLETE
-S9.4: NOT STARTED
+S9.3: COMPLETE
+S9.4: IMPLEMENTATION COMPLETE
 S9.5: NOT STARTED
 ```
 
-S9.3 requires no separate independent review under the approved S9 hybrid review
-model. Backend-owner approval remains required before S9.4 begins.
+S9.3 required no separate independent review under the approved S9 hybrid review
+model. S9.4 now owns monthly provisioning and explicit close; it does not change this
+read contract. S9.5 remains not started.
