@@ -475,3 +475,54 @@ export const moneyAccounts = ledgerSchema.table(
       .where(sql`${table.accountType} = 'cash' and ${table.status} = 'active'`),
   ],
 );
+
+export const accountingPeriods = ledgerSchema.table(
+  'accounting_periods',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    periodYear: integer('period_year').notNull(),
+    periodMonth: integer('period_month').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true, mode: 'date' }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true, mode: 'date' }).notNull(),
+    status: text('status').$type<'open' | 'closing' | 'closed'>().notNull().default('open'),
+    closedAt: timestamp('closed_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'accounting_periods_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'accounting_periods_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('accounting_periods_store_id_id_key').on(table.storeId, table.id),
+    unique('accounting_periods_store_id_period_year_period_month_key').on(
+      table.storeId,
+      table.periodYear,
+      table.periodMonth,
+    ),
+    unique('accounting_periods_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('accounting_periods_period_year_check', sql`${table.periodYear} >= 2020`),
+    check('accounting_periods_period_month_check', sql`${table.periodMonth} between 1 and 12`),
+    check('accounting_periods_status_check', sql`${table.status} in ('open', 'closing', 'closed')`),
+    check('accounting_periods_check', sql`${table.endsAt} > ${table.startsAt}`),
+    check(
+      'accounting_periods_check1',
+      sql`(${table.status} = 'closed' and ${table.closedAt} is not null) or ${table.status} in ('open', 'closing')`,
+    ),
+    check('accounting_periods_version_check', sql`${table.version} >= 1`),
+  ],
+);
