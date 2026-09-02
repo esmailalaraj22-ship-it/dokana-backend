@@ -281,8 +281,8 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S9 - Accounting Periods and Posting Controls
 
-- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 COMPLETE; S9.4 IMPLEMENTATION COMPLETE;
-  S9.5 NOT STARTED.
+- **Status:** S9.1 CLOSED; S9.2 CLOSED; S9.3 COMPLETE; S9.4 CLOSED;
+  S9.5 IMPLEMENTATION COMPLETE; Station 9 pending full independent review.
 - **Purpose:** Establish posting-date resolution and open/closed period authority.
 - **Distinct boundary:** Period eligibility is a cross-domain accounting control that
   must exist before any posted financial or inventory workflow.
@@ -305,8 +305,9 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **Task plan:** S9.1 contract; S9.2 physical/Drizzle mapping; S9.3 tenant-safe reads;
   S9.4 on-demand provisioning/lifecycle; S9.5 posting context and close-vs-post control.
 - **Progression:** S9.2 passed independent foundation review and is closed. S9.3 is
-  complete under the approved no-separate-review gate. S9.4 implementation is complete;
-  formal closure remains a backend-owner/project-governance decision. S9.5 has not started.
+  complete under the approved no-separate-review gate. S9.4 is closed. S9.5 implementation
+  is complete; Station 9 closure requires the full independent Station review and
+  backend-owner approval.
 - **Closure intent:** Reusable posting controls that every later posting Station invokes.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
@@ -690,8 +691,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. S9.2 is pending its required independent foundation
-review.
+No roadmap-level owner decision is open. Station 9 implementation is complete and pending
+its required full independent Station review.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -716,14 +717,14 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                                 | Current position                               |
-| ------------------------------------- | ---------------------------------------------- |
-| Last fully closed Station             | S8 - Money Account Catalog Foundation          |
-| Last closed implementation checkpoint | `9a7945033d351359b0117e4aeee7969991a8f0e0`     |
-| Safe completed capabilities           | S0-S8 plus S9.1-S9.3 foundations documented    |
-| First unimplemented hard dependency   | Period provisioning and lifecycle              |
-| Next candidate                        | S9.4 monthly period provisioning/lifecycle     |
-| S9 current status                     | S9.3 IMPLEMENTATION COMPLETE; S9.4 NOT STARTED |
+| Field                                 | Current position                                     |
+| ------------------------------------- | ---------------------------------------------------- |
+| Last fully closed Station             | S8 - Money Account Catalog Foundation                |
+| Last closed implementation checkpoint | `d7d9e5e65ed8aaca7266de4b95a257044505c037`           |
+| Safe completed capabilities           | S0-S8 plus S9.1-S9.5 implementation                  |
+| First incomplete release dependency   | Station 9 independent review and owner closure       |
+| Next candidate                        | Full Station 9 independent review                    |
+| S9 current status                     | IMPLEMENTATION COMPLETE - PENDING INDEPENDENT REVIEW |
 
-Do not start S9.4 from this document. The next permitted action is explicit backend-owner
-progression after the verified S9.3 handoff.
+Do not start S10 from this document. The next permitted action is the full independent
+Station 9 review followed by explicit backend-owner closure and progression.
