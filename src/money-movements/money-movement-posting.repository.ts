@@ -15,6 +15,7 @@ import {
 import { parseStoredMoneyMovementPostingResponse } from './money-movement-posting-response';
 import type {
   MoneyMovementEffectInput,
+  MoneyMovementInsertSpec,
   MoneyMovementPostingCommand,
   MoneyMovementPostingResponse,
   PostedMoneyMovement,
@@ -66,28 +67,11 @@ export class MoneyMovementPostingRepository {
         operationId: command.operationId,
       });
 
-      const affectedAccountIds = this.collectAccountIds(command);
-      const lockedAccounts = await this.lockAccountsInCanonicalOrder(
+      await this.lockAndValidateAccounts(
         transaction,
         context.storeId,
-        affectedAccountIds,
+        this.collectAccountIds(command),
       );
-
-      for (const accountId of affectedAccountIds) {
-        const account = lockedAccounts.get(accountId);
-        if (!account) {
-          throw new NotFoundException({
-            code: 'MONEY_ACCOUNT_NOT_FOUND',
-            message: 'Money Account not found.',
-          });
-        }
-        if (account.status !== 'active' || account.availability !== 'available') {
-          throw new ConflictException({
-            code: 'MONEY_ACCOUNT_UNAVAILABLE',
-            message: 'Money Account is not available for new posting.',
-          });
-        }
-      }
 
       const movements: PostedMoneyMovement[] = [];
       for (const effect of command.effects) {
@@ -114,7 +98,7 @@ export class MoneyMovementPostingRepository {
     });
   }
 
-  private async insertMovement(
+  private insertMovement(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: MoneyMovementPostingCommand,
@@ -122,27 +106,56 @@ export class MoneyMovementPostingRepository {
     posting: AccountingPeriodPostingContext,
     transactionGroupId: string,
   ): Promise<PostedMoneyMovement> {
+    return this.insertMovementWithinTransaction(transaction, context, {
+      commandOperationId: command.operationId,
+      discriminator: effect.discriminator,
+      accountId: effect.accountId,
+      amountDeltaMinor: effect.amountDeltaMinor,
+      movementType: effect.movementType,
+      referenceType: effect.referenceType,
+      referenceId: effect.referenceId,
+      accountingPeriodId: posting.accountingPeriodId,
+      occurredAt: command.occurredAt,
+      transactionGroupId,
+      transferGroupId: effect.transferGroupId ?? null,
+      counterAccountId: effect.counterAccountId ?? null,
+      counterpartyName: effect.counterpartyName ?? null,
+      externalReference: effect.externalReference ?? null,
+      notes: effect.notes ?? null,
+      reversalOfId: effect.reversalOfId ?? null,
+    });
+  }
+
+  // Transaction-aware child-fact primitive. Inserts one immutable money movement using the
+  // frozen deterministic identity contract, given a fully server-controlled spec and an
+  // already-resolved posting context. The caller owns the transaction, idempotency claim,
+  // account locking, and operation completion. It does not claim or complete any operation.
+  async insertMovementWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    spec: MoneyMovementInsertSpec,
+  ): Promise<PostedMoneyMovement> {
     const rows = await transaction
       .insert(moneyMovements)
       .values({
-        id: deriveMoneyFactId(command.operationId, effect.discriminator),
+        id: deriveMoneyFactId(spec.commandOperationId, spec.discriminator),
         storeId: context.storeId,
-        accountId: effect.accountId,
-        accountingPeriodId: posting.accountingPeriodId,
-        movementType: effect.movementType,
-        amountDeltaMinor: effect.amountDeltaMinor,
-        referenceType: effect.referenceType,
-        referenceId: effect.referenceId,
-        transactionGroupId,
-        transferGroupId: effect.transferGroupId ?? null,
-        counterAccountId: effect.counterAccountId ?? null,
-        counterpartyName: effect.counterpartyName ?? null,
-        externalReference: effect.externalReference ?? null,
-        notes: effect.notes ?? null,
-        occurredAt: command.occurredAt,
-        reversalOfId: effect.reversalOfId ?? null,
+        accountId: spec.accountId,
+        accountingPeriodId: spec.accountingPeriodId,
+        movementType: spec.movementType,
+        amountDeltaMinor: spec.amountDeltaMinor,
+        referenceType: spec.referenceType,
+        referenceId: spec.referenceId,
+        transactionGroupId: spec.transactionGroupId,
+        transferGroupId: spec.transferGroupId ?? null,
+        counterAccountId: spec.counterAccountId ?? null,
+        counterpartyName: spec.counterpartyName ?? null,
+        externalReference: spec.externalReference ?? null,
+        notes: spec.notes ?? null,
+        occurredAt: spec.occurredAt,
+        reversalOfId: spec.reversalOfId ?? null,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(command.operationId, effect.discriminator),
+        operationId: deriveMoneyFactOperationId(spec.commandOperationId, spec.discriminator),
       })
       .returning({
         id: moneyMovements.id,
@@ -170,6 +183,32 @@ export class MoneyMovementPostingRepository {
       occurredAt: row.occurredAt.toISOString(),
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  // Locks each affected Money Account row FOR UPDATE in canonical order and revalidates
+  // active/available eligibility under the lock (D10-P4a). Reused by every money-posting
+  // command so lifecycle serialization is identical across S10.
+  async lockAndValidateAccounts(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    accountIds: string[],
+  ): Promise<void> {
+    const locked = await this.lockAccountsInCanonicalOrder(transaction, storeId, accountIds);
+    for (const accountId of accountIds) {
+      const account = locked.get(accountId);
+      if (!account) {
+        throw new NotFoundException({
+          code: 'MONEY_ACCOUNT_NOT_FOUND',
+          message: 'Money Account not found.',
+        });
+      }
+      if (account.status !== 'active' || account.availability !== 'available') {
+        throw new ConflictException({
+          code: 'MONEY_ACCOUNT_UNAVAILABLE',
+          message: 'Money Account is not available for new posting.',
+        });
+      }
+    }
   }
 
   private collectAccountIds(command: MoneyMovementPostingCommand): string[] {

@@ -49,3 +49,25 @@ export interface MoneyMovementPostingResponse {
   accountingPeriodId: string;
   movements: PostedMoneyMovement[];
 }
+
+// Fully-resolved, server-controlled specification for inserting one immutable money
+// movement inside a caller-owned transaction (used by S10.3+ multi-effect commands that
+// compose the S10.2 authority without claiming/completing their own operation).
+export interface MoneyMovementInsertSpec {
+  commandOperationId: string;
+  discriminator: string;
+  accountId: string;
+  amountDeltaMinor: bigint;
+  movementType: MoneyMovementTypeValue;
+  referenceType: string;
+  referenceId: string;
+  accountingPeriodId: string;
+  occurredAt: Date;
+  transactionGroupId: string;
+  transferGroupId?: string | null;
+  counterAccountId?: string | null;
+  counterpartyName?: string | null;
+  externalReference?: string | null;
+  notes?: string | null;
+  reversalOfId?: string | null;
+}

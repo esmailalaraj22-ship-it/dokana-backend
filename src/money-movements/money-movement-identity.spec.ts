@@ -17,6 +17,14 @@ describe('deterministic money fact identity', () => {
     expect(deriveMoneyFactOperationId(command, 'opening')).toBe(
       '93c3fabf-9cba-5439-9520-b85d36402106',
     );
+    expect(deriveMoneyFactId(command, 'owner-money')).toBe('4fb42be9-9167-536a-b32b-c52bb1f6673d');
+    expect(deriveMoneyFactOperationId(command, 'owner-money')).toBe(
+      'e19a7e2f-e956-5e06-9a3f-6554371ac1cb',
+    );
+    expect(deriveMoneyFactId(command, 'owner-entry')).toBe('cf6bec35-21d0-5d5f-84f8-5b93712b683e');
+    expect(deriveMoneyFactOperationId(command, 'owner-entry')).toBe(
+      'd6f8f595-2938-57ba-acbd-9ecc0079d204',
+    );
     expect(deriveMoneyFactId(command, 'transfer-source')).toBe(
       '8afc9b08-3b8e-5240-b560-69821294a154',
     );

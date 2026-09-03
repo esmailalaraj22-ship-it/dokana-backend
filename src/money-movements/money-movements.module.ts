@@ -18,6 +18,10 @@ import { MoneyMovementPostingService } from './money-movement-posting.service';
     MoneyMovementPostingService,
     MoneyAccountBalanceReadRepository,
   ],
-  exports: [MoneyMovementPostingService, MoneyAccountBalanceReadRepository],
+  exports: [
+    MoneyMovementPostingService,
+    MoneyMovementPostingRepository,
+    MoneyAccountBalanceReadRepository,
+  ],
 })
 export class MoneyMovementsModule {}

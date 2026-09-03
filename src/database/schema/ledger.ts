@@ -614,3 +614,92 @@ export const moneyMovements = ledgerSchema.table(
     check('money_movements_amount_delta_minor_check', sql`${table.amountDeltaMinor} <> 0`),
   ],
 );
+
+export const ownerLedgerEntryTypes = [
+  'capital_contribution',
+  'owner_loan_to_store',
+  'owner_paid_expense',
+  'owner_paid_supplier',
+  'owner_reimbursement',
+  'personal_withdrawal',
+  'profit_withdrawal',
+  'capital_withdrawal',
+  'correction',
+] as const;
+
+export type OwnerLedgerEntryTypeValue = (typeof ownerLedgerEntryTypes)[number];
+
+export const ownerLedgerEntries = ledgerSchema.table(
+  'owner_ledger_entries',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    accountingPeriodId: uuid('accounting_period_id').notNull(),
+    entryType: text('entry_type').$type<OwnerLedgerEntryTypeValue>().notNull(),
+    ownerLiabilityDeltaMinor: bigint('owner_liability_delta_minor', { mode: 'bigint' })
+      .notNull()
+      .default(0n),
+    equityDeltaMinor: bigint('equity_delta_minor', { mode: 'bigint' }).notNull().default(0n),
+    moneyAccountId: uuid('money_account_id'),
+    referenceType: text('reference_type'),
+    referenceId: uuid('reference_id'),
+    transactionGroupId: uuid('transaction_group_id').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+    reversalOfId: uuid('reversal_of_id'),
+    reason: text('reason'),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'owner_ledger_entries_store_id_accounting_period_id_fkey',
+      columns: [table.storeId, table.accountingPeriodId],
+      foreignColumns: [accountingPeriods.storeId, accountingPeriods.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'owner_ledger_entries_store_id_money_account_id_fkey',
+      columns: [table.storeId, table.moneyAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'owner_ledger_entries_store_id_reversal_of_id_fkey',
+      columns: [table.storeId, table.reversalOfId],
+      foreignColumns: [table.storeId, table.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'owner_ledger_entries_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('owner_ledger_entries_store_id_id_key').on(table.storeId, table.id),
+    unique('owner_ledger_entries_store_id_operation_id_key').on(table.storeId, table.operationId),
+    index('idx_owner_ledger_time').on(table.storeId, table.occurredAt.desc()),
+    check(
+      'owner_ledger_entries_entry_type_check',
+      sql`${table.entryType} in ('capital_contribution', 'owner_loan_to_store', 'owner_paid_expense', 'owner_paid_supplier', 'owner_reimbursement', 'personal_withdrawal', 'profit_withdrawal', 'capital_withdrawal', 'correction')`,
+    ),
+    check(
+      'owner_ledger_entries_check',
+      sql`${table.ownerLiabilityDeltaMinor} <> 0 or ${table.equityDeltaMinor} <> 0`,
+    ),
+  ],
+);
+
+export const ownerPosition = ledgerSchema
+  .view('v_owner_position', {
+    storeId: uuid('store_id').notNull(),
+    storeOwesOwnerMinor: bigint('store_owes_owner_minor', { mode: 'bigint' }).notNull(),
+    ownerEquityMovementMinor: bigint('owner_equity_movement_minor', {
+      mode: 'bigint',
+    }).notNull(),
+  })
+  .existing();
