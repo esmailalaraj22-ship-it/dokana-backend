@@ -3069,6 +3069,7 @@ GRANT SELECT ON sync.change_events, sync.bootstrap_snapshots TO shop_app_runtime
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA sync TO shop_app_runtime;
 GRANT EXECUTE ON FUNCTION sync.claim_operation(uuid,uuid,uuid,text,uuid,text,text) TO shop_app_runtime;
 GRANT EXECUTE ON FUNCTION ledger.next_document_number(uuid,uuid,text,integer,text) TO shop_app_runtime;
+GRANT EXECUTE ON FUNCTION ledger.assert_period_open(uuid, uuid, timestamptz) TO shop_app_runtime;
 GRANT EXECUTE ON FUNCTION platform.current_store_id() TO shop_app_runtime, shop_app_readonly;
 GRANT EXECUTE ON FUNCTION platform.current_user_id() TO shop_app_runtime;
 GRANT EXECUTE ON FUNCTION platform.current_device_id() TO shop_app_runtime;

@@ -29,6 +29,7 @@ describe('controlled migration runner', () => {
       '0003_authentication_api_schema.sql',
       '0004_authentication_database_api.sql',
       '0005_refresh_rotation_session_boundary.sql',
+      '0006_money_movement_period_guard_execute.sql',
     ]);
   });
 

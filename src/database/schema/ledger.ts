@@ -526,3 +526,91 @@ export const accountingPeriods = ledgerSchema.table(
     check('accounting_periods_version_check', sql`${table.version} >= 1`),
   ],
 );
+
+export const moneyMovementTypes = [
+  'opening_balance',
+  'sale_payment',
+  'customer_payment',
+  'supplier_payment',
+  'expense_payment',
+  'owner_contribution',
+  'owner_loan',
+  'owner_reimbursement',
+  'owner_withdrawal',
+  'internal_transfer',
+  'customer_refund',
+  'supplier_refund',
+  'correction',
+  'other',
+] as const;
+
+export type MoneyMovementTypeValue = (typeof moneyMovementTypes)[number];
+
+export const moneyMovements = ledgerSchema.table(
+  'money_movements',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    accountingPeriodId: uuid('accounting_period_id').notNull(),
+    movementType: text('movement_type').$type<MoneyMovementTypeValue>().notNull(),
+    amountDeltaMinor: bigint('amount_delta_minor', { mode: 'bigint' }).notNull(),
+    referenceType: text('reference_type').notNull(),
+    referenceId: uuid('reference_id').notNull(),
+    transactionGroupId: uuid('transaction_group_id').notNull(),
+    transferGroupId: uuid('transfer_group_id'),
+    counterAccountId: uuid('counter_account_id'),
+    counterpartyName: text('counterparty_name'),
+    externalReference: text('external_reference'),
+    notes: text('notes'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+    reversalOfId: uuid('reversal_of_id'),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'money_movements_store_id_account_id_fkey',
+      columns: [table.storeId, table.accountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_movements_store_id_accounting_period_id_fkey',
+      columns: [table.storeId, table.accountingPeriodId],
+      foreignColumns: [accountingPeriods.storeId, accountingPeriods.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_movements_store_id_counter_account_id_fkey',
+      columns: [table.storeId, table.counterAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_movements_store_id_reversal_of_id_fkey',
+      columns: [table.storeId, table.reversalOfId],
+      foreignColumns: [table.storeId, table.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_movements_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('money_movements_store_id_id_key').on(table.storeId, table.id),
+    unique('money_movements_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check(
+      'money_movements_movement_type_check',
+      sql`${table.movementType} in ('opening_balance', 'sale_payment', 'customer_payment', 'supplier_payment', 'expense_payment', 'owner_contribution', 'owner_loan', 'owner_reimbursement', 'owner_withdrawal', 'internal_transfer', 'customer_refund', 'supplier_refund', 'correction', 'other')`,
+    ),
+    check('money_movements_amount_delta_minor_check', sql`${table.amountDeltaMinor} <> 0`),
+  ],
+);
