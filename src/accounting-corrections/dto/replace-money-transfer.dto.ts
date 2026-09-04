@@ -1,8 +1,15 @@
-import { IsISO8601, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { IsISO8601, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 
 export class ReplaceMoneyTransferDto {
   @IsUUID()
   operationId!: string;
+
+  // Optional for a Replacement. When omitted the server reuses the original Transfer's
+  // source account; when supplied it becomes the replacement Transfer's source. The server
+  // still derives the trusted Store, the source negative sign, and the posting identity.
+  @IsOptional()
+  @IsUUID()
+  sourceAccountId?: string;
 
   @IsUUID()
   destinationAccountId!: string;

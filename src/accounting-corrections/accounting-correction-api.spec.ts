@@ -75,7 +75,7 @@ describe('Accounting Correction API boundary', () => {
     ).rejects.toMatchObject({ response: { statusCode: 400 } });
   });
 
-  it('allows only destination replacement for a Transfer', async () => {
+  it('allows source and destination replacement for a Transfer', async () => {
     const valid = {
       ...common,
       destinationAccountId: '40000000-0000-4000-8000-000000000002',
@@ -89,6 +89,15 @@ describe('Accounting Correction API boundary', () => {
         { ...valid, sourceAccountId: '40000000-0000-4000-8000-000000000003' },
         metadata(ReplaceMoneyTransferDto),
       ),
+    ).resolves.toBeInstanceOf(ReplaceMoneyTransferDto);
+    await expect(
+      pipe.transform(
+        { ...valid, sourceAccountId: 'not-a-uuid' },
+        metadata(ReplaceMoneyTransferDto),
+      ),
+    ).rejects.toMatchObject({ response: { statusCode: 400 } });
+    await expect(
+      pipe.transform({ ...valid, unexpectedField: 'x' }, metadata(ReplaceMoneyTransferDto)),
     ).rejects.toMatchObject({ response: { statusCode: 400 } });
   });
 

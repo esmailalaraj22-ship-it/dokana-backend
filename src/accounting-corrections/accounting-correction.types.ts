@@ -18,6 +18,7 @@ export type AccountingCorrectionKind = 'reversal' | 'replacement';
 export interface AccountingCorrectionReplacement {
   amountMinor: bigint;
   moneyAccountId?: string;
+  sourceAccountId?: string;
   destinationAccountId?: string;
 }
 

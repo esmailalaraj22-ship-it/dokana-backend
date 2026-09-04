@@ -20,6 +20,7 @@ const ids = {
   account: '10000000-0000-4000-8000-000000000007',
   destination: '10000000-0000-4000-8000-000000000008',
   period: '10000000-0000-4000-8000-000000000009',
+  source: '10000000-0000-4000-8000-00000000000a',
 };
 
 const principal: Pick<
@@ -107,7 +108,7 @@ describe('AccountingCorrectionWriteService', () => {
     expect(first?.requestHash).toBe(second?.requestHash);
   });
 
-  it('permits only destination and amount as transfer replacement input', async () => {
+  it('permits destination, amount, and an optional source as transfer replacement input', async () => {
     await service.replaceTransfer(principal, context, ids.target, {
       operationId: ids.operation,
       destinationAccountId: ids.destination,
@@ -119,6 +120,48 @@ describe('AccountingCorrectionWriteService', () => {
       domain: 'internal_transfer',
       replacement: { destinationAccountId: ids.destination, amountMinor: 25n },
     });
+    expect(repository.correct.mock.calls[0]?.[1].replacement).not.toHaveProperty('sourceAccountId');
+
+    await service.replaceTransfer(principal, context, ids.target, {
+      operationId: ids.operation,
+      sourceAccountId: ids.source.toUpperCase(),
+      destinationAccountId: ids.destination,
+      amountMinor: '25',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+
+    expect(repository.correct.mock.calls[1]?.[1]).toMatchObject({
+      domain: 'internal_transfer',
+      replacement: {
+        sourceAccountId: ids.source,
+        destinationAccountId: ids.destination,
+        amountMinor: 25n,
+      },
+    });
+  });
+
+  it('folds the replacement source into the canonical request hash', async () => {
+    const base = {
+      operationId: ids.operation,
+      destinationAccountId: ids.destination,
+      amountMinor: '25',
+      occurredAt: '2026-01-15T10:00:00Z',
+    };
+    await service.replaceTransfer(principal, context, ids.target, base);
+    await service.replaceTransfer(principal, context, ids.target, {
+      ...base,
+      sourceAccountId: ids.source,
+    });
+    await service.replaceTransfer(principal, context, ids.target, {
+      ...base,
+      sourceAccountId: ids.account,
+    });
+
+    const withoutSource = repository.correct.mock.calls[0]?.[1].requestHash;
+    const withSource = repository.correct.mock.calls[1]?.[1].requestHash;
+    const withOtherSource = repository.correct.mock.calls[2]?.[1].requestHash;
+    expect(withSource).not.toBe(withoutSource);
+    expect(withSource).not.toBe(withOtherSource);
   });
 
   it.each([

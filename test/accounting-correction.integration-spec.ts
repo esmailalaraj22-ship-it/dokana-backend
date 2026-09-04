@@ -1130,6 +1130,218 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     ).rejects.toMatchObject({ response: { code: 'MONEY_TRANSFER_SAME_ACCOUNT' } });
   });
 
+  it('replaces a Transfer source, destination, and amount with immutable net-zero history and exact replay', async () => {
+    const target = randomUUID();
+    const original = await transferWrites.create(principal('active'), context('active'), {
+      operationId: target,
+      sourceAccountId: fixture.accounts.activeCash,
+      destinationAccountId: fixture.accounts.activeBank,
+      amountMinor: '100',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    const operationId = randomUUID();
+    const request = {
+      operationId,
+      sourceAccountId: fixture.accounts.openingPositive,
+      destinationAccountId: fixture.accounts.activeAlternate,
+      amountMinor: '150',
+      occurredAt: '2026-01-24T10:00:00Z',
+    };
+    const result = await corrections.replaceTransfer(
+      principal('active'),
+      context('active'),
+      target,
+      request,
+    );
+    expect(result.movements.map((row) => row.amountDeltaMinor)).toEqual([
+      '100',
+      '-100',
+      '-150',
+      '150',
+    ]);
+    expect(result.movements.reduce((sum, row) => sum + BigInt(row.amountDeltaMinor), 0n)).toBe(0n);
+    expect(result.replacementTransfer).toMatchObject({
+      id: deriveMoneyFactId(operationId, 'replacement:transfer-header'),
+      sourceAccountId: fixture.accounts.openingPositive,
+      destinationAccountId: fixture.accounts.activeAlternate,
+      amountMinor: '150',
+    });
+    const unchanged = await adminPool.query(
+      'select source_account_id, destination_account_id, amount_minor::text from ledger.money_transfers where id = $1',
+      [original.transfer.id],
+    );
+    expect(unchanged.rows[0]).toEqual({
+      source_account_id: fixture.accounts.activeCash,
+      destination_account_id: fixture.accounts.activeBank,
+      amount_minor: '100',
+    });
+    const replay = await corrections.replaceTransfer(
+      principal('active'),
+      context('active'),
+      target,
+      request,
+    );
+    expect(replay).toEqual(result);
+  });
+
+  it('replaces only a Transfer source and conflicts on a changed source under one operationId', async () => {
+    const target = randomUUID();
+    await transferWrites.create(principal('active'), context('active'), {
+      operationId: target,
+      sourceAccountId: fixture.accounts.activeCash,
+      destinationAccountId: fixture.accounts.activeBank,
+      amountMinor: '30',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    const operationId = randomUUID();
+    const result = await corrections.replaceTransfer(
+      principal('active'),
+      context('active'),
+      target,
+      {
+        operationId,
+        sourceAccountId: fixture.accounts.openingPositive,
+        destinationAccountId: fixture.accounts.activeBank,
+        amountMinor: '30',
+        occurredAt: '2026-01-24T10:00:00Z',
+      },
+    );
+    expect(result.movements.map((row) => row.amountDeltaMinor)).toEqual(['30', '-30', '-30', '30']);
+    expect(result.replacementTransfer).toMatchObject({
+      sourceAccountId: fixture.accounts.openingPositive,
+      destinationAccountId: fixture.accounts.activeBank,
+      amountMinor: '30',
+    });
+    await expect(
+      corrections.replaceTransfer(principal('active'), context('active'), target, {
+        operationId,
+        sourceAccountId: fixture.accounts.activeAlternate,
+        destinationAccountId: fixture.accounts.activeBank,
+        amountMinor: '30',
+        occurredAt: '2026-01-24T10:00:00Z',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'OPERATION_ID_CONFLICT' } });
+  });
+
+  it('rejects a Transfer source relocation into the same final account or another Store', async () => {
+    const target = randomUUID();
+    await transferWrites.create(principal('active'), context('active'), {
+      operationId: target,
+      sourceAccountId: fixture.accounts.activeCash,
+      destinationAccountId: fixture.accounts.activeBank,
+      amountMinor: '20',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    const sameAccount = randomUUID();
+    await expect(
+      corrections.replaceTransfer(principal('active'), context('active'), target, {
+        operationId: sameAccount,
+        sourceAccountId: fixture.accounts.activeAlternate,
+        destinationAccountId: fixture.accounts.activeAlternate,
+        amountMinor: '20',
+        occurredAt: '2026-01-24T10:00:00Z',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'MONEY_TRANSFER_SAME_ACCOUNT' } });
+    const crossStore = randomUUID();
+    await expect(
+      corrections.replaceTransfer(principal('active'), context('active'), target, {
+        operationId: crossStore,
+        sourceAccountId: fixture.accounts.tenantBCash,
+        destinationAccountId: fixture.accounts.activeBank,
+        amountMinor: '20',
+        occurredAt: '2026-01-24T10:00:00Z',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(await movementRows(fixture.stores.active, sameAccount)).toEqual([]);
+    expect(await movementRows(fixture.stores.active, crossStore)).toEqual([]);
+  });
+
+  it('rejects a Transfer source relocation onto an ineligible account', async () => {
+    const target = randomUUID();
+    await transferWrites.create(principal('active'), context('active'), {
+      operationId: target,
+      sourceAccountId: fixture.accounts.activeCash,
+      destinationAccountId: fixture.accounts.activeBank,
+      amountMinor: '30',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    const operationId = randomUUID();
+    await adminPool.query(
+      "update ledger.money_accounts set availability = 'held_by_external_party' where id = $1",
+      [fixture.accounts.openingNegative],
+    );
+    try {
+      await expect(
+        corrections.replaceTransfer(principal('active'), context('active'), target, {
+          operationId,
+          sourceAccountId: fixture.accounts.openingNegative,
+          destinationAccountId: fixture.accounts.activeBank,
+          amountMinor: '30',
+          occurredAt: '2026-01-24T10:00:00Z',
+        }),
+      ).rejects.toMatchObject({ response: { code: 'MONEY_ACCOUNT_UNAVAILABLE' } });
+      expect(await movementRows(fixture.stores.active, operationId)).toEqual([]);
+    } finally {
+      await adminPool.query(
+        "update ledger.money_accounts set availability = 'available' where id = $1",
+        [fixture.accounts.openingNegative],
+      );
+    }
+  });
+
+  it('locks new-source Transfer relocations across the canonical account union without deadlock', async () => {
+    const firstTarget = randomUUID();
+    const secondTarget = randomUUID();
+    await transferWrites.create(principal('concurrent'), context('concurrent'), {
+      operationId: firstTarget,
+      sourceAccountId: fixture.accounts.concurrentCash,
+      destinationAccountId: fixture.accounts.concurrentBank,
+      amountMinor: '10',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    await transferWrites.create(principal('concurrent'), context('concurrent'), {
+      operationId: secondTarget,
+      sourceAccountId: fixture.accounts.concurrentBank,
+      destinationAccountId: fixture.accounts.concurrentAlternate,
+      amountMinor: '20',
+      occurredAt: '2026-01-15T10:00:00Z',
+    });
+    const firstOperationId = randomUUID();
+    const secondOperationId = randomUUID();
+    const results = await Promise.all([
+      corrections.replaceTransfer(principal('concurrent'), context('concurrent'), firstTarget, {
+        operationId: firstOperationId,
+        sourceAccountId: fixture.accounts.concurrentAlternate,
+        destinationAccountId: fixture.accounts.concurrentBank,
+        amountMinor: '15',
+        occurredAt: '2026-01-24T10:00:00Z',
+      }),
+      corrections.replaceTransfer(principal('concurrent'), context('concurrent'), secondTarget, {
+        operationId: secondOperationId,
+        sourceAccountId: fixture.accounts.concurrentCash,
+        destinationAccountId: fixture.accounts.concurrentBank,
+        amountMinor: '25',
+        occurredAt: '2026-01-24T10:00:00Z',
+      }),
+    ]);
+    expect(results).toHaveLength(2);
+    expect(results[0].replacementTransfer).toMatchObject({
+      sourceAccountId: fixture.accounts.concurrentAlternate,
+      destinationAccountId: fixture.accounts.concurrentBank,
+      amountMinor: '15',
+    });
+    expect(results[1].replacementTransfer).toMatchObject({
+      sourceAccountId: fixture.accounts.concurrentCash,
+      destinationAccountId: fixture.accounts.concurrentBank,
+      amountMinor: '25',
+    });
+    for (const operationId of [firstOperationId, secondOperationId]) {
+      const rows = await movementRows(fixture.stores.concurrent, operationId);
+      expect(rows).toHaveLength(4);
+      expect(rows.reduce((sum, row) => sum + BigInt(row.amountDeltaMinor), 0n)).toBe(0n);
+    }
+  });
+
   it('purely reverses a Transfer without creating a replacement header', async () => {
     const beforeSource = await balance(fixture.stores.active, fixture.accounts.activeCash);
     const beforeDestination = await balance(fixture.stores.active, fixture.accounts.activeBank);

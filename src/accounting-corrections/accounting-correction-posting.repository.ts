@@ -631,12 +631,15 @@ export class AccountingCorrectionPostingRepository {
       if (!replacement.destinationAccountId) {
         reject('ACCOUNTING_CORRECTION_TARGET_INTEGRITY_CONFLICT');
       }
-      if (replacement.destinationAccountId === target.transfer.sourceAccountId) {
+      const finalSource = replacement.sourceAccountId ?? target.transfer.sourceAccountId;
+      const finalDestination = replacement.destinationAccountId;
+      if (finalSource === finalDestination) {
         reject('MONEY_TRANSFER_SAME_ACCOUNT');
       }
       if (
         replacement.amountMinor === target.transfer.amountMinor &&
-        replacement.destinationAccountId === target.transfer.destinationAccountId
+        finalSource === target.transfer.sourceAccountId &&
+        finalDestination === target.transfer.destinationAccountId
       ) {
         reject('ACCOUNTING_CORRECTION_NO_OP');
       }
@@ -665,6 +668,9 @@ export class AccountingCorrectionPostingRepository {
     if (target.domain === 'internal_transfer') {
       ids.add(target.transfer.sourceAccountId);
       ids.add(target.transfer.destinationAccountId);
+      if (input.replacement?.sourceAccountId) {
+        ids.add(input.replacement.sourceAccountId);
+      }
       if (input.replacement?.destinationAccountId) {
         ids.add(input.replacement.destinationAccountId);
       }
@@ -855,6 +861,9 @@ export class AccountingCorrectionPostingRepository {
     let replacementTransfer: PostedMoneyTransfer | null = null;
 
     if (input.replacement?.destinationAccountId) {
+      // The replacement Transfer may relocate the source account; when the client omits it the
+      // original source is reused. Reversal facts above always target the immutable original.
+      const finalSource = input.replacement.sourceAccountId ?? target.transfer.sourceAccountId;
       const replacementHeaderId = deriveMoneyFactId(
         input.operationId,
         'replacement:transfer-header',
@@ -866,7 +875,7 @@ export class AccountingCorrectionPostingRepository {
       );
       const replacementSource = await this.insertMovement(transaction, context, input, posting, {
         discriminator: 'replacement:transfer-source',
-        accountId: target.transfer.sourceAccountId,
+        accountId: finalSource,
         amountDeltaMinor: -input.replacement.amountMinor,
         referenceType: 'money_transfer',
         referenceId: replacementHeaderId,
@@ -889,7 +898,7 @@ export class AccountingCorrectionPostingRepository {
           reversalOfId: null,
           transactionGroupId,
           transferGroupId: replacementHeaderId,
-          counterAccountId: target.transfer.sourceAccountId,
+          counterAccountId: finalSource,
         },
       );
       movements.push(replacementSource, replacementDestination);
@@ -905,7 +914,7 @@ export class AccountingCorrectionPostingRepository {
           id: replacementHeaderId,
           operationId: deriveMoneyFactOperationId(input.operationId, 'replacement:transfer-header'),
           displayNumber,
-          sourceAccountId: target.transfer.sourceAccountId,
+          sourceAccountId: finalSource,
           destinationAccountId: input.replacement.destinationAccountId,
           amountMinor: input.replacement.amountMinor,
           transferAt: input.occurredAt,

@@ -94,6 +94,9 @@ export class AccountingCorrectionWriteService {
         dto.destinationAccountId,
         'destinationAccountId',
       ),
+      ...(dto.sourceAccountId !== undefined
+        ? { sourceAccountId: this.canonicalizeIdentifier(dto.sourceAccountId, 'sourceAccountId') }
+        : {}),
     });
   }
 
@@ -118,6 +121,7 @@ export class AccountingCorrectionWriteService {
       ? {
           amountMinor: replacement.amountMinor.toString(),
           ...(replacement.moneyAccountId ? { moneyAccountId: replacement.moneyAccountId } : {}),
+          ...(replacement.sourceAccountId ? { sourceAccountId: replacement.sourceAccountId } : {}),
           ...(replacement.destinationAccountId
             ? { destinationAccountId: replacement.destinationAccountId }
             : {}),
