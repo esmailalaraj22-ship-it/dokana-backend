@@ -24,3 +24,8 @@ export function postgresqlErrorCode(error: unknown): string | undefined {
   const code = databaseError(error)?.code;
   return typeof code === 'string' ? code : undefined;
 }
+
+export function postgresqlConstraint(error: unknown): string | undefined {
+  const constraint = databaseError(error)?.constraint;
+  return typeof constraint === 'string' ? constraint : undefined;
+}

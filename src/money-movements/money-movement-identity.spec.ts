@@ -37,6 +37,12 @@ describe('deterministic money fact identity', () => {
     expect(deriveMoneyFactOperationId(command, 'transfer-destination')).toBe(
       '26a66f60-c2b7-5bdc-83a9-094f59d15466',
     );
+    expect(deriveMoneyFactId(command, 'transfer-header')).toBe(
+      '4bff13e7-f520-5287-b0aa-3581510bbc5f',
+    );
+    expect(deriveMoneyFactOperationId(command, 'transfer-header')).toBe(
+      '07cde60a-d459-5a96-94f2-8762d78f4106',
+    );
   });
 
   it('is stable and case-insensitive on the command id', () => {

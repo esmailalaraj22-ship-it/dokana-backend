@@ -9,7 +9,7 @@
 | Review branch            | `main`                                     |
 | Review checkpoint        | `85ab494ac9383e6e31cba266a5b0d3749dee7740` |
 | Closed execution history | Stations S0 through S9                     |
-| Next candidate           | S10.4 - Internal Transfers                  |
+| Next candidate           | S10.5 - Reversal / Replacement              |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -317,8 +317,8 @@ invent opening-balance behavior or authorize implementation before orientation.
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
 
 - **Status:** IN PROGRESS. S10.1 CLOSED; S10.2 CLOSED (Money Movement Authority);
-  S10.3 CLOSED (Opening Balance and Owner Ledger); S10.4 NEXT / NOT STARTED;
-  S10.5 NOT STARTED.
+  S10.3 CLOSED (Opening Balance and Owner Ledger); S10.4 CLOSED (Internal Transfers);
+  S10.5 NEXT / NOT STARTED.
 - **S10.2 note:** The legacy accounting-period guard runtime EXECUTE permission was
   reconciled across live DB, the existing PostgreSQL reference, and forward migration `0006`
   (`GRANT EXECUTE ON FUNCTION ledger.assert_period_open(uuid, uuid, timestamptz) TO
@@ -741,8 +741,8 @@ decision does not authorize an implementer to invent policy.
 | Last closed implementation checkpoint | `85ab494ac9383e6e31cba266a5b0d3749dee7740`           |
 | Safe completed capabilities           | S0-S9 boundaries documented above                    |
 | First incomplete release dependency   | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| Next candidate                        | S10.4 internal transfers                              |
-| S10 current status                    | IN PROGRESS - S10.1-S10.3 closed; S10.4 next         |
+| Next candidate                        | S10.5 reversal / replacement                           |
+| S10 current status                    | IN PROGRESS - S10.1-S10.4 closed; S10.5 next         |
 
-Do not start S10.4 from this document. S10.4 requires its own execution prompt and
+Do not start S10.5 from this document. S10.5 requires its own execution prompt and
 explicit backend-owner approval before implementation.

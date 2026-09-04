@@ -615,6 +615,97 @@ export const moneyMovements = ledgerSchema.table(
   ],
 );
 
+export const moneyTransferStatuses = ['draft', 'posted', 'cancelled'] as const;
+
+export type MoneyTransferStatusValue = (typeof moneyTransferStatuses)[number];
+
+export const moneyTransfers = ledgerSchema.table(
+  'money_transfers',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    accountingPeriodId: uuid('accounting_period_id'),
+    displayNumber: text('display_number').notNull(),
+    sourceAccountId: uuid('source_account_id').notNull(),
+    destinationAccountId: uuid('destination_account_id').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    transferAt: timestamp('transfer_at', { withTimezone: true, mode: 'date' }).notNull(),
+    sourceMovementId: uuid('source_movement_id'),
+    destinationMovementId: uuid('destination_movement_id'),
+    status: text('status').$type<MoneyTransferStatusValue>().notNull().default('draft'),
+    notes: text('notes'),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'money_transfers_store_id_accounting_period_id_fkey',
+      columns: [table.storeId, table.accountingPeriodId],
+      foreignColumns: [accountingPeriods.storeId, accountingPeriods.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_transfers_store_id_source_account_id_fkey',
+      columns: [table.storeId, table.sourceAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_transfers_store_id_destination_account_id_fkey',
+      columns: [table.storeId, table.destinationAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_transfers_store_id_source_movement_id_fkey',
+      columns: [table.storeId, table.sourceMovementId],
+      foreignColumns: [moneyMovements.storeId, moneyMovements.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_transfers_store_id_destination_movement_id_fkey',
+      columns: [table.storeId, table.destinationMovementId],
+      foreignColumns: [moneyMovements.storeId, moneyMovements.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'money_transfers_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    unique('money_transfers_store_id_id_key').on(table.storeId, table.id),
+    unique('money_transfers_store_id_display_number_key').on(table.storeId, table.displayNumber),
+    unique('money_transfers_store_id_source_movement_id_key').on(
+      table.storeId,
+      table.sourceMovementId,
+    ),
+    unique('money_transfers_store_id_destination_movement_id_key').on(
+      table.storeId,
+      table.destinationMovementId,
+    ),
+    unique('money_transfers_store_id_operation_id_key').on(table.storeId, table.operationId),
+    check('money_transfers_amount_minor_check', sql`${table.amountMinor} > 0`),
+    check('money_transfers_status_check', sql`${table.status} in ('draft', 'posted', 'cancelled')`),
+    check('money_transfers_check', sql`${table.sourceAccountId} <> ${table.destinationAccountId}`),
+    check(
+      'money_transfers_check1',
+      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null) or ${table.status} <> 'cancelled'`,
+    ),
+    check('money_transfers_version_check', sql`${table.version} >= 1`),
+  ],
+);
+
 export const ownerLedgerEntryTypes = [
   'capital_contribution',
   'owner_loan_to_store',
