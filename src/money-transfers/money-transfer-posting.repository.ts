@@ -204,12 +204,12 @@ export class MoneyTransferPostingRepository {
               counterAccountId: input.sourceAccountId,
             },
           );
-          const displayNumber = await this.nextDisplayNumber(
+          const displayNumber = await this.nextDisplayNumberWithinTransaction(
             savepoint,
             context,
             posting.postingDate,
           );
-          const transfer = await this.insertTransfer(savepoint, context, {
+          const transfer = await this.insertTransferWithinTransaction(savepoint, context, {
             id: transferId,
             operationId: deriveMoneyFactOperationId(input.operationId, 'transfer-header'),
             displayNumber,
@@ -318,7 +318,7 @@ export class MoneyTransferPostingRepository {
     return error;
   }
 
-  private async nextDisplayNumber(
+  async nextDisplayNumberWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     postingDate: string,
@@ -344,7 +344,7 @@ export class MoneyTransferPostingRepository {
     return displayNumber;
   }
 
-  private async insertTransfer(
+  async insertTransferWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     spec: {

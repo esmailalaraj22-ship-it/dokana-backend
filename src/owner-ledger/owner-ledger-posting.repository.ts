@@ -318,7 +318,7 @@ export class OwnerLedgerPostingRepository {
               transactionGroupId,
             },
           );
-          const ownerEntry = await this.insertOwnerEntry(savepoint, context, {
+          const ownerEntry = await this.insertOwnerEntryWithinTransaction(savepoint, context, {
             id: ownerEntryId,
             operationId: deriveMoneyFactOperationId(input.operationId, 'owner-entry'),
             entryType: descriptor.entryType,
@@ -423,7 +423,7 @@ export class OwnerLedgerPostingRepository {
     return rows[0]?.liability ?? 0n;
   }
 
-  private async insertOwnerEntry(
+  async insertOwnerEntryWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     spec: {
@@ -438,6 +438,7 @@ export class OwnerLedgerPostingRepository {
       occurredAt: Date;
       referenceType: string;
       referenceId: string;
+      reversalOfId?: string | null;
     },
   ): Promise<PostedOwnerLedgerEntry> {
     const rows = await transaction
@@ -454,6 +455,7 @@ export class OwnerLedgerPostingRepository {
         referenceId: spec.referenceId,
         transactionGroupId: spec.transactionGroupId,
         occurredAt: spec.occurredAt,
+        reversalOfId: spec.reversalOfId ?? null,
         deviceId: context.deviceId,
         operationId: spec.operationId,
       })

@@ -52,6 +52,18 @@ describe('deterministic money fact identity', () => {
     expect(deriveTransactionGroupId(command.toUpperCase())).toBe(command);
   });
 
+  it('derives correction facts from base semantic roles without recursive prefixes', () => {
+    const reversal = deriveMoneyFactId(command, 'reversal:owner-money');
+    const replacement = deriveMoneyFactId(command, 'replacement:owner-money');
+
+    expect(reversal).toBe('bc652382-a9b7-5a8b-a51f-2281e451de57');
+    expect(replacement).toBe('dc8c034a-6416-5a13-9264-b463708b1d6e');
+    expect(reversal).not.toBe(replacement);
+    expect(deriveMoneyFactId(command, 'replacement:transfer-header')).toBe(
+      '47f66df9-965a-5283-9372-f30f4ddad102',
+    );
+  });
+
   it('changes with the effect discriminator and with the command', () => {
     expect(deriveMoneyFactId(command, 'transfer-source')).not.toBe(
       deriveMoneyFactId(command, 'transfer-destination'),

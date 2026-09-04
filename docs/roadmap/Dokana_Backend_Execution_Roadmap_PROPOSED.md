@@ -7,9 +7,9 @@
 | Status                   | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository               | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch            | `main`                                     |
-| Review checkpoint        | `85ab494ac9383e6e31cba266a5b0d3749dee7740` |
-| Closed execution history | Stations S0 through S9                     |
-| Next candidate           | S10.5 - Reversal / Replacement              |
+| S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
+| Closed execution history  | Stations S0 through S10                    |
+| Next candidate            | S11 - Manual Inventory and Costing         |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -65,18 +65,18 @@ The roadmap was reconstructed against this verified state:
 | `origin/main`                   | `85ab494ac9383e6e31cba266a5b0d3749dee7740`     |
 | Ahead/behind                    | `0/0`                                          |
 | Working tree                    | Clean                                          |
-| Migrations                      | 5 applied, 0 pending                           |
+| Migrations                      | 6 applied, 0 pending                           |
 | Migration checksum verification | Pass                                           |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches                 |
-| Last fully closed Station       | S9                                             |
-| Later Station started           | No; S10 remains not started                    |
+| Last fully closed Station       | S10                                            |
+| Later Station started           | No; S11 remains not started                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S9
+## 5. Completed Stations S0-S10
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -316,9 +316,9 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S10 - Money Posting, Opening Balances, and Owner Ledger
 
-- **Status:** IN PROGRESS. S10.1 CLOSED; S10.2 CLOSED (Money Movement Authority);
+- **Status:** CLOSED. S10.1 CLOSED; S10.2 CLOSED (Money Movement Authority);
   S10.3 CLOSED (Opening Balance and Owner Ledger); S10.4 CLOSED (Internal Transfers);
-  S10.5 NEXT / NOT STARTED.
+  S10.5 CLOSED (Same-Domain Reversal / Replacement).
 - **S10.2 note:** The legacy accounting-period guard runtime EXECUTE permission was
   reconciled across live DB, the existing PostgreSQL reference, and forward migration `0006`
   (`GRANT EXECUTE ON FUNCTION ledger.assert_period_open(uuid, uuid, timestamptz) TO
@@ -709,7 +709,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Station 9 is closed; S10 is the next candidate and
+No roadmap-level owner decision is open. Station 10 is closed; S11 is the next candidate and
 remains not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
@@ -718,9 +718,9 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S9 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S10 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S9-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S11-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -737,12 +737,12 @@ decision does not authorize an implementer to invent policy.
 
 | Field                                 | Current position                                     |
 | ------------------------------------- | ---------------------------------------------------- |
-| Last fully closed Station             | S9 - Accounting Periods and Posting Controls         |
-| Last closed implementation checkpoint | `85ab494ac9383e6e31cba266a5b0d3749dee7740`           |
-| Safe completed capabilities           | S0-S9 boundaries documented above                    |
-| First incomplete release dependency   | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| Next candidate                        | S10.5 reversal / replacement                           |
-| S10 current status                    | IN PROGRESS - S10.1-S10.4 closed; S10.5 next         |
+| Last fully closed Station             | S10 - Money Posting, Opening Balances, and Owner Ledger |
+| S10.5 starting checkpoint             | `d6e7cd845ff245f070c82d503ea410bc7e676e1a`              |
+| Safe completed capabilities           | S0-S10 boundaries documented above                      |
+| First incomplete release dependency   | S11 - Manual Inventory, Stock Projection, and Costing   |
+| Next candidate                        | S11 orientation and contract planning                    |
+| S10 current status                    | CLOSED - S10.1-S10.5 closed                              |
 
-Do not start S10.5 from this document. S10.5 requires its own execution prompt and
-explicit backend-owner approval before implementation.
+Do not start S11 from this document. S11 requires its own orientation, contract review,
+and explicit backend-owner approval before implementation.

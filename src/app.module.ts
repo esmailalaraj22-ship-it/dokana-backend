@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AccountingCorrectionsModule } from './accounting-corrections/accounting-corrections.module';
 import { AccountingPeriodsModule } from './accounting-periods/accounting-periods.module';
 import { AuthenticationModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
@@ -23,6 +24,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     HealthModule,
     AuthenticationModule,
     AccountingPeriodsModule,
+    AccountingCorrectionsModule,
     MoneyAccountsModule,
     MoneyMovementsModule,
     MoneyTransfersModule,
