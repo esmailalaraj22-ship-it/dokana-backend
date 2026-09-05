@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg';
 
+import { readMigrationFile } from './migration-files';
+
 import {
   applicationRoutines,
   applicationSchemas,
@@ -47,6 +49,22 @@ export async function verifyApplicationInventory(
   expectedOwner: 'postgres' | 'shop_app_migrator',
   includeFoundation: boolean,
 ): Promise<void> {
+  // The baseline inventory remains frozen. Versioned additions are admitted only
+  // after their exact migration is registered, without accepting arbitrary objects.
+  let inventoryFoundationApplied = false;
+  if (includeFoundation) {
+    const applied = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0007_inventory_physical_foundation.sql'`,
+    );
+    if (applied.rows[0]) {
+      const file = await readMigrationFile('0007_inventory_physical_foundation.sql');
+      if (applied.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Inventory foundation migration checksum mismatch.');
+      }
+      inventoryFoundationApplied = true;
+    }
+  }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
       select
@@ -88,6 +106,7 @@ export async function verifyApplicationInventory(
     ...applicationSequences,
     ...applicationViews,
     ...(includeFoundation ? ownershipFoundationAdditions : []),
+    ...(inventoryFoundationApplied ? ['ledger.manual_inventory_entries'] : []),
   ];
   assertExactSet(
     'Application relation',
@@ -119,7 +138,20 @@ export async function verifyApplicationInventory(
   assertExactSet(
     'Application routine',
     routineResult.rows.map((row) => row.signature),
-    applicationRoutines,
+    [
+      ...applicationRoutines,
+      ...(inventoryFoundationApplied
+        ? [
+            'ledger.inventory_base_quantity(p_selected bigint, p_num integer, p_den integer)',
+            'ledger.validate_inventory_unit()',
+            'ledger.validate_manual_inventory_movement()',
+            'ledger.validate_inventory_manual_reference()',
+            'ledger.guard_inventory_count_item()',
+            'ledger.guard_inventory_count_header()',
+            'ledger.validate_inventory_count_facts()',
+          ]
+        : []),
+    ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {
     throw new Error('An application routine has an unexpected owner.');

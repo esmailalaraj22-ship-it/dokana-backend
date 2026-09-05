@@ -1086,17 +1086,21 @@ describe('Accounting Period provisioning and lifecycle with real PostgreSQL', ()
          quantity_before_milli, quantity_delta_milli, quantity_after_milli,
          inventory_value_before_minor, value_delta_minor, inventory_value_after_minor,
          average_unit_cost_after_minor, cost_status, has_pending_cost_after,
-         reference_type, reference_id, transaction_group_id, occurred_at, operation_id
+         reference_type, reference_id, transaction_group_id, occurred_at, operation_id,
+         product_unit_id, selected_quantity_milli, factor_num, factor_den,
+         business_date, posting_date, cost_state_before, cost_state_after
        ) values (
          $1, $2, $3, $4, 'adjustment_in', 0, 1000, 1000,
          0, 0, 0, 0, 'pending', true,
-         's9_4_test', $5, $6, '2026-04-10T10:00:00Z', $7
+         's9_4_test', $5, $6, '2026-04-10T10:00:00Z', $7,
+         $8, 1000, 1, 1, '2026-04-10', '2026-04-10', 'known', 'pending'
        )`,
       [
         inventoryMovementId,
         fixture.stores.ownerA,
         randomUUID(),
         periodIds.ownerAApril,
+        randomUUID(),
         randomUUID(),
         randomUUID(),
         randomUUID(),

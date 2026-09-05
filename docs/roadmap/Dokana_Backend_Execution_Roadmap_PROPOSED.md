@@ -9,7 +9,7 @@
 | Review branch            | `main`                                     |
 | S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
 | Closed execution history  | Stations S0 through S10                    |
-| Next candidate            | S11 - Manual Inventory and Costing         |
+| Next candidate            | S11.3 - Inventory Reads and Exact Math      |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -350,12 +350,12 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S11 - Manual Inventory, Stock Projection, and Costing
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** IN PROGRESS; S11.1 CLOSED; S11.2 CLOSED; S11.3 NEXT / NOT STARTED.
 - **Purpose:** Establish independent inventory and cost authority before sales.
 - **Distinct boundary:** Inventory is movement-driven and independent from supplier
   invoice/payable posting.
 - **Hard dependencies:** S5 Product/Unit, S7 settings, and S9 periods.
-- **Soft dependencies:** S6 Supplier for optional trace references.
+- **Soft dependencies:** None; supplier-invoice linkage is excluded from S11.
 - **Primary deliverables:** Manual inventory documents; authoritative inventory
   movements; protected stock projections; opening stock; counts and adjustments;
   locking/concurrency; negative-stock policy; weighted-average and pending/unknown cost.
@@ -363,7 +363,7 @@ invent opening-balance behavior or authorize implementation before orientation.
   sales, and COGS posting.
 - **Coverage:** PRD manual inventory, stock, counts, adjustments, and costing.
 - **Known risks/migrations:** Do not reuse legacy goods-receipt payable coupling. Unknown
-  cost must not become known zero. Optional invoice trace creates no reciprocal effect.
+  cost must not become known zero. No supplier-invoice linkage is implemented in S11.
 - **Start condition:** S5, S7, and S9 closed; inventory contract and any forward
   migration independently reviewed.
 - **Closure intent:** Tested stock/cost authority ready for inventory-enabled sales.
@@ -709,8 +709,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Station 10 is closed; S11 is the next candidate and
-remains not started.
+No roadmap-level owner decision is open. Station 10 is closed; S11 is in progress.
+S11.1 and S11.2 are closed; S11.3 is next and remains not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -720,7 +720,7 @@ decision does not authorize an implementer to invent policy.
 
 - Completed Stations S0-S10 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S11-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S12-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -741,8 +741,9 @@ decision does not authorize an implementer to invent policy.
 | S10.5 starting checkpoint             | `d6e7cd845ff245f070c82d503ea410bc7e676e1a`              |
 | Safe completed capabilities           | S0-S10 boundaries documented above                      |
 | First incomplete release dependency   | S11 - Manual Inventory, Stock Projection, and Costing   |
-| Next candidate                        | S11 orientation and contract planning                    |
+| Next candidate                        | S11.3 - Inventory Reads and Exact Math; NOT STARTED       |
 | S10 current status                    | CLOSED - S10.1-S10.5 closed                              |
+| S11 current status                    | IN PROGRESS - S11.1-S11.2 CLOSED                         |
 
-Do not start S11 from this document. S11 requires its own orientation, contract review,
-and explicit backend-owner approval before implementation.
+Do not start S11.3 from this document. The next Task requires an explicit backend-owner
+execution prompt; S11.3+ business implementation has not started.
