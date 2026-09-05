@@ -9,7 +9,7 @@
 | Review branch            | `main`                                     |
 | S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
 | Closed execution history  | Stations S0 through S10                    |
-| Next candidate            | S11.3 - Inventory Reads and Exact Math      |
+| Next candidate            | S11.4 - Opening Stock and Manual Adjustments |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -350,7 +350,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S11 - Manual Inventory, Stock Projection, and Costing
 
-- **Status:** IN PROGRESS; S11.1 CLOSED; S11.2 CLOSED; S11.3 NEXT / NOT STARTED.
+- **Status:** IN PROGRESS; S11.1 CLOSED; S11.2 CLOSED; S11.3 CLOSED; S11.4 NEXT / NOT STARTED.
 - **Purpose:** Establish independent inventory and cost authority before sales.
 - **Distinct boundary:** Inventory is movement-driven and independent from supplier
   invoice/payable posting.
@@ -710,7 +710,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-level owner decision is open. Station 10 is closed; S11 is in progress.
-S11.1 and S11.2 are closed; S11.3 is next and remains not started.
+S11.1-S11.3 are closed; S11.4 is next and remains not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -741,9 +741,9 @@ decision does not authorize an implementer to invent policy.
 | S10.5 starting checkpoint             | `d6e7cd845ff245f070c82d503ea410bc7e676e1a`              |
 | Safe completed capabilities           | S0-S10 boundaries documented above                      |
 | First incomplete release dependency   | S11 - Manual Inventory, Stock Projection, and Costing   |
-| Next candidate                        | S11.3 - Inventory Reads and Exact Math; NOT STARTED       |
+| Next candidate                        | S11.4 - Opening Stock and Manual Adjustments; NOT STARTED |
 | S10 current status                    | CLOSED - S10.1-S10.5 closed                              |
-| S11 current status                    | IN PROGRESS - S11.1-S11.2 CLOSED                         |
+| S11 current status                    | IN PROGRESS - S11.1-S11.3 CLOSED                         |
 
-Do not start S11.3 from this document. The next Task requires an explicit backend-owner
-execution prompt; S11.3+ business implementation has not started.
+Do not start S11.4 from this document. The next Task requires an explicit backend-owner
+execution prompt; S11.4+ business implementation has not started.

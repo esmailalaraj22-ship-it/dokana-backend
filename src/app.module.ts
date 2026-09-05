@@ -8,6 +8,7 @@ import { LoggingModule } from './common/logging/logging.module';
 import { ApplicationConfigModule } from './config/config.module';
 import { CustomersModule } from './customers/customers.module';
 import { HealthModule } from './health/health.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { MoneyAccountsModule } from './money-accounts/money-accounts.module';
 import { MoneyMovementsModule } from './money-movements/money-movements.module';
 import { MoneyTransfersModule } from './money-transfers/money-transfers.module';
@@ -22,6 +23,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     LoggingModule,
     CommonModule,
     HealthModule,
+    InventoryModule,
     AuthenticationModule,
     AccountingPeriodsModule,
     AccountingCorrectionsModule,
