@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { InventoryPostingService } from './inventory-posting.service';
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import {
@@ -12,7 +13,28 @@ import type { InventoryOperationResponse, InventoryStockResponse } from './inven
 @Controller('inventory')
 @UseGuards(AuthenticationGuard)
 export class InventoryController {
-  constructor(private readonly reads: InventoryReadService) {}
+  constructor(
+    private readonly reads: InventoryReadService,
+    private readonly posting: InventoryPostingService,
+  ) {}
+
+  @Post('opening')
+  opening(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    assertNoInventoryQuery(request.query);
+    return this.posting.post(request.principal, request.tenantContext, 'opening', body);
+  }
+
+  @Post('increase')
+  increase(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    assertNoInventoryQuery(request.query);
+    return this.posting.post(request.principal, request.tenantContext, 'increase', body);
+  }
+
+  @Post('decrease')
+  decrease(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    assertNoInventoryQuery(request.query);
+    return this.posting.post(request.principal, request.tenantContext, 'decrease', body);
+  }
 
   @Get('stock/:productId')
   stock(
