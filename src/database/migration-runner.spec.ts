@@ -31,6 +31,7 @@ describe('controlled migration runner', () => {
       '0005_refresh_rotation_session_boundary.sql',
       '0006_money_movement_period_guard_execute.sql',
       '0007_inventory_physical_foundation.sql',
+      '0008_stock_count_zero_establishment.sql',
     ]);
   });
 

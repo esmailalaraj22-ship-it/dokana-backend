@@ -36,9 +36,13 @@ export const inventoryMovementTypes = [
   'expiry',
 ] as const;
 export type InventoryMovementType = (typeof inventoryMovementTypes)[number];
+export const inventoryQuantityFactKinds = ['movement', 'count_zero_establishment'] as const;
+export type InventoryQuantityFactKind = (typeof inventoryQuantityFactKinds)[number];
+export const stockCountPreviousProjectionStates = ['missing', 'established'] as const;
+export type StockCountPreviousProjectionState = (typeof stockCountPreviousProjectionStates)[number];
 
-// SQL migration 0007 owns RLS, triggers, grants and deferred constraints. Drizzle
-// models their columns/relationships without trying to regenerate that behavior.
+// SQL migrations 0007 and 0008 own RLS, triggers, grants and deferred constraints.
+// Drizzle models their columns/relationships without trying to regenerate that behavior.
 export const inventoryMovements = ledgerSchema.table(
   'inventory_movements',
   {
@@ -75,6 +79,10 @@ export const inventoryMovements = ledgerSchema.table(
     postingDate: date('posting_date', { mode: 'string' }).notNull(),
     costStateBefore: text('cost_state_before').$type<InventoryCostState>().notNull(),
     costStateAfter: text('cost_state_after').$type<InventoryCostState>().notNull(),
+    quantityFactKind: text('quantity_fact_kind')
+      .$type<InventoryQuantityFactKind>()
+      .notNull()
+      .default('movement'),
   },
   (t) => [
     unique('inventory_movements_store_id_id_key').on(t.storeId, t.id),
@@ -117,7 +125,14 @@ export const inventoryMovements = ledgerSchema.table(
       'inventory_movements_movement_type_check',
       sql`${t.movementType} in ('opening_balance', 'purchase_receipt', 'sale', 'customer_return_saleable', 'supplier_return', 'adjustment_in', 'adjustment_out', 'stock_count', 'correction', 'owner_use', 'gift', 'damage', 'loss', 'expiry')`,
     ),
-    check('inventory_movements_quantity_delta_milli_check', sql`${t.quantityDeltaMilli} <> 0`),
+    check(
+      'inventory_movements_quantity_fact_kind_check',
+      sql`${t.quantityFactKind} in ('movement', 'count_zero_establishment')`,
+    ),
+    check(
+      'inventory_movements_quantity_delta_milli_check',
+      sql`(${t.quantityFactKind} = 'movement' and ${t.quantityDeltaMilli} <> 0) or (${t.quantityFactKind} = 'count_zero_establishment' and ${t.quantityDeltaMilli} = 0 and ${t.movementType} = 'stock_count' and ${t.referenceType} = 'stock_count' and ${t.quantityBeforeMilli} = 0 and ${t.quantityAfterMilli} = 0 and ${t.selectedQuantityMilli} = 0 and ${t.inventoryValueBeforeMinor} = 0 and ${t.valueDeltaMinor} = 0 and ${t.inventoryValueAfterMinor} = 0 and ${t.averageUnitCostAfterMinor} = 0 and ${t.costStatus} = 'unknown' and ${t.costStateBefore} = 'unknown' and ${t.costStateAfter} = 'unknown' and not ${t.hasPendingCostAfter} and ${t.reversalOfId} is null)`,
+    ),
     check(
       'inventory_movements_average_unit_cost_after_minor_check',
       sql`${t.averageUnitCostAfterMinor} >= 0`,
@@ -148,7 +163,7 @@ export const inventoryMovements = ledgerSchema.table(
     ),
     check(
       'inventory_movements_quantity_snapshot_check',
-      sql`${t.selectedQuantityMilli} > 0 and ${t.factorNum} > 0 and ${t.factorDen} > 0 and abs(${t.quantityDeltaMilli}::numeric) = ledger.inventory_base_quantity(${t.selectedQuantityMilli}, ${t.factorNum}, ${t.factorDen})::numeric`,
+      sql`${t.factorNum} > 0 and ${t.factorDen} > 0 and ((${t.quantityFactKind} = 'movement' and ${t.selectedQuantityMilli} > 0 and abs(${t.quantityDeltaMilli}::numeric) = ledger.inventory_base_quantity(${t.selectedQuantityMilli}, ${t.factorNum}, ${t.factorDen})::numeric) or (${t.quantityFactKind} = 'count_zero_establishment' and ${t.selectedQuantityMilli} = 0 and ledger.inventory_base_quantity(${t.selectedQuantityMilli}, ${t.factorNum}, ${t.factorDen}) = 0))`,
     ),
     check(
       'inventory_movements_dates_check',
@@ -395,9 +410,9 @@ export const stockCountItems = ledgerSchema.table(
     storeId: uuid('store_id').notNull(),
     stockCountId: uuid('stock_count_id').notNull(),
     productId: uuid('product_id').notNull(),
-    systemQuantityMilli: bigint('system_quantity_milli', { mode: 'bigint' }).notNull(),
+    systemQuantityMilli: bigint('system_quantity_milli', { mode: 'bigint' }),
     actualQuantityMilli: bigint('actual_quantity_milli', { mode: 'bigint' }).notNull(),
-    differenceMilli: bigint('difference_milli', { mode: 'bigint' }).notNull(),
+    differenceMilli: bigint('difference_milli', { mode: 'bigint' }),
     adjustmentMovementId: uuid('adjustment_movement_id'),
     reason: text('reason'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
@@ -407,6 +422,9 @@ export const stockCountItems = ledgerSchema.table(
     selectedQuantityMilli: bigint('selected_quantity_milli', { mode: 'bigint' }).notNull(),
     factorNum: integer('factor_num').notNull(),
     factorDen: integer('factor_den').notNull(),
+    previousProjectionState: text('previous_projection_state')
+      .$type<StockCountPreviousProjectionState>()
+      .notNull(),
   },
   (t) => [
     unique('stock_count_items_store_id_id_key').on(t.storeId, t.id),
@@ -451,8 +469,12 @@ export const stockCountItems = ledgerSchema.table(
       ],
     }).onDelete('restrict'),
     check(
-      'stock_count_items_check',
-      sql`${t.differenceMilli} = ${t.actualQuantityMilli} - ${t.systemQuantityMilli}`,
+      'stock_count_items_previous_projection_state_check',
+      sql`${t.previousProjectionState} in ('missing', 'established')`,
+    ),
+    check(
+      'stock_count_items_previous_quantity_check',
+      sql`(${t.previousProjectionState} = 'missing' and ${t.systemQuantityMilli} is null and ${t.differenceMilli} is null) or (${t.previousProjectionState} = 'established' and ${t.systemQuantityMilli} is not null and ${t.differenceMilli} is not null and ${t.differenceMilli} = ${t.actualQuantityMilli} - ${t.systemQuantityMilli})`,
     ),
     check('stock_count_items_version_check', sql`${t.version} >= 1`),
     check(

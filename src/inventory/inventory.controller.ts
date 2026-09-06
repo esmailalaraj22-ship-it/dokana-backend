@@ -9,6 +9,7 @@ import {
 } from './dto/inventory-read.dto';
 import { InventoryReadService } from './inventory-read.service';
 import type { InventoryOperationResponse, InventoryStockResponse } from './inventory-read.types';
+import { StockCountService } from './stock-count.service';
 
 @Controller('inventory')
 @UseGuards(AuthenticationGuard)
@@ -16,6 +17,7 @@ export class InventoryController {
   constructor(
     private readonly reads: InventoryReadService,
     private readonly posting: InventoryPostingService,
+    private readonly stockCounts: StockCountService,
   ) {}
 
   @Post('opening')
@@ -34,6 +36,12 @@ export class InventoryController {
   decrease(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
     assertNoInventoryQuery(request.query);
     return this.posting.post(request.principal, request.tenantContext, 'decrease', body);
+  }
+
+  @Post('counts')
+  count(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    assertNoInventoryQuery(request.query);
+    return this.stockCounts.post(request.principal, request.tenantContext, body);
   }
 
   @Get('stock/:productId')

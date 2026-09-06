@@ -28,6 +28,7 @@ import type {
 import {
   createInventoryTestDatabase,
   setInventoryContext,
+  stockCountMigrationFilename,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
@@ -209,7 +210,7 @@ describe('S11.3 authenticated inventory reads on isolated PostgreSQL', () => {
       throw new Error('Approved non-production local test environment is required.');
     // Existing fixture creates a new generated database with no business data.
     // It never applies SQL or inserts fixtures in the source development database.
-    database = await createInventoryTestDatabase();
+    database = await createInventoryTestDatabase(stockCountMigrationFilename);
     const migration = await db().migration.connect();
     try {
       await verifyMigrationSession(migration);

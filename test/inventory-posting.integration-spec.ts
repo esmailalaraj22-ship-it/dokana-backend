@@ -20,6 +20,7 @@ import type { InventoryPostingResponse } from '../src/inventory/inventory-postin
 import {
   createInventoryTestDatabase,
   setInventoryContext,
+  stockCountMigrationFilename,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
@@ -136,7 +137,7 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
   beforeAll(async () => {
     const environment = readLocalPostgresTestEnvironment();
     if (!environment) throw new Error('Approved non-production local test environment required.');
-    database = await createInventoryTestDatabase();
+    database = await createInventoryTestDatabase(stockCountMigrationFilename);
     const migration = await db().migration.connect();
     try {
       await verifyMigrationSession(migration);

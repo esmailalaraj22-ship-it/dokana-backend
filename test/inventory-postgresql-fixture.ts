@@ -9,6 +9,7 @@ import { readMigrationFiles, type MigrationFile } from '../scripts/migrations/mi
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
 export const inventoryMigrationFilename = '0007_inventory_physical_foundation.sql';
+export const stockCountMigrationFilename = '0008_stock_count_zero_establishment.sql';
 
 export interface InventoryTestDatabase {
   admin: Pool;
@@ -19,8 +20,10 @@ export interface InventoryTestDatabase {
 }
 
 // An isolated, freshly created database exercises both empty initialization and
-// the six-migration upgrade path. Never replay the baseline in the source DB.
-export async function createInventoryTestDatabase(): Promise<InventoryTestDatabase> {
+// the current migration upgrade path. Never replay the baseline in the source DB.
+export async function createInventoryTestDatabase(
+  targetMigrationFilename = inventoryMigrationFilename,
+): Promise<InventoryTestDatabase> {
   const environment = readLocalPostgresTestEnvironment();
   if (!environment) throw new Error('The approved local PostgreSQL test environment is required.');
   const databaseName = `dokana_s112_${randomUUID().replaceAll('-', '')}`;
@@ -90,9 +93,9 @@ export async function createInventoryTestDatabase(): Promise<InventoryTestDataba
       ),
     );
     const files = await readMigrationFiles();
-    const file = files.find((item) => item.filename === inventoryMigrationFilename);
-    if (!file) throw new Error('Inventory migration is missing.');
-    for (const prior of files.filter((item) => item.filename < inventoryMigrationFilename)) {
+    const file = files.find((item) => item.filename === targetMigrationFilename);
+    if (!file) throw new Error(`Inventory migration is missing: ${targetMigrationFilename}.`);
+    for (const prior of files.filter((item) => item.filename < targetMigrationFilename)) {
       if (Number(prior.filename.slice(0, 4)) <= 3) {
         await admin.query(prior.contents);
         if (prior.filename.startsWith('0002')) {

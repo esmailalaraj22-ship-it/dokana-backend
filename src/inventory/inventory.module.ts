@@ -9,6 +9,8 @@ import { AccountingPeriodsModule } from '../accounting-periods/accounting-period
 import { SettingsModule } from '../settings/settings.module';
 import { InventoryPostingRepository } from './inventory-posting.repository';
 import { InventoryPostingService } from './inventory-posting.service';
+import { StockCountRepository } from './stock-count.repository';
+import { StockCountService } from './stock-count.service';
 
 @Module({
   imports: [AuthenticationModule, DatabaseModule, AccountingPeriodsModule, SettingsModule],
@@ -18,6 +20,8 @@ import { InventoryPostingService } from './inventory-posting.service';
     InventoryReadService,
     InventoryPostingRepository,
     InventoryPostingService,
+    StockCountRepository,
+    StockCountService,
   ],
 })
 export class InventoryModule {}

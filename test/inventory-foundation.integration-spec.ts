@@ -19,8 +19,8 @@ import {
 } from '../src/database/schema/inventory';
 import {
   createInventoryTestDatabase,
-  inventoryMigrationFilename,
   setInventoryContext,
+  stockCountMigrationFilename,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 
@@ -273,6 +273,11 @@ describe('S11.2 inventory physical foundation on isolated real PostgreSQL', () =
         legacyStore,
       ]);
       await applyMigration(migrator, db().file);
+      const stockCountFile = (await readMigrationFiles()).find(
+        (file) => file.filename === stockCountMigrationFilename,
+      );
+      if (!stockCountFile) throw new Error('Stock Count migration is missing.');
+      await applyMigration(migrator, stockCountFile);
     } finally {
       await migrator.query('rollback');
       await migrator.query('reset role');
@@ -328,8 +333,8 @@ describe('S11.2 inventory physical foundation on isolated real PostgreSQL', () =
     const rows = await db().admin.query<{ filename: string; checksumSha256: string }>(
       `select filename, checksum_sha256 as "checksumSha256" from platform.schema_migrations order by filename`,
     );
-    expect(rows.rows).toHaveLength(7);
-    expect(rows.rows.at(-1)?.filename).toBe(inventoryMigrationFilename);
+    expect(rows.rows).toHaveLength(8);
+    expect(rows.rows.at(-1)?.filename).toBe(stockCountMigrationFilename);
     expect(() => verifyChecksums(awaitedFiles, rows.rows)).not.toThrow();
     const inspector = await db().admin.connect();
     try {
@@ -1000,6 +1005,7 @@ describe('S11.2 inventory physical foundation on isolated real PostgreSQL', () =
       actualQuantityMilli: 0n,
       differenceMilli: 0n,
       selectedQuantityMilli: 0n,
+      previousProjectionState: 'established' as const,
     };
     await drizzle(client).insert(stockCountItems).values(item);
     await drizzle(client)
@@ -1068,6 +1074,7 @@ describe('S11.2 inventory physical foundation on isolated real PostgreSQL', () =
             actualQuantityMilli: 1n,
             systemQuantityMilli: 0n,
             differenceMilli: 1n,
+            previousProjectionState: 'established',
           }),
       '23514',
     );
@@ -1083,6 +1090,7 @@ describe('S11.2 inventory physical foundation on isolated real PostgreSQL', () =
         actualQuantityMilli: 1000n,
         systemQuantityMilli: 0n,
         differenceMilli: 1000n,
+        previousProjectionState: 'established',
       });
     await reject(
       () =>

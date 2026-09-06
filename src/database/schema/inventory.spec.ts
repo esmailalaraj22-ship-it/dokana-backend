@@ -47,15 +47,18 @@ describe('Inventory physical schema boundary', () => {
     expect(manualInventoryEntries.totalPurchaseCostMinor.hasDefault).toBe(false);
   });
 
-  it('leaves transaction ownership and role transitions with the controlled runner', () => {
-    const absolutePath = resolve('database/migrations/0007_inventory_physical_foundation.sql');
-    const file = {
-      filename: '0007_inventory_physical_foundation.sql',
-      absolutePath,
-      contents: readFileSync(absolutePath, 'utf8'),
-      checksumSha256: '',
-    };
-    expect(() => validateTransactionControl(file)).not.toThrow();
-    expect(() => validateRoleSwitches(file)).not.toThrow();
-  });
+  it.each(['0007_inventory_physical_foundation.sql', '0008_stock_count_zero_establishment.sql'])(
+    'leaves transaction ownership and role transitions with the controlled runner: %s',
+    (filename) => {
+      const absolutePath = resolve(`database/migrations/${filename}`);
+      const file = {
+        filename,
+        absolutePath,
+        contents: readFileSync(absolutePath, 'utf8'),
+        checksumSha256: '',
+      };
+      expect(() => validateTransactionControl(file)).not.toThrow();
+      expect(() => validateRoleSwitches(file)).not.toThrow();
+    },
+  );
 });
