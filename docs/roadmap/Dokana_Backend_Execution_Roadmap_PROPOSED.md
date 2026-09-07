@@ -8,8 +8,8 @@
 | Repository               | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch            | `main`                                     |
 | S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
-| Closed execution history  | Stations S0 through S10                    |
-| Next candidate            | S11.6 - Inventory Corrections              |
+| Closed execution history  | Stations S0 through S11                    |
+| Next candidate            | S12 - Supplier Invoices and Payables       |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -350,8 +350,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S11 - Manual Inventory, Stock Projection, and Costing
 
-- **Status:** IN PROGRESS; S11.1 CLOSED; S11.2 CLOSED; S11.3 CLOSED; S11.4 CLOSED;
-  S11.5 CLOSED; S11.6 NEXT / NOT STARTED.
+- **Status:** CLOSED; S11.1-S11.6 CLOSED.
 - **Purpose:** Establish independent inventory and cost authority before sales.
 - **Distinct boundary:** Inventory is movement-driven and independent from supplier
   invoice/payable posting.
@@ -365,6 +364,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 - **Coverage:** PRD manual inventory, stock, counts, adjustments, and costing.
 - **Known risks/migrations:** Do not reuse legacy goods-receipt payable coupling. Unknown
   cost must not become known zero. No supplier-invoice linkage is implemented in S11.
+- Deferred DB capability: Stock Counts that established inventory from MISSING cannot be historically reversed/replaced in the current MVP; correct current state with a new Stock Count and revisit projection retraction only if later development/release review requires it.
 - **Start condition:** S5, S7, and S9 closed; inventory contract and any forward
   migration independently reviewed.
 - **Closure intent:** Tested stock/cost authority ready for inventory-enabled sales.
@@ -710,8 +710,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Station 10 is closed; S11 is in progress.
-S11.1-S11.5 are closed; S11.6 is next and remains not started.
+No roadmap-level owner decision is open. Stations S0-S11 are closed. S12 is next and
+remains not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -719,7 +719,7 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S10 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S11 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
 - Future Stations S12-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
@@ -736,15 +736,15 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                                 | Current position                                     |
-| ------------------------------------- | ---------------------------------------------------- |
-| Last fully closed Station             | S10 - Money Posting, Opening Balances, and Owner Ledger |
-| S10.5 starting checkpoint             | `d6e7cd845ff245f070c82d503ea410bc7e676e1a`              |
-| Safe completed capabilities           | S0-S10 boundaries documented above                      |
-| First incomplete release dependency   | S11 - Manual Inventory, Stock Projection, and Costing   |
-| Next candidate                        | S11.6 - Inventory Corrections; NOT STARTED                |
-| S10 current status                    | CLOSED - S10.1-S10.5 closed                              |
-| S11 current status                    | IN PROGRESS - S11.1-S11.5 CLOSED                         |
+| Field                               | Current position                                      |
+| ----------------------------------- | ----------------------------------------------------- |
+| Last fully closed Station           | S11 - Manual Inventory, Stock Projection, and Costing |
+| S11.6 starting checkpoint           | `d5e6bf2f923571f79a41f9eddeae68e083d69ec7`            |
+| Safe completed capabilities         | S0-S11 boundaries documented above                    |
+| First incomplete release dependency | S12 - Supplier Invoices and Payables                  |
+| Next candidate                      | S12 - Supplier Invoices and Payables; NOT STARTED     |
+| S11 current status                  | CLOSED - S11.1-S11.6 closed                           |
+| S12 current status                  | NEXT / NOT STARTED                                    |
 
-Do not start S11.6 from this document. The next Task requires an explicit backend-owner
-execution prompt; S11.6+ business implementation has not started.
+Do not start S12 from this document. The next Station requires an explicit backend-owner
+orientation and execution prompt; S12 business implementation has not started.

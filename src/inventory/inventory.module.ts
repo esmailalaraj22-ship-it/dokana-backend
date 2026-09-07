@@ -7,6 +7,8 @@ import { InventoryReadRepository } from './inventory-read.repository';
 import { InventoryReadService } from './inventory-read.service';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { SettingsModule } from '../settings/settings.module';
+import { InventoryCorrectionRepository } from './inventory-correction.repository';
+import { InventoryCorrectionService } from './inventory-correction.service';
 import { InventoryPostingRepository } from './inventory-posting.repository';
 import { InventoryPostingService } from './inventory-posting.service';
 import { StockCountRepository } from './stock-count.repository';
@@ -18,6 +20,8 @@ import { StockCountService } from './stock-count.service';
   providers: [
     InventoryReadRepository,
     InventoryReadService,
+    InventoryCorrectionRepository,
+    InventoryCorrectionService,
     InventoryPostingRepository,
     InventoryPostingService,
     StockCountRepository,

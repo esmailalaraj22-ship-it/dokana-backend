@@ -6,6 +6,7 @@ import {
   AccountingPeriodNotPostingEligibleError,
   AccountingPeriodPostingContextService,
 } from '../accounting-periods/accounting-period-posting-context.service';
+import type { AccountingPeriodPostingContext } from '../accounting-periods/accounting-period-posting-context.types';
 import { AccountingPeriodIntegrityError } from '../accounting-periods/accounting-period-provisioning.service';
 import { DatabaseService } from '../database/database.service';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
@@ -42,15 +43,15 @@ const failures = {
   OPERATION_ID_CONFLICT: [409, 'Operation ID was reused with a different request.'],
   OPERATION_IN_PROGRESS: [409, 'The operation is still being processed.'],
 } as const;
-type FailureCode = keyof typeof failures;
+export type StockCountFailureCode = keyof typeof failures;
 
-function failure(code: FailureCode): Extract<StockCountResult, { ok: false }> {
+function failure(code: StockCountFailureCode): Extract<StockCountResult, { ok: false }> {
   const [statusCode, message] = failures[code];
   return { ok: false, code, statusCode, message };
 }
 
-class StockCountRejection extends Error {
-  constructor(readonly code: FailureCode) {
+export class StockCountRejection extends Error {
+  constructor(readonly code: StockCountFailureCode) {
     super(failures[code][1]);
   }
 }
@@ -115,7 +116,7 @@ export class StockCountRepository {
       try {
         response = await tx.transaction((sp) => this.insert(sp, context, command, postingDate));
       } catch (error) {
-        let code: FailureCode;
+        let code: StockCountFailureCode;
         if (error instanceof StockCountRejection) code = error.code;
         else if (error instanceof AccountingPeriodNotPostingEligibleError) {
           code = 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE';
@@ -143,6 +144,25 @@ export class StockCountRepository {
       postingDate,
       operationId: command.operationId,
     });
+    return this.insertAccepted(tx, context, command, posting);
+  }
+
+  insertCorrectionReplacementWithinTransaction(
+    tx: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: StockCountCommand,
+    posting: AccountingPeriodPostingContext,
+  ): Promise<StockCountResponse> {
+    return this.insertAccepted(tx, context, command, posting);
+  }
+
+  private async insertAccepted(
+    tx: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: StockCountCommand,
+    posting: AccountingPeriodPostingContext,
+  ): Promise<StockCountResponse> {
+    const postingDate = posting.postingDate;
     const submittedIds = command.items.map((item) => item.productId);
     const lockedProducts =
       command.countType === 'full'
@@ -422,7 +442,7 @@ export class StockCountRepository {
       const code = row.errorCode;
       if (!code || !Object.hasOwn(failures, code))
         throw new Error('Invalid Stock Count rejection.');
-      const result = failure(code as FailureCode);
+      const result = failure(code as StockCountFailureCode);
       const stored = stockCountRejectionSchema.parse(row.responseBody);
       if (row.responseCode !== result.statusCode || stored.code !== code) {
         throw new Error('Invalid Stock Count rejection status.');

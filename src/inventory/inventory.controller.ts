@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { InventoryCorrectionService } from './inventory-correction.service';
 import { InventoryPostingService } from './inventory-posting.service';
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
@@ -16,9 +17,16 @@ import { StockCountService } from './stock-count.service';
 export class InventoryController {
   constructor(
     private readonly reads: InventoryReadService,
+    private readonly corrections: InventoryCorrectionService,
     private readonly posting: InventoryPostingService,
     private readonly stockCounts: StockCountService,
   ) {}
+
+  @Post('corrections')
+  correct(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    assertNoInventoryQuery(request.query);
+    return this.corrections.correct(request.principal, request.tenantContext, body);
+  }
 
   @Post('opening')
   opening(@Req() request: AuthenticatedRequest, @Body() body: unknown) {

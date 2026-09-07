@@ -6,6 +6,7 @@ import {
   AccountingPeriodNotPostingEligibleError,
   AccountingPeriodPostingContextService,
 } from '../accounting-periods/accounting-period-posting-context.service';
+import type { AccountingPeriodPostingContext } from '../accounting-periods/accounting-period-posting-context.types';
 import { AccountingPeriodIntegrityError } from '../accounting-periods/accounting-period-provisioning.service';
 import { DatabaseService } from '../database/database.service';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
@@ -45,13 +46,15 @@ const failures = {
   OPERATION_ID_CONFLICT: [409, 'Operation ID was reused with a different request.'],
   OPERATION_IN_PROGRESS: [409, 'The operation is still being processed.'],
 } as const;
-type FailureCode = keyof typeof failures;
-function failure(code: FailureCode): Extract<InventoryPostingResult, { ok: false }> {
+export type InventoryPostingFailureCode = keyof typeof failures;
+function failure(
+  code: InventoryPostingFailureCode,
+): Extract<InventoryPostingResult, { ok: false }> {
   const [statusCode, message] = failures[code];
   return { ok: false, code, statusCode, message };
 }
-class InventoryPostingRejection extends Error {
-  constructor(readonly code: FailureCode) {
+export class InventoryPostingRejection extends Error {
+  constructor(readonly code: InventoryPostingFailureCode) {
     super(failures[code][1]);
   }
 }
@@ -115,7 +118,7 @@ export class InventoryPostingRepository {
       try {
         response = await tx.transaction((sp) => this.insert(sp, context, command, postingDate));
       } catch (error) {
-        let code: FailureCode;
+        let code: InventoryPostingFailureCode;
         if (error instanceof InventoryPostingRejection) code = error.code;
         else if (error instanceof AccountingPeriodNotPostingEligibleError)
           code = 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE';
@@ -143,6 +146,26 @@ export class InventoryPostingRepository {
       postingDate,
       operationId: c.operationId,
     });
+    return this.insertAccepted(tx, context, c, posting, false);
+  }
+
+  insertCorrectionReplacementWithinTransaction(
+    tx: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: InventoryPostingCommand,
+    posting: AccountingPeriodPostingContext,
+  ): Promise<InventoryPostingResponse> {
+    return this.insertAccepted(tx, context, command, posting, true);
+  }
+
+  private async insertAccepted(
+    tx: DatabaseTransaction,
+    context: TenantTransactionContext,
+    c: InventoryPostingCommand,
+    posting: AccountingPeriodPostingContext,
+    correctionReplacement: boolean,
+  ): Promise<InventoryPostingResponse> {
+    const postingDate = posting.postingDate;
     const [product] = await tx
       .select()
       .from(products)
@@ -165,7 +188,7 @@ export class InventoryPostingRepository {
     if (!unit) throw new InventoryPostingRejection('INVENTORY_UNIT_NOT_FOUND');
     if (unit.status !== 'active' || unit.measurementType !== product.measurementType)
       throw new InventoryPostingRejection('INVENTORY_UNIT_UNAVAILABLE');
-    if (c.kind === 'opening') {
+    if (c.kind === 'opening' && !correctionReplacement) {
       const existingHistory = await tx
         .select({ id: inventoryMovements.id })
         .from(inventoryMovements)
@@ -236,8 +259,9 @@ export class InventoryPostingRepository {
       ...effect,
       id: movementId,
       operationId: randomUUID(),
-      movementType:
-        c.kind === 'opening'
+      movementType: correctionReplacement
+        ? 'correction'
+        : c.kind === 'opening'
           ? 'opening_balance'
           : c.kind === 'increase'
             ? 'adjustment_in'
@@ -326,7 +350,7 @@ export class InventoryPostingRepository {
     if (row.status === 'rejected') {
       const code = row.errorCode;
       if (!code || !Object.hasOwn(failures, code)) throw new Error('Invalid inventory rejection.');
-      const result = failure(code as FailureCode);
+      const result = failure(code as InventoryPostingFailureCode);
       const stored = inventoryPostingRejectionSchema.parse(row.responseBody);
       if (row.responseCode !== result.statusCode || stored.code !== code)
         throw new Error('Invalid inventory rejection status.');
