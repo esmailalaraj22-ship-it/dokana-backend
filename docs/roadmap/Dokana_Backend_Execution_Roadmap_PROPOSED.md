@@ -9,7 +9,7 @@
 | Review branch            | `main`                                     |
 | S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
 | Closed execution history  | Stations S0 through S11                    |
-| Next candidate            | S12 - Supplier Invoices and Payables       |
+| Next candidate            | S12.2 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -170,7 +170,7 @@ and final release validation.
 | Accounting periods/posting controls                | Implemented                          | S9 (closed)                     |
 | Money movements/transfers/balances/owner ledger    | Still required                       | S10                             |
 | Manual inventory/stock projection/costing          | Still required                       | S11                             |
-| Supplier invoices/payables                         | Still required; legacy conflict      | S12                             |
+| Supplier invoices/payables                         | FOUNDATION DONE; WORKFLOW REQUIRED   | S12                             |
 | Supplier payments/allocations/credits              | Still required                       | S13                             |
 | Sales and customer receivables                     | Still required                       | S14                             |
 | Customer collections/credit/settlement             | Still required                       | S15                             |
@@ -371,7 +371,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S12 - Supplier Invoices and Payables
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** IN PROGRESS - S12.1 CLOSED; S12.2 NEXT / NOT STARTED.
 - **Purpose:** Post supplier invoices as payable effects only.
 - **Distinct boundary:** Invoice recognition and payable creation are separate from
   inventory entry and later cash settlement.
@@ -660,15 +660,15 @@ orphaned.
 
 ## 14. Known Legacy and Forward-Migration Risks
 
-| Risk                                | Current legacy state                                                         | Approved target                                       | Future owner        | Required before                  | Baseline rewrite |
-| ----------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------- | -------------------------------- | ---------------- |
-| Invoice close requires full receipt | PostgreSQL/SQLite validation couples closure to received quantities          | Invoice affects payable only                          | S12                 | First invoice posting            | No               |
-| Goods receipt creates payable       | Receipt validation requires a matching `goods_receipt` supplier-ledger entry | Manual inventory and payable are independent          | S11-S12             | Receipt reuse or invoice posting | No               |
-| Supplier ledger semantics           | Legacy payable origin centers on goods receipt                               | Invoice-originated payable and independent settlement | S12                 | Payable implementation           | No               |
-| Purchase invoice period context     | Legacy shape lacks the required modern posting-period contract               | Period-controlled supplier posting                    | S12                 | Invoice posting                  | No               |
-| Unknown inventory cost              | Numeric defaults can be mistaken for known zero                              | Explicit pending/unknown cost                         | S11                 | Costing/opening stock            | No               |
-| PostgreSQL/SQLite compatibility     | Both references retain legacy receipt coupling                               | Versioned compatible contract                         | S11-S12; verify S19 | Sync exposure                    | No               |
-| Restore event semantics             | Generic event may say `update` while processed action says `restore`         | Sync interprets both without assuming equality        | S19                 | Generic sync                     | No               |
+| Risk                                | Current legacy state                                                 | Approved target                                       | Future owner        | Required before       | Baseline rewrite |
+| ----------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- | ------------------- | --------------------- | ---------------- |
+| Invoice close requires full receipt | PostgreSQL decoupled by `0009`; references retain legacy coupling    | Invoice affects payable only                          | S12.1 (closed)      | Complete              | No               |
+| Goods receipt creates payable       | PostgreSQL decoupled by `0009`; references retain legacy coupling    | Manual inventory and payable are independent          | S12.1 (closed)      | Complete              | No               |
+| Supplier ledger semantics           | `0009` adds invoice-originated payable type                          | Invoice-originated payable and independent settlement | S12.1 (closed)      | Complete              | No               |
+| Purchase invoice period context     | `0009` adds the S9 period link and guard                             | Period-controlled supplier posting                    | S12.1 (closed)      | Complete              | No               |
+| Unknown inventory cost              | Numeric defaults can be mistaken for known zero                      | Explicit pending/unknown cost                         | S11                 | Costing/opening stock | No               |
+| PostgreSQL/SQLite compatibility     | Both references retain legacy receipt coupling                       | Versioned compatible contract                         | S11-S12; verify S19 | Sync exposure         | No               |
+| Restore event semantics             | Generic event may say `update` while processed action says `restore` | Sync interprets both without assuming equality        | S19                 | Generic sync          | No               |
 
 These risks require forward migrations or explicit compatibility contracts. They do not
 authorize editing or replaying the baseline or changing the read-only reference package.
@@ -710,8 +710,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S11 are closed. S12 is next and
-remains not started.
+No roadmap-level owner decision is open. Stations S0-S11 are closed. S12 is in progress:
+S12.1 is closed and S12.2 is next / not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -742,9 +742,9 @@ decision does not authorize an implementer to invent policy.
 | S11.6 starting checkpoint           | `d5e6bf2f923571f79a41f9eddeae68e083d69ec7`            |
 | Safe completed capabilities         | S0-S11 boundaries documented above                    |
 | First incomplete release dependency | S12 - Supplier Invoices and Payables                  |
-| Next candidate                      | S12 - Supplier Invoices and Payables; NOT STARTED     |
+| Next candidate                      | S12.2 - NEXT / NOT STARTED                            |
 | S11 current status                  | CLOSED - S11.1-S11.6 closed                           |
-| S12 current status                  | NEXT / NOT STARTED                                    |
+| S12 current status                  | IN PROGRESS - S12.1 CLOSED; S12.2 NEXT / NOT STARTED  |
 
-Do not start S12 from this document. The next Station requires an explicit backend-owner
-orientation and execution prompt; S12 business implementation has not started.
+Do not start S12.2 from this document. It requires an explicit backend-owner execution
+prompt; the Supplier Invoice workflow has not started.
