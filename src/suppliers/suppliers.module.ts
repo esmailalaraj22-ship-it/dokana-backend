@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AuthenticationModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
+import { SupplierFinancialReadRepository } from './supplier-financial-read.repository';
+import { SupplierFinancialReadService } from './supplier-financial-read.service';
 import { SupplierReadRepository } from './supplier-read.repository';
 import { SupplierReadService } from './supplier-read.service';
 import { SuppliersController } from './suppliers.controller';
@@ -12,6 +14,8 @@ import { SupplierWriteService } from './supplier-write.service';
   imports: [AuthenticationModule, DatabaseModule],
   controllers: [SuppliersController],
   providers: [
+    SupplierFinancialReadRepository,
+    SupplierFinancialReadService,
     SupplierReadRepository,
     SupplierReadService,
     SupplierWriteRepository,

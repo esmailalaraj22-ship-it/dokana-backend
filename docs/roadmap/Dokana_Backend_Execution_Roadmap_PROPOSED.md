@@ -9,7 +9,7 @@
 | Review branch            | `main`                                     |
 | S10.5 starting checkpoint | `d6e7cd845ff245f070c82d503ea410bc7e676e1a` |
 | Closed execution history  | Stations S0 through S11                    |
-| Next candidate            | S12.2 - NEXT / NOT STARTED                 |
+| Next candidate            | S12.3 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -371,7 +371,7 @@ invent opening-balance behavior or authorize implementation before orientation.
 
 ### S12 - Supplier Invoices and Payables
 
-- **Status:** IN PROGRESS - S12.1 CLOSED; S12.2 NEXT / NOT STARTED.
+- **Status:** IN PROGRESS - S12.1-S12.2 CLOSED; S12.3 NEXT / NOT STARTED.
 - **Purpose:** Post supplier invoices as payable effects only.
 - **Distinct boundary:** Invoice recognition and payable creation are separate from
   inventory entry and later cash settlement.
@@ -711,7 +711,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-level owner decision is open. Stations S0-S11 are closed. S12 is in progress:
-S12.1 is closed and S12.2 is next / not started.
+S12.1-S12.2 are closed and S12.3 is next / not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -742,9 +742,9 @@ decision does not authorize an implementer to invent policy.
 | S11.6 starting checkpoint           | `d5e6bf2f923571f79a41f9eddeae68e083d69ec7`            |
 | Safe completed capabilities         | S0-S11 boundaries documented above                    |
 | First incomplete release dependency | S12 - Supplier Invoices and Payables                  |
-| Next candidate                      | S12.2 - NEXT / NOT STARTED                            |
+| Next candidate                      | S12.3 - NEXT / NOT STARTED                            |
 | S11 current status                  | CLOSED - S11.1-S11.6 closed                           |
-| S12 current status                  | IN PROGRESS - S12.1 CLOSED; S12.2 NEXT / NOT STARTED  |
+| S12 current status                  | IN PROGRESS - S12.1-S12.2 CLOSED; S12.3 NEXT / NOT STARTED |
 
-Do not start S12.2 from this document. It requires an explicit backend-owner execution
-prompt; the Supplier Invoice workflow has not started.
+Do not start S12.3 from this document. It requires an explicit backend-owner execution
+prompt; Supplier Invoice writes remain outside the completed S12.2 read boundary.
