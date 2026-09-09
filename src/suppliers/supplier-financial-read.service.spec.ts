@@ -42,6 +42,9 @@ const firstInvoice: SupplierInvoiceListRow = {
   totalMinor: 9_007_199_254_740_993n,
   outstandingMinor: 9_007_199_254_740_993n,
   accountingPeriodId: '72300000-0000-4000-8000-000000000001',
+  correctionOfId: null,
+  replacedById: null,
+  replacedBySupplierId: null,
   updatedAt: new Date('2026-07-20T10:05:00.000Z'),
   version: 9_007_199_254_740_993n,
 };

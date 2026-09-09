@@ -35,6 +35,9 @@ export interface SupplierInvoiceListRow {
   totalMinor: bigint;
   outstandingMinor: bigint;
   accountingPeriodId: string | null;
+  correctionOfId: string | null;
+  replacedById: string | null;
+  replacedBySupplierId: string | null;
   updatedAt: Date;
   version: bigint;
 }
@@ -52,7 +55,6 @@ export interface SupplierInvoiceDetailRow extends SupplierInvoiceListRow {
   lineDiscountTotalMinor: bigint;
   invoiceDiscountMinor: bigint;
   roundingMinor: bigint;
-  correctionOfId: string | null;
   cancelledAt: Date | null;
   createdAt: Date;
   items: SupplierInvoiceItemRow[];
@@ -99,6 +101,9 @@ export interface SupplierInvoiceSummaryResponse {
   outstandingMinor: string;
   paidAmountMinor: null;
   accountingPeriodId: string | null;
+  correctionOfId: string | null;
+  replacedById: string | null;
+  replacedBySupplierId: string | null;
   updatedAt: string;
   version: string;
 }

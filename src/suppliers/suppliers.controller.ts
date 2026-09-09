@@ -25,6 +25,8 @@ import type {
   SupplierInvoiceDetailResponse,
 } from './supplier-financial-read.types';
 import { SupplierReadService } from './supplier-read.service';
+import { SupplierInvoiceCorrectionService } from './supplier-invoice-correction.service';
+import type { SupplierFinancialCorrectionResponse } from './supplier-invoice-correction.types';
 import { SupplierInvoicePostingService } from './supplier-invoice-posting.service';
 import type {
   SupplierInvoicePostingResponse,
@@ -39,6 +41,7 @@ import type { SupplierMutationResponse } from './supplier-write.types';
 export class SuppliersController {
   constructor(
     private readonly supplierFinancialReads: SupplierFinancialReadService,
+    private readonly supplierInvoiceCorrections: SupplierInvoiceCorrectionService,
     private readonly supplierInvoicePosting: SupplierInvoicePostingService,
     private readonly supplierReads: SupplierReadService,
     private readonly supplierWrites: SupplierWriteService,
@@ -98,6 +101,62 @@ export class SuppliersController {
       request.principal,
       request.tenantContext,
       params.supplierId,
+      body,
+    );
+  }
+
+  @Post('invoices/:targetOperationId/cancel')
+  cancelInvoice(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialCorrectionResponse> {
+    return this.supplierInvoiceCorrections.cancelInvoice(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('invoices/:targetOperationId/edit')
+  editInvoice(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialCorrectionResponse> {
+    return this.supplierInvoiceCorrections.editInvoice(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('opening-payables/:targetOperationId/cancel')
+  cancelOpeningPayable(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialCorrectionResponse> {
+    return this.supplierInvoiceCorrections.cancelOpeningPayable(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('opening-payables/:targetOperationId/edit')
+  editOpeningPayable(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialCorrectionResponse> {
+    return this.supplierInvoiceCorrections.editOpeningPayable(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
       body,
     );
   }

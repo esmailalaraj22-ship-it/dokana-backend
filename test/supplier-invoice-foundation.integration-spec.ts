@@ -7,11 +7,7 @@ import { applyMigration, verifyChecksums, verifyMigrationSession } from '../scri
 import { readMigrationFiles } from '../scripts/migrations/migration-files';
 import { deriveAccountingPeriodId } from '../src/accounting-periods/accounting-period-identity';
 import { resolveAccountingPeriodBoundaries } from '../src/accounting-periods/accounting-period-month';
-import {
-  purchaseInvoices,
-  purchaseItems,
-  supplierLedgerEntries,
-} from '../src/database/schema/supplier-finance';
+import { purchaseInvoices, supplierLedgerEntries } from '../src/database/schema/supplier-finance';
 import {
   createInventoryTestDatabase,
   setInventoryContext,
@@ -19,7 +15,7 @@ import {
 } from './inventory-postgresql-fixture';
 
 const migrationFilename = '0009_supplier_invoice_payable_foundation.sql';
-const tables = [purchaseInvoices, purchaseItems, supplierLedgerEntries];
+const tables = [purchaseInvoices, supplierLedgerEntries];
 const stores = [randomUUID(), randomUUID()] as const;
 const users = [randomUUID(), randomUUID()] as const;
 const devices = [randomUUID(), randomUUID()] as const;
@@ -216,7 +212,7 @@ describe('S12.1 Supplier Invoice payable physical foundation', () => {
     if (database) await database.close();
   });
 
-  it('applies transactionally as migration 0009 and maps the resulting contract exactly', async () => {
+  it('applies transactionally as migration 0009 and maps its stable tables exactly', async () => {
     const applied = await db().admin.query<{ filename: string; checksumSha256: string }>(
       `select filename, checksum_sha256 as "checksumSha256"
        from platform.schema_migrations order by filename`,

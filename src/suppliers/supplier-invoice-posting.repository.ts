@@ -35,7 +35,9 @@ import {
 import type {
   PostedSupplierInvoiceItem,
   PostedSupplierPayableEntry,
+  SupplierInvoicePostingResponse,
   SupplierInvoicePostingResult,
+  SupplierOpeningPayableResponse,
   SupplierOpeningPayableResult,
   SupplierPostingFailure,
   SupplierPostingFailureCode,
@@ -110,7 +112,7 @@ const failureDefinitions: Readonly<Record<SupplierPostingFailureCode, SupplierPo
   },
 };
 
-class SupplierPostingRejectedError extends Error {
+export class SupplierPostingRejectedError extends Error {
   constructor(readonly result: FailureResult) {
     super(result.error.message);
     this.name = 'SupplierPostingRejectedError';
@@ -154,124 +156,7 @@ export class SupplierInvoicePostingRepository {
             command.operationId,
             postingDate,
           );
-          await this.lockSupplier(savepoint, context.storeId, command.supplierId);
-          const items = await this.prepareItems(savepoint, context.storeId, command);
-          const displayNumber = `PI-${invoiceId}`;
-
-          await savepoint.insert(purchaseInvoices).values({
-            id: invoiceId,
-            storeId: context.storeId,
-            supplierId: command.supplierId,
-            invoiceNumber: command.invoiceNumber,
-            displayNumber,
-            invoiceDateAt: command.occurredAt,
-            dueAt: command.dueAt,
-            itemsSubtotalMinor: command.itemsSubtotalMinor,
-            lineDiscountTotalMinor: command.lineDiscountTotalMinor,
-            invoiceDiscountMinor: command.invoiceDiscountMinor,
-            roundingMinor: command.roundingMinor,
-            totalMinor: command.totalMinor,
-            status: 'draft',
-            notes: command.notes,
-            deviceId: context.deviceId,
-            operationId: command.operationId,
-          });
-
-          await savepoint.insert(purchaseItems).values(
-            items.map((item) => ({
-              id: item.id,
-              storeId: context.storeId,
-              purchaseInvoiceId: invoiceId,
-              productId: item.productId,
-              productUnitId: item.productUnitId,
-              productNameSnapshot: item.description,
-              unitNameSnapshot: item.unitName,
-              quantityMilli: BigInt(item.quantityMilli),
-              conversionFactorNum: item.conversionFactorNumerator,
-              conversionFactorDen: item.conversionFactorDenominator,
-              baseQuantityMilli: BigInt(item.baseQuantityMilli),
-              unitCostMinor: BigInt(item.unitCostMinor),
-              lineGrossMinor: BigInt(item.lineGrossMinor),
-              lineDiscountMinor: BigInt(item.lineDiscountMinor),
-              roundingMinor: BigInt(item.roundingMinor),
-              lineTotalMinor: BigInt(item.lineTotalMinor),
-            })),
-          );
-
-          const payable = await this.insertPayable(savepoint, context, {
-            id: deriveMoneyFactId(command.operationId, 'supplier-invoice-payable'),
-            operationId: deriveMoneyFactOperationId(
-              command.operationId,
-              'supplier-invoice-payable',
-            ),
-            supplierId: command.supplierId,
-            accountingPeriodId: posting.accountingPeriodId,
-            entryType: 'supplier_invoice',
-            payableDeltaMinor: command.totalMinor,
-            sourcePurchaseInvoiceId: invoiceId,
-            referenceType: 'supplier_invoice',
-            referenceId: invoiceId,
-            transactionGroupId: deriveTransactionGroupId(command.operationId),
-            occurredAt: command.occurredAt,
-            reason: command.notes,
-          });
-
-          const finalized = await savepoint
-            .update(purchaseInvoices)
-            .set({
-              status: 'open',
-              accountingPeriodId: posting.accountingPeriodId,
-              postingDate: posting.postingDate,
-            })
-            .where(
-              and(
-                eq(purchaseInvoices.storeId, context.storeId),
-                eq(purchaseInvoices.id, invoiceId),
-                eq(purchaseInvoices.status, 'draft'),
-              ),
-            )
-            .returning({ version: purchaseInvoices.version });
-          const header = finalized[0];
-          if (!header) throw new Error('Supplier Invoice finalization did not return a row.');
-
-          await savepoint.execute(
-            sql`set constraints ledger.supplier_ledger_entries_store_id_source_purchase_invoice_i_fkey immediate`,
-          );
-          const payableCount = await savepoint.execute<{ count: string }>(sql`
-            select count(*)::text as count
-            from ledger.supplier_ledger_entries
-            where store_id = ${context.storeId}::uuid
-              and source_purchase_invoice_id = ${invoiceId}::uuid
-              and entry_type = 'supplier_invoice'
-          `);
-          if (payableCount.rows[0]?.count !== '1') {
-            throw new Error('Supplier Invoice payable effect is incomplete.');
-          }
-
-          return {
-            operationId: command.operationId,
-            supplierId: command.supplierId,
-            businessDate: posting.postingDate,
-            postingDate: posting.postingDate,
-            accountingPeriodId: posting.accountingPeriodId,
-            invoice: {
-              id: invoiceId,
-              invoiceNumber: command.invoiceNumber,
-              displayNumber,
-              occurredAt: command.occurredAt.toISOString(),
-              dueAt: command.dueAt?.toISOString() ?? null,
-              status: 'open' as const,
-              itemsSubtotalMinor: command.itemsSubtotalMinor.toString(),
-              lineDiscountTotalMinor: command.lineDiscountTotalMinor.toString(),
-              invoiceDiscountMinor: command.invoiceDiscountMinor.toString(),
-              roundingMinor: command.roundingMinor.toString(),
-              totalMinor: command.totalMinor.toString(),
-              notes: command.notes,
-              version: header.version.toString(),
-            },
-            items,
-            payable,
-          };
+          return this.insertInvoiceWithinTransaction(savepoint, context, command, posting, null);
         });
 
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
@@ -308,45 +193,13 @@ export class SupplierInvoicePostingRepository {
             command.operationId,
             postingDate,
           );
-          await this.lockSupplier(savepoint, context.storeId, command.supplierId);
-          const existing = await savepoint.execute<{ present: boolean }>(sql`
-            select exists (
-              select 1 from ledger.supplier_ledger_entries
-              where store_id = ${context.storeId}::uuid
-                and supplier_id = ${command.supplierId}::uuid
-                and entry_type = 'opening_balance'
-                and reversal_of_id is null
-            ) as present
-          `);
-          if (existing.rows[0]?.present === true) {
-            throw new SupplierPostingRejectedError(failure('OPENING_PAYABLE_ALREADY_EXISTS'));
-          }
-
-          const payable = await this.insertPayable(savepoint, context, {
-            id: payableId,
-            operationId: deriveMoneyFactOperationId(
-              command.operationId,
-              'supplier-opening-payable',
-            ),
-            supplierId: command.supplierId,
-            accountingPeriodId: posting.accountingPeriodId,
-            entryType: 'opening_balance',
-            payableDeltaMinor: command.amountMinor,
-            sourcePurchaseInvoiceId: null,
-            referenceType: 'opening_balance',
-            referenceId: payableId,
-            transactionGroupId: deriveTransactionGroupId(command.operationId),
-            occurredAt: command.occurredAt,
-            reason: command.notes,
-          });
-          return {
-            operationId: command.operationId,
-            supplierId: command.supplierId,
-            businessDate: posting.postingDate,
-            postingDate: posting.postingDate,
-            accountingPeriodId: posting.accountingPeriodId,
-            payable,
-          };
+          return this.insertOpeningPayableWithinTransaction(
+            savepoint,
+            context,
+            command,
+            posting,
+            true,
+          );
         });
 
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
@@ -355,6 +208,187 @@ export class SupplierInvoicePostingRepository {
         return this.persistKnownRejection(transaction, context.storeId, command.operationId, error);
       }
     });
+  }
+
+  async insertInvoiceWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: SupplierInvoicePostingCommand,
+    posting: AccountingPeriodPostingContext,
+    correctionOfId: string | null,
+  ): Promise<SupplierInvoicePostingResponse> {
+    const invoiceId = deriveMoneyFactId(command.operationId, 'supplier-invoice');
+    await this.lockSupplier(transaction, context.storeId, command.supplierId);
+    const items = await this.prepareItems(transaction, context.storeId, command);
+    const displayNumber = `PI-${invoiceId}`;
+
+    await transaction.insert(purchaseInvoices).values({
+      id: invoiceId,
+      storeId: context.storeId,
+      supplierId: command.supplierId,
+      invoiceNumber: command.invoiceNumber,
+      displayNumber,
+      invoiceDateAt: command.occurredAt,
+      dueAt: command.dueAt,
+      itemsSubtotalMinor: command.itemsSubtotalMinor,
+      lineDiscountTotalMinor: command.lineDiscountTotalMinor,
+      invoiceDiscountMinor: command.invoiceDiscountMinor,
+      roundingMinor: command.roundingMinor,
+      totalMinor: command.totalMinor,
+      status: 'draft',
+      notes: command.notes,
+      correctionOfId,
+      deviceId: context.deviceId,
+      operationId: command.operationId,
+    });
+
+    await transaction.insert(purchaseItems).values(
+      items.map((item) => ({
+        id: item.id,
+        storeId: context.storeId,
+        purchaseInvoiceId: invoiceId,
+        productId: item.productId,
+        productUnitId: item.productUnitId,
+        productNameSnapshot: item.description,
+        unitNameSnapshot: item.unitName,
+        quantityMilli: BigInt(item.quantityMilli),
+        conversionFactorNum: item.conversionFactorNumerator,
+        conversionFactorDen: item.conversionFactorDenominator,
+        baseQuantityMilli: BigInt(item.baseQuantityMilli),
+        unitCostMinor: BigInt(item.unitCostMinor),
+        lineGrossMinor: BigInt(item.lineGrossMinor),
+        lineDiscountMinor: BigInt(item.lineDiscountMinor),
+        roundingMinor: BigInt(item.roundingMinor),
+        lineTotalMinor: BigInt(item.lineTotalMinor),
+      })),
+    );
+
+    const payable = await this.insertPayable(transaction, context, {
+      id: deriveMoneyFactId(command.operationId, 'supplier-invoice-payable'),
+      operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-invoice-payable'),
+      supplierId: command.supplierId,
+      accountingPeriodId: posting.accountingPeriodId,
+      entryType: 'supplier_invoice',
+      payableDeltaMinor: command.totalMinor,
+      sourcePurchaseInvoiceId: invoiceId,
+      referenceType: 'supplier_invoice',
+      referenceId: invoiceId,
+      transactionGroupId: deriveTransactionGroupId(command.operationId),
+      occurredAt: command.occurredAt,
+      reason: command.notes,
+    });
+
+    const finalized = await transaction
+      .update(purchaseInvoices)
+      .set({
+        status: 'open',
+        accountingPeriodId: posting.accountingPeriodId,
+        postingDate: posting.postingDate,
+      })
+      .where(
+        and(
+          eq(purchaseInvoices.storeId, context.storeId),
+          eq(purchaseInvoices.id, invoiceId),
+          eq(purchaseInvoices.status, 'draft'),
+        ),
+      )
+      .returning({ version: purchaseInvoices.version });
+    const header = finalized[0];
+    if (!header) throw new Error('Supplier Invoice finalization did not return a row.');
+
+    await transaction.execute(
+      sql`set constraints ledger.supplier_ledger_entries_store_id_source_purchase_invoice_i_fkey immediate`,
+    );
+    const payableCount = await transaction.execute<{ count: string }>(sql`
+      select count(*)::text as count
+      from ledger.supplier_ledger_entries
+      where store_id = ${context.storeId}::uuid
+        and source_purchase_invoice_id = ${invoiceId}::uuid
+        and entry_type = 'supplier_invoice'
+    `);
+    if (payableCount.rows[0]?.count !== '1') {
+      throw new Error('Supplier Invoice payable effect is incomplete.');
+    }
+
+    return {
+      operationId: command.operationId,
+      supplierId: command.supplierId,
+      businessDate: posting.postingDate,
+      postingDate: posting.postingDate,
+      accountingPeriodId: posting.accountingPeriodId,
+      invoice: {
+        id: invoiceId,
+        invoiceNumber: command.invoiceNumber,
+        displayNumber,
+        occurredAt: command.occurredAt.toISOString(),
+        dueAt: command.dueAt?.toISOString() ?? null,
+        status: 'open',
+        itemsSubtotalMinor: command.itemsSubtotalMinor.toString(),
+        lineDiscountTotalMinor: command.lineDiscountTotalMinor.toString(),
+        invoiceDiscountMinor: command.invoiceDiscountMinor.toString(),
+        roundingMinor: command.roundingMinor.toString(),
+        totalMinor: command.totalMinor.toString(),
+        notes: command.notes,
+        version: header.version.toString(),
+      },
+      items,
+      payable,
+    };
+  }
+
+  async insertOpeningPayableWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: SupplierOpeningPayableCommand,
+    posting: AccountingPeriodPostingContext,
+    enforceOriginalUniqueness: boolean,
+  ): Promise<SupplierOpeningPayableResponse> {
+    const payableId = deriveMoneyFactId(command.operationId, 'supplier-opening-payable');
+    await this.lockSupplier(transaction, context.storeId, command.supplierId);
+    const existing = await transaction.execute<{ present: boolean }>(sql`
+        select exists (
+          select 1 from ledger.supplier_ledger_entries opening
+          where opening.store_id = ${context.storeId}::uuid
+            and opening.supplier_id = ${command.supplierId}::uuid
+            and opening.entry_type = 'opening_balance'
+            and opening.reversal_of_id is null
+            ${
+              enforceOriginalUniqueness
+                ? sql``
+                : sql`and not exists (
+                    select 1 from ledger.supplier_ledger_entries reversal
+                    where reversal.store_id=opening.store_id
+                      and reversal.reversal_of_id=opening.id
+                  )`
+            }
+        ) as present
+      `);
+    if (existing.rows[0]?.present === true) {
+      throw new SupplierPostingRejectedError(failure('OPENING_PAYABLE_ALREADY_EXISTS'));
+    }
+
+    const payable = await this.insertPayable(transaction, context, {
+      id: payableId,
+      operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-opening-payable'),
+      supplierId: command.supplierId,
+      accountingPeriodId: posting.accountingPeriodId,
+      entryType: 'opening_balance',
+      payableDeltaMinor: command.amountMinor,
+      sourcePurchaseInvoiceId: null,
+      referenceType: 'opening_balance',
+      referenceId: payableId,
+      transactionGroupId: deriveTransactionGroupId(command.operationId),
+      occurredAt: command.occurredAt,
+      reason: command.notes,
+    });
+    return {
+      operationId: command.operationId,
+      supplierId: command.supplierId,
+      businessDate: posting.postingDate,
+      postingDate: posting.postingDate,
+      accountingPeriodId: posting.accountingPeriodId,
+      payable,
+    };
   }
 
   private async prepareItems(

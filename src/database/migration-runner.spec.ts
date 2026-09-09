@@ -32,6 +32,8 @@ describe('controlled migration runner', () => {
       '0006_money_movement_period_guard_execute.sql',
       '0007_inventory_physical_foundation.sql',
       '0008_stock_count_zero_establishment.sql',
+      '0009_supplier_invoice_payable_foundation.sql',
+      '0010_supplier_invoice_optional_product_links.sql',
     ]);
   });
 

@@ -36,6 +36,9 @@ interface SupplierInvoicePhysicalRow extends Record<string, unknown> {
   totalMinor: string;
   outstandingMinor: string;
   accountingPeriodId: string | null;
+  correctionOfId: string | null;
+  replacedById: string | null;
+  replacedBySupplierId: string | null;
   updatedAt: string;
   version: string;
 }
@@ -157,6 +160,12 @@ export class SupplierFinancialReadRepository {
           p.invoice_discount_minor::text as "invoiceDiscountMinor",
           p.rounding_minor::text as "roundingMinor",
           p.correction_of_id as "correctionOfId",
+          (select child.id from ledger.purchase_invoices child
+            where child.store_id=p.store_id and child.correction_of_id=p.id
+            order by child.created_at asc, child.id asc limit 1) as "replacedById",
+          (select child.supplier_id from ledger.purchase_invoices child
+            where child.store_id=p.store_id and child.correction_of_id=p.id
+            order by child.created_at asc, child.id asc limit 1) as "replacedBySupplierId",
           p.cancelled_at as "cancelledAt",
           p.created_at as "createdAt",
           s.id as "supplierId",
@@ -273,6 +282,13 @@ export class SupplierFinancialReadRepository {
         p.total_minor::text as "totalMinor",
         coalesce(o.outstanding_minor, 0)::text as "outstandingMinor",
         p.accounting_period_id as "accountingPeriodId",
+        p.correction_of_id as "correctionOfId",
+        (select child.id from ledger.purchase_invoices child
+          where child.store_id=p.store_id and child.correction_of_id=p.id
+          order by child.created_at asc, child.id asc limit 1) as "replacedById",
+        (select child.supplier_id from ledger.purchase_invoices child
+          where child.store_id=p.store_id and child.correction_of_id=p.id
+          order by child.created_at asc, child.id asc limit 1) as "replacedBySupplierId",
         p.updated_at as "updatedAt",
         p.version::text as version
       from ledger.purchase_invoices p
@@ -299,6 +315,9 @@ export class SupplierFinancialReadRepository {
       totalMinor: BigInt(row.totalMinor),
       outstandingMinor: BigInt(row.outstandingMinor),
       accountingPeriodId: row.accountingPeriodId,
+      correctionOfId: row.correctionOfId,
+      replacedById: row.replacedById,
+      replacedBySupplierId: row.replacedBySupplierId,
       updatedAt: new Date(row.updatedAt),
       version: BigInt(row.version),
     };

@@ -8,6 +8,8 @@ import { SupplierFinancialReadRepository } from './supplier-financial-read.repos
 import { SupplierFinancialReadService } from './supplier-financial-read.service';
 import { SupplierReadRepository } from './supplier-read.repository';
 import { SupplierReadService } from './supplier-read.service';
+import { SupplierInvoiceCorrectionRepository } from './supplier-invoice-correction.repository';
+import { SupplierInvoiceCorrectionService } from './supplier-invoice-correction.service';
 import { SupplierInvoicePostingRepository } from './supplier-invoice-posting.repository';
 import { SupplierInvoicePostingService } from './supplier-invoice-posting.service';
 import { SuppliersController } from './suppliers.controller';
@@ -20,6 +22,8 @@ import { SupplierWriteService } from './supplier-write.service';
   providers: [
     SupplierFinancialReadRepository,
     SupplierFinancialReadService,
+    SupplierInvoiceCorrectionRepository,
+    SupplierInvoiceCorrectionService,
     SupplierInvoicePostingRepository,
     SupplierInvoicePostingService,
     SupplierReadRepository,

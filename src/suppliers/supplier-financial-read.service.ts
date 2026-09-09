@@ -160,6 +160,9 @@ export class SupplierFinancialReadService {
       outstandingMinor: row.outstandingMinor.toString(),
       paidAmountMinor: null,
       accountingPeriodId: row.accountingPeriodId,
+      correctionOfId: row.correctionOfId,
+      replacedById: row.replacedById,
+      replacedBySupplierId: row.replacedBySupplierId,
       updatedAt: row.updatedAt.toISOString(),
       version: row.version.toString(),
     };
