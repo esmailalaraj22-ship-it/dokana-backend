@@ -60,8 +60,8 @@ export interface SupplierInvoiceDetailRow extends SupplierInvoiceListRow {
 
 export interface SupplierInvoiceItemRow {
   id: string;
-  productId: string;
-  productUnitId: string;
+  productId: string | null;
+  productUnitId: string | null;
   productNameSnapshot: string;
   unitNameSnapshot: string;
   quantityMilli: bigint;
@@ -112,8 +112,8 @@ export interface SupplierFinancialResponse {
 
 export interface SupplierInvoiceItemResponse {
   id: string;
-  productId: string;
-  productUnitId: string;
+  productId: string | null;
+  productUnitId: string | null;
   productName: string;
   unitName: string;
   quantityMilli: string;

@@ -59,8 +59,8 @@ interface SupplierInvoiceDetailPhysicalRow extends SupplierInvoicePhysicalRow {
 
 interface SupplierInvoiceItemPhysicalRow extends Record<string, unknown> {
   id: string;
-  productId: string;
-  productUnitId: string;
+  productId: string | null;
+  productUnitId: string | null;
   productNameSnapshot: string;
   unitNameSnapshot: string;
   quantityMilli: string;

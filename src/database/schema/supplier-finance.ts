@@ -146,8 +146,8 @@ export const purchaseItems = ledgerSchema.table(
     id: uuid('id').primaryKey(),
     storeId: uuid('store_id').notNull(),
     purchaseInvoiceId: uuid('purchase_invoice_id').notNull(),
-    productId: uuid('product_id').notNull(),
-    productUnitId: uuid('product_unit_id').notNull(),
+    productId: uuid('product_id'),
+    productUnitId: uuid('product_unit_id'),
     productNameSnapshot: text('product_name_snapshot').notNull(),
     unitNameSnapshot: text('unit_name_snapshot').notNull(),
     quantityMilli: bigint('quantity_milli', { mode: 'bigint' }).notNull(),
@@ -208,6 +208,10 @@ export const purchaseItems = ledgerSchema.table(
       sql`${table.lineDiscountMinor} <= ${table.lineGrossMinor} + ${table.roundingMinor}`,
     ),
     check('purchase_items_version_check', sql`${table.version} >= 1`),
+    check(
+      'purchase_items_product_link_pair_check',
+      sql`(${table.productId} is null) = (${table.productUnitId} is null)`,
+    ),
     index('idx_purchase_items_invoice').on(table.storeId, table.purchaseInvoiceId),
   ],
 );
