@@ -32,7 +32,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0010_supplier_invoice_optional_product_links.sql';
+const migrationFilename = '0011_supplier_opening_payable_allocations.sql';
 const julyInstant = '2026-07-15T10:00:00Z';
 const augustInstant = '2026-08-05T10:00:00Z';
 
@@ -489,12 +489,11 @@ describe('S12.4 Supplier Invoice lifecycle corrections on isolated PostgreSQL', 
       [source.invoice.id],
     );
     expect(currentHeader.rows[0]).toMatchObject({ status: 'cancelled' });
-    const {
-      status: _status,
-      cancelled_at: _cancelledAt,
-      version: _version,
-      ...financialHeader
-    } = currentHeader.rows[0] as Record<string, unknown>;
+    const financialHeader = Object.fromEntries(
+      Object.entries(currentHeader.rows[0] as Record<string, unknown>).filter(
+        ([key]) => !['status', 'cancelled_at', 'version'].includes(key),
+      ),
+    );
     expect(financialHeader).toEqual(originalHeader.rows[0]);
     const currentItems = await db().admin.query(
       `select product_id,product_unit_id,product_name_snapshot,unit_name_snapshot,

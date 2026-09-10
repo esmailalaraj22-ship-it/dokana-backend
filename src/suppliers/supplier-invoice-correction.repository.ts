@@ -93,6 +93,11 @@ const correctionFailureDefinitions: Readonly<
     message: 'Supplier financial correction target is inconsistent.',
     statusCode: 409,
   },
+  SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS: {
+    code: 'SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS',
+    message: 'Supplier financial correction target has active payment allocations.',
+    statusCode: 409,
+  },
   SUPPLIER_CORRECTION_TARGET_NOT_ACTIVE: {
     code: 'SUPPLIER_CORRECTION_TARGET_NOT_ACTIVE',
     message: 'Supplier financial correction target is not the active operation.',
@@ -480,6 +485,7 @@ export class SupplierInvoiceCorrectionRepository {
     ) {
       reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     }
+    await this.assertNoActivePaymentAllocations(transaction, storeId, 'invoice', row.invoiceId);
     return row;
   }
 
@@ -521,7 +527,40 @@ export class SupplierInvoiceCorrectionRepository {
     ) {
       reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     }
+    await this.assertNoActivePaymentAllocations(
+      transaction,
+      storeId,
+      'opening_payable',
+      row.payableId,
+    );
     return row;
+  }
+
+  private async assertNoActivePaymentAllocations(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    targetType: 'invoice' | 'opening_payable',
+    targetId: string,
+  ): Promise<void> {
+    const target =
+      targetType === 'invoice'
+        ? sql`allocation.purchase_invoice_id=${targetId}::uuid`
+        : sql`allocation.opening_payable_ledger_entry_id=${targetId}::uuid`;
+    const result = await transaction.execute<{ present: boolean }>(sql`
+      select exists(
+        select 1
+        from ledger.supplier_payment_allocations allocation
+        inner join ledger.supplier_payments payment
+          on payment.store_id=allocation.store_id
+          and payment.id=allocation.supplier_payment_id
+        where allocation.store_id=${storeId}::uuid
+          and ${target}
+          and payment.status='posted'
+      ) as present
+    `);
+    if (result.rows[0]?.present === true) {
+      reject('SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS');
+    }
   }
 
   private async insertReversal(
@@ -573,7 +612,7 @@ export class SupplierInvoiceCorrectionRepository {
         createdAt: supplierLedgerEntries.createdAt,
       });
     const row = rows[0];
-    if (!row || row.entryType !== 'correction' || row.reversalOfId === null) {
+    if (row?.entryType !== 'correction' || row.reversalOfId === null) {
       throw new Error('Supplier payable correction insertion did not return the expected row.');
     }
     return {

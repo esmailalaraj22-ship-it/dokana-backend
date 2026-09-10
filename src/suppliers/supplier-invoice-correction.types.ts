@@ -57,6 +57,7 @@ export type SupplierFinancialCorrectionResponse =
 export type SupplierCorrectionFailureCode =
   | SupplierPostingFailureCode
   | 'SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT'
+  | 'SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS'
   | 'SUPPLIER_CORRECTION_TARGET_NOT_ACTIVE'
   | 'SUPPLIER_CORRECTION_TARGET_NOT_FOUND';
 

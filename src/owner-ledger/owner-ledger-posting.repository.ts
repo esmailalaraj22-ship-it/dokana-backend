@@ -432,7 +432,7 @@ export class OwnerLedgerPostingRepository {
       entryType: OwnerLedgerEntryTypeValue;
       ownerLiabilityDeltaMinor: bigint;
       equityDeltaMinor: bigint;
-      moneyAccountId: string;
+      moneyAccountId: string | null;
       accountingPeriodId: string;
       transactionGroupId: string;
       occurredAt: Date;

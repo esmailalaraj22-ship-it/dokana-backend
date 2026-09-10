@@ -3,6 +3,8 @@ import { Module } from '@nestjs/common';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { AuthenticationModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
+import { MoneyMovementsModule } from '../money-movements/money-movements.module';
+import { OwnerLedgerModule } from '../owner-ledger/owner-ledger.module';
 import { SettingsModule } from '../settings/settings.module';
 import { SupplierFinancialReadRepository } from './supplier-financial-read.repository';
 import { SupplierFinancialReadService } from './supplier-financial-read.service';
@@ -12,12 +14,21 @@ import { SupplierInvoiceCorrectionRepository } from './supplier-invoice-correcti
 import { SupplierInvoiceCorrectionService } from './supplier-invoice-correction.service';
 import { SupplierInvoicePostingRepository } from './supplier-invoice-posting.repository';
 import { SupplierInvoicePostingService } from './supplier-invoice-posting.service';
+import { SupplierPaymentPostingRepository } from './supplier-payment-posting.repository';
+import { SupplierPaymentPostingService } from './supplier-payment-posting.service';
 import { SuppliersController } from './suppliers.controller';
 import { SupplierWriteRepository } from './supplier-write.repository';
 import { SupplierWriteService } from './supplier-write.service';
 
 @Module({
-  imports: [AuthenticationModule, DatabaseModule, AccountingPeriodsModule, SettingsModule],
+  imports: [
+    AuthenticationModule,
+    DatabaseModule,
+    AccountingPeriodsModule,
+    MoneyMovementsModule,
+    OwnerLedgerModule,
+    SettingsModule,
+  ],
   controllers: [SuppliersController],
   providers: [
     SupplierFinancialReadRepository,
@@ -26,6 +37,8 @@ import { SupplierWriteService } from './supplier-write.service';
     SupplierInvoiceCorrectionService,
     SupplierInvoicePostingRepository,
     SupplierInvoicePostingService,
+    SupplierPaymentPostingRepository,
+    SupplierPaymentPostingService,
     SupplierReadRepository,
     SupplierReadService,
     SupplierWriteRepository,

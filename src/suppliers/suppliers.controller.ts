@@ -32,6 +32,8 @@ import type {
   SupplierInvoicePostingResponse,
   SupplierOpeningPayableResponse,
 } from './supplier-invoice-posting.types';
+import { SupplierPaymentPostingService } from './supplier-payment-posting.service';
+import type { SupplierPaymentPostingResponse } from './supplier-payment-posting.types';
 import type { SupplierDetailResponse, SupplierListResponse } from './supplier-read.types';
 import { SupplierWriteService } from './supplier-write.service';
 import type { SupplierMutationResponse } from './supplier-write.types';
@@ -43,6 +45,7 @@ export class SuppliersController {
     private readonly supplierFinancialReads: SupplierFinancialReadService,
     private readonly supplierInvoiceCorrections: SupplierInvoiceCorrectionService,
     private readonly supplierInvoicePosting: SupplierInvoicePostingService,
+    private readonly supplierPaymentPosting: SupplierPaymentPostingService,
     private readonly supplierReads: SupplierReadService,
     private readonly supplierWrites: SupplierWriteService,
   ) {}
@@ -98,6 +101,20 @@ export class SuppliersController {
     @Body() body: unknown,
   ): Promise<SupplierOpeningPayableResponse> {
     return this.supplierInvoicePosting.postOpeningPayable(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      body,
+    );
+  }
+
+  @Post(':supplierId/payments')
+  postPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+    @Body() body: unknown,
+  ): Promise<SupplierPaymentPostingResponse> {
+    return this.supplierPaymentPosting.post(
       request.principal,
       request.tenantContext,
       params.supplierId,

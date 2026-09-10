@@ -3,7 +3,7 @@ import { ConflictException, ForbiddenException } from '@nestjs/common';
 import type { AuthenticatedPrincipal } from '../auth/auth.types';
 import type { TenantTransactionContext } from '../database/database.types';
 import { OperationalTimeService } from '../settings/operational-time.service';
-import { SupplierInvoiceCorrectionRepository } from './supplier-invoice-correction.repository';
+import type { SupplierInvoiceCorrectionRepository } from './supplier-invoice-correction.repository';
 import { SupplierInvoiceCorrectionService } from './supplier-invoice-correction.service';
 import type {
   SupplierFinancialCorrectionResult,
@@ -116,15 +116,15 @@ describe('S12.4 SupplierInvoiceCorrectionService', () => {
       },
     });
 
-    expect(repository.correct).toHaveBeenCalledWith(
-      context,
-      expect.objectContaining({
-        family: 'invoice',
-        kind: 'edit',
-        replacement: expect.objectContaining({ totalMinor: 450n }),
-      }),
-      '2026-08-05',
-    );
+    const call = repository.correct.mock.calls[0];
+    expect(call?.[0]).toBe(context);
+    expect(call?.[2]).toBe('2026-08-05');
+    expect(call?.[1]).toMatchObject({ family: 'invoice', kind: 'edit' });
+    expect(
+      call?.[1].family === 'invoice' && call[1].kind === 'edit'
+        ? call[1].replacement.totalMinor
+        : null,
+    ).toBe(450n);
   });
 
   it('rejects non-owner and mismatched trusted context before persistence', async () => {

@@ -194,7 +194,7 @@ function splitReplacement(value: Record<string, unknown>): {
 }
 
 function invoicePresence(value: Record<string, unknown>): object {
-  const items = Array.isArray(value.items) ? value.items : [];
+  const items: unknown[] = Array.isArray(value.items) ? (value.items as unknown[]) : [];
   return {
     invoiceNumber: Object.hasOwn(value, 'invoiceNumber'),
     dueAt: Object.hasOwn(value, 'dueAt'),
