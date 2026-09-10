@@ -1,5 +1,7 @@
 import type { PurchaseInvoiceStatus } from '../database/schema';
 
+export type SupplierSettlementState = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+
 export interface SupplierInvoiceCursorAnchor {
   id: string;
   version: bigint;
@@ -33,7 +35,9 @@ export interface SupplierInvoiceListRow {
   dueAt: Date | null;
   status: PurchaseInvoiceStatus;
   totalMinor: bigint;
+  paidAmountMinor: bigint;
   outstandingMinor: bigint;
+  settlementState: SupplierSettlementState | null;
   accountingPeriodId: string | null;
   correctionOfId: string | null;
   replacedById: string | null;
@@ -46,6 +50,18 @@ export interface SupplierFinancialPageRow {
   supplier: SupplierFinancialSupplierRow;
   totalOutstandingMinor: bigint;
   invoices: SupplierInvoiceListRow[];
+  openingPayable: SupplierOpeningPayableRow | null;
+}
+
+export interface SupplierOpeningPayableRow {
+  id: string;
+  accountingPeriodId: string;
+  amountMinor: bigint;
+  paidAmountMinor: bigint;
+  outstandingMinor: bigint;
+  settlementState: SupplierSettlementState;
+  occurredAt: Date;
+  createdAt: Date;
 }
 
 export interface SupplierInvoiceDetailRow extends SupplierInvoiceListRow {
@@ -99,7 +115,8 @@ export interface SupplierInvoiceSummaryResponse {
   status: PurchaseInvoiceStatus;
   totalMinor: string;
   outstandingMinor: string;
-  paidAmountMinor: null;
+  paidAmountMinor: string;
+  settlementState: SupplierSettlementState | null;
   accountingPeriodId: string | null;
   correctionOfId: string | null;
   replacedById: string | null;
@@ -112,7 +129,19 @@ export interface SupplierFinancialResponse {
   supplier: SupplierFinancialSupplierResponse;
   totalOutstandingMinor: string;
   invoices: SupplierInvoiceSummaryResponse[];
+  openingPayable: SupplierOpeningPayableResponse | null;
   nextCursor: string | null;
+}
+
+export interface SupplierOpeningPayableResponse {
+  id: string;
+  accountingPeriodId: string;
+  amountMinor: string;
+  paidAmountMinor: string;
+  outstandingMinor: string;
+  settlementState: SupplierSettlementState;
+  occurredAt: string;
+  createdAt: string;
 }
 
 export interface SupplierInvoiceItemResponse {

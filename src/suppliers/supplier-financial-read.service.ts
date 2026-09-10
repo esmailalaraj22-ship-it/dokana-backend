@@ -67,6 +67,18 @@ export class SupplierFinancialReadService {
         supplier: this.mapSupplier(result.supplier),
         totalOutstandingMinor: result.totalOutstandingMinor.toString(),
         invoices: pageRows.map((row) => this.mapInvoice(row)),
+        openingPayable: result.openingPayable
+          ? {
+              id: result.openingPayable.id,
+              accountingPeriodId: result.openingPayable.accountingPeriodId,
+              amountMinor: result.openingPayable.amountMinor.toString(),
+              paidAmountMinor: result.openingPayable.paidAmountMinor.toString(),
+              outstandingMinor: result.openingPayable.outstandingMinor.toString(),
+              settlementState: result.openingPayable.settlementState,
+              occurredAt: result.openingPayable.occurredAt.toISOString(),
+              createdAt: result.openingPayable.createdAt.toISOString(),
+            }
+          : null,
         nextCursor:
           hasNextPage && lastRow
             ? encodeSupplierInvoiceCursor({
@@ -158,7 +170,8 @@ export class SupplierFinancialReadService {
       status: row.status,
       totalMinor: row.totalMinor.toString(),
       outstandingMinor: row.outstandingMinor.toString(),
-      paidAmountMinor: null,
+      paidAmountMinor: row.paidAmountMinor.toString(),
+      settlementState: row.settlementState,
       accountingPeriodId: row.accountingPeriodId,
       correctionOfId: row.correctionOfId,
       replacedById: row.replacedById,

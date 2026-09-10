@@ -14,6 +14,7 @@ import {
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { ListSupplierInvoicesQueryDto } from './dto/list-supplier-invoices-query.dto';
+import { ListSupplierPaymentsQueryDto } from './dto/list-supplier-payments-query.dto';
 import { ListSuppliersQueryDto } from './dto/list-suppliers-query.dto';
 import { SupplierIdParamDto } from './dto/supplier-id-param.dto';
 import { SupplierInvoiceIdParamDto } from './dto/supplier-invoice-id-param.dto';
@@ -34,6 +35,12 @@ import type {
 } from './supplier-invoice-posting.types';
 import { SupplierPaymentPostingService } from './supplier-payment-posting.service';
 import type { SupplierPaymentPostingResponse } from './supplier-payment-posting.types';
+import { SupplierPaymentIdParamDto } from './dto/supplier-payment-id-param.dto';
+import { SupplierPaymentReadService } from './supplier-payment-read.service';
+import type {
+  SupplierPaymentDetailResponse,
+  SupplierPaymentListResponse,
+} from './supplier-payment-read.types';
 import type { SupplierDetailResponse, SupplierListResponse } from './supplier-read.types';
 import { SupplierWriteService } from './supplier-write.service';
 import type { SupplierMutationResponse } from './supplier-write.types';
@@ -46,6 +53,7 @@ export class SuppliersController {
     private readonly supplierInvoiceCorrections: SupplierInvoiceCorrectionService,
     private readonly supplierInvoicePosting: SupplierInvoicePostingService,
     private readonly supplierPaymentPosting: SupplierPaymentPostingService,
+    private readonly supplierPaymentReads: SupplierPaymentReadService,
     private readonly supplierReads: SupplierReadService,
     private readonly supplierWrites: SupplierWriteService,
   ) {}
@@ -119,6 +127,33 @@ export class SuppliersController {
       request.tenantContext,
       params.supplierId,
       body,
+    );
+  }
+
+  @Get(':supplierId/payments')
+  listPayments(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+    @Query() query: ListSupplierPaymentsQueryDto,
+  ): Promise<SupplierPaymentListResponse> {
+    return this.supplierPaymentReads.list(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      query,
+    );
+  }
+
+  @Get(':supplierId/payments/:paymentId')
+  getPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierPaymentIdParamDto,
+  ): Promise<SupplierPaymentDetailResponse> {
+    return this.supplierPaymentReads.getById(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      params.paymentId,
     );
   }
 

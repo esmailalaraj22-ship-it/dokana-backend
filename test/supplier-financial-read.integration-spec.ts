@@ -734,7 +734,8 @@ describe('S12.2 Supplier financial reads with real PostgreSQL', () => {
       status: 'open',
       totalMinor: '9007199254740993',
       outstandingMinor: '9007199254740993',
-      paidAmountMinor: null,
+      paidAmountMinor: '0',
+      settlementState: 'UNPAID',
     });
     expect(first.nextCursor).not.toBeNull();
 
@@ -751,13 +752,15 @@ describe('S12.2 Supplier financial reads with real PostgreSQL', () => {
       dueAt: '2026-08-10T10:00:00.000Z',
       totalMinor: '700',
       outstandingMinor: '200',
-      paidAmountMinor: null,
+      paidAmountMinor: '0',
+      settlementState: 'UNPAID',
     });
     expect(second.invoices[1]).toMatchObject({
       status: 'draft',
       totalMinor: '0',
       outstandingMinor: '0',
-      paidAmountMinor: null,
+      paidAmountMinor: '0',
+      settlementState: null,
       accountingPeriodId: null,
       postingDate: null,
     });
@@ -785,7 +788,8 @@ describe('S12.2 Supplier financial reads with real PostgreSQL', () => {
       postingDate: '2026-07-20',
       totalMinor: '300',
       outstandingMinor: '300',
-      paidAmountMinor: null,
+      paidAmountMinor: '0',
+      settlementState: 'UNPAID',
       itemsSubtotalMinor: '300',
       lineDiscountTotalMinor: '0',
       invoiceDiscountMinor: '0',

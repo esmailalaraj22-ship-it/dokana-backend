@@ -9,7 +9,7 @@
 | Review branch             | `main`                                     |
 | S12.4 starting checkpoint | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
 | Closed execution history  | Stations S0 through S12                    |
-| Next candidate            | S13.4 - NEXT / NOT STARTED                 |
+| Next candidate            | S13.5 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S12                                        |
-| Next Station started            | Yes; S13.1 and S13.2 closed                |
+| Next Station started            | Yes; S13.1-S13.4 closed                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -181,7 +181,7 @@ validation.
 | Money movements/transfers/balances/owner ledger    | Implemented                                   | S10 (closed)                 |
 | Manual inventory/stock projection/costing          | Implemented                                   | S11 (closed)                 |
 | Supplier invoices/payables                         | Implemented                                   | S12 (closed)                 |
-| Supplier payments/allocations/credits              | Posting implemented; reads/corrections remain | S13                          |
+| Supplier payments/allocations/credits              | Posting/reads implemented; corrections remain | S13                          |
 | Sales and customer receivables                     | Still required                                | S14                          |
 | Customer collections/credit/settlement             | Still required                                | S15                          |
 | Expenses and expense payments                      | Still required                                | S16                          |
@@ -405,7 +405,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S13 - Supplier Payments and Allocations
 
-- **Status:** IN PROGRESS - S13.1 CLOSED / ASSESSMENT COMPLETE; S13.2-S13.3 CLOSED; S13.4 NEXT / NOT STARTED.
+- **Status:** IN PROGRESS - S13.1 CLOSED / ASSESSMENT COMPLETE; S13.2-S13.4 CLOSED; S13.5 NEXT / NOT STARTED.
 - **Purpose:** Settle supplier liabilities atomically against approved money sources.
 - **Distinct boundary:** Payment/allocation replay and locking differ from invoice
   recognition and deserve independent verification.
@@ -420,8 +420,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 - **Known risks/migrations:** Migration `0011` adds the XOR physical allocation target for
   either a Purchase Invoice or an active original Opening Supplier Payable. Payment must
   reduce payable and money exactly once and must not alter inventory or recognize expense
-  again. S13.3 completed explicit, replay-safe payment posting; payment reads and later
-  correction/reversal behavior remain outside that completed boundary.
+  again. S13.3 completed explicit, replay-safe payment posting. S13.4 added tenant-safe
+  payment history/detail reads and ledger/allocation-derived settlement state; later
+  correction/reversal behavior remains outside that completed boundary.
 - **Start condition:** S10 and S12 closed with payment/allocation policy approved.
 - **Closure intent:** Least-privileged, replay-safe supplier settlement.
 
@@ -727,7 +728,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-level owner decision is open. Stations S0-S12 are closed. S13.1 is closed /
-assessment complete, S13.2-S13.3 are closed, and S13.4 is next / not started.
+assessment complete, S13.2-S13.4 are closed, and S13.5 is next / not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -758,10 +759,10 @@ decision does not authorize an implementer to invent policy.
 | Last fully closed Station           | S12 - Supplier Invoices and Payables       |
 | S12.4 starting checkpoint           | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
 | Safe completed capabilities         | S0-S12 boundaries documented above         |
-| First incomplete release dependency | S13.4 - Supplier Payment reads             |
-| Next candidate                      | S13.4 - NEXT / NOT STARTED                 |
+| First incomplete release dependency | S13.5 - Supplier Payment corrections       |
+| Next candidate                      | S13.5 - NEXT / NOT STARTED                 |
 | S12 current status                  | CLOSED - S12.1-S12.4 closed                |
-| S13 current status                  | S13.1-S13.3 closed; S13.4 next             |
+| S13 current status                  | S13.1-S13.4 closed; S13.5 next             |
 
-Do not start S13.4 from this document. It requires an explicit backend-owner execution
-prompt; Supplier Payment read/history behavior remains outside the completed S13.3 boundary.
+Do not start S13.5 from this document. It requires an explicit backend-owner execution
+prompt; Supplier Payment correction/reversal remains outside the completed S13.4 boundary.

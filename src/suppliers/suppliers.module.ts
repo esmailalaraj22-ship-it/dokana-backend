@@ -16,6 +16,7 @@ import { SupplierInvoicePostingRepository } from './supplier-invoice-posting.rep
 import { SupplierInvoicePostingService } from './supplier-invoice-posting.service';
 import { SupplierPaymentPostingRepository } from './supplier-payment-posting.repository';
 import { SupplierPaymentPostingService } from './supplier-payment-posting.service';
+import { SupplierPaymentReadService } from './supplier-payment-read.service';
 import { SuppliersController } from './suppliers.controller';
 import { SupplierWriteRepository } from './supplier-write.repository';
 import { SupplierWriteService } from './supplier-write.service';
@@ -39,6 +40,7 @@ import { SupplierWriteService } from './supplier-write.service';
     SupplierInvoicePostingService,
     SupplierPaymentPostingRepository,
     SupplierPaymentPostingService,
+    SupplierPaymentReadService,
     SupplierReadRepository,
     SupplierReadService,
     SupplierWriteRepository,

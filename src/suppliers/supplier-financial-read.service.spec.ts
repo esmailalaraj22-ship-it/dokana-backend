@@ -40,7 +40,9 @@ const firstInvoice: SupplierInvoiceListRow = {
   dueAt: new Date('2026-08-20T10:00:00.000Z'),
   status: 'open',
   totalMinor: 9_007_199_254_740_993n,
+  paidAmountMinor: 0n,
   outstandingMinor: 9_007_199_254_740_993n,
+  settlementState: 'UNPAID',
   accountingPeriodId: '72300000-0000-4000-8000-000000000001',
   correctionOfId: null,
   replacedById: null,
@@ -58,7 +60,9 @@ const secondInvoice: SupplierInvoiceListRow = {
   dueAt: null,
   status: 'draft',
   totalMinor: 0n,
+  paidAmountMinor: 0n,
   outstandingMinor: 0n,
+  settlementState: null,
   accountingPeriodId: null,
   version: 1n,
 };
@@ -73,6 +77,16 @@ const page: SupplierFinancialPageRow = {
   },
   totalOutstandingMinor: 9_007_199_254_740_993n,
   invoices: [firstInvoice, secondInvoice],
+  openingPayable: {
+    id: '72700000-0000-4000-8000-000000000001',
+    accountingPeriodId: '72300000-0000-4000-8000-000000000001',
+    amountMinor: 500n,
+    paidAmountMinor: 200n,
+    outstandingMinor: 300n,
+    settlementState: 'PARTIALLY_PAID',
+    occurredAt: new Date('2026-07-01T00:00:00.000Z'),
+    createdAt: new Date('2026-07-01T00:00:01.000Z'),
+  },
 };
 
 describe('SupplierFinancialReadService', () => {
@@ -90,7 +104,7 @@ describe('SupplierFinancialReadService', () => {
     jest.clearAllMocks();
   });
 
-  it('serializes exact invoice and Supplier balances without fabricating paid amount', async () => {
+  it('serializes exact invoice, Opening Payable, and Supplier settlement amounts', async () => {
     repository.readSupplierFinancialPage.mockResolvedValue(page);
 
     await expect(
@@ -110,17 +124,26 @@ describe('SupplierFinancialReadService', () => {
           id: firstInvoice.id,
           totalMinor: '9007199254740993',
           outstandingMinor: '9007199254740993',
-          paidAmountMinor: null,
+          paidAmountMinor: '0',
+          settlementState: 'UNPAID',
           postingDate: '2026-07-20',
         }),
         expect.objectContaining({
           id: secondInvoice.id,
           totalMinor: '0',
           outstandingMinor: '0',
-          paidAmountMinor: null,
+          paidAmountMinor: '0',
+          settlementState: null,
           postingDate: null,
         }),
       ],
+      openingPayable: expect.objectContaining({
+        id: page.openingPayable?.id,
+        amountMinor: '500',
+        paidAmountMinor: '200',
+        outstandingMinor: '300',
+        settlementState: 'PARTIALLY_PAID',
+      }),
       nextCursor: null,
     });
     expect(repository.readSupplierFinancialPage).toHaveBeenCalledWith(context, supplierId, {
@@ -222,7 +245,8 @@ describe('SupplierFinancialReadService', () => {
       id: firstInvoice.id,
       totalMinor: '9007199254740993',
       outstandingMinor: '9007199254740993',
-      paidAmountMinor: null,
+      paidAmountMinor: '0',
+      settlementState: 'UNPAID',
       itemsSubtotalMinor: '9007199254740994',
       lineDiscountTotalMinor: '1',
     });
