@@ -16,6 +16,9 @@ import {
   accountingPeriods,
   devices,
   ledgerSchema,
+  moneyAccounts,
+  moneyMovements,
+  ownerLedgerEntries,
   products,
   productUnits,
   suppliers,
@@ -36,6 +39,12 @@ export const supplierLedgerEntryTypes = [
   'correction',
 ] as const;
 export type SupplierLedgerEntryType = (typeof supplierLedgerEntryTypes)[number];
+
+export const supplierPaymentStatuses = ['draft', 'posted', 'cancelled'] as const;
+export type SupplierPaymentStatus = (typeof supplierPaymentStatuses)[number];
+
+export const supplierPaymentSources = ['money_account', 'owner_pocket'] as const;
+export type SupplierPaymentSource = (typeof supplierPaymentSources)[number];
 
 // Migration 0009 owns Supplier Invoice period enforcement and the remaining
 // receipt-decoupling trigger behavior. These mappings model the resulting facts.
@@ -216,6 +225,117 @@ export const purchaseItems = ledgerSchema.table(
   ],
 );
 
+export const supplierPayments = ledgerSchema.table(
+  'supplier_payments',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    accountingPeriodId: uuid('accounting_period_id'),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    allocatedTotalMinor: bigint('allocated_total_minor', { mode: 'bigint' }).notNull().default(0n),
+    creditCreatedMinor: bigint('credit_created_minor', { mode: 'bigint' }).notNull().default(0n),
+    paymentSource: text('payment_source').$type<SupplierPaymentSource>().notNull(),
+    moneyAccountId: uuid('money_account_id'),
+    moneyMovementId: uuid('money_movement_id'),
+    ownerLedgerEntryId: uuid('owner_ledger_entry_id'),
+    paymentAt: timestamp('payment_at', { withTimezone: true, mode: 'date' }).notNull(),
+    externalReference: text('external_reference'),
+    notes: text('notes'),
+    status: text('status').$type<SupplierPaymentStatus>().notNull().default('draft'),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    unique('supplier_payments_store_id_id_key').on(table.storeId, table.id),
+    unique('supplier_payments_store_id_money_movement_id_key').on(
+      table.storeId,
+      table.moneyMovementId,
+    ),
+    unique('supplier_payments_store_id_owner_ledger_entry_id_key').on(
+      table.storeId,
+      table.ownerLedgerEntryId,
+    ),
+    unique('supplier_payments_store_id_operation_id_key').on(table.storeId, table.operationId),
+    foreignKey({
+      name: 'supplier_payments_store_id_supplier_id_fkey',
+      columns: [table.storeId, table.supplierId],
+      foreignColumns: [suppliers.storeId, suppliers.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payments_store_id_accounting_period_id_fkey',
+      columns: [table.storeId, table.accountingPeriodId],
+      foreignColumns: [accountingPeriods.storeId, accountingPeriods.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payments_store_id_money_account_id_fkey',
+      columns: [table.storeId, table.moneyAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payments_store_id_money_movement_id_fkey',
+      columns: [table.storeId, table.moneyMovementId],
+      foreignColumns: [moneyMovements.storeId, moneyMovements.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payments_store_id_owner_ledger_entry_id_fkey',
+      columns: [table.storeId, table.ownerLedgerEntryId],
+      foreignColumns: [ownerLedgerEntries.storeId, ownerLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payments_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    check('supplier_payments_amount_minor_check', sql`${table.amountMinor} > 0`),
+    check('supplier_payments_allocated_total_minor_check', sql`${table.allocatedTotalMinor} >= 0`),
+    check('supplier_payments_credit_created_minor_check', sql`${table.creditCreatedMinor} >= 0`),
+    check(
+      'supplier_payments_payment_source_check',
+      sql`${table.paymentSource} in ('money_account', 'owner_pocket')`,
+    ),
+    check(
+      'supplier_payments_status_check',
+      sql`${table.status} in ('draft', 'posted', 'cancelled')`,
+    ),
+    check(
+      'supplier_payments_check',
+      sql`${table.status} <> 'posted' or ${table.allocatedTotalMinor} + ${table.creditCreatedMinor} = ${table.amountMinor}`,
+    ),
+    check(
+      'supplier_payments_check1',
+      sql`${table.status} <> 'posted' or (${table.paymentSource} = 'money_account' and ${table.moneyAccountId} is not null and ${table.moneyMovementId} is not null and ${table.ownerLedgerEntryId} is null) or (${table.paymentSource} = 'owner_pocket' and ${table.moneyAccountId} is null and ${table.moneyMovementId} is null and ${table.ownerLedgerEntryId} is not null)`,
+    ),
+    check(
+      'supplier_payments_check2',
+      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null) or ${table.status} <> 'cancelled'`,
+    ),
+    check('supplier_payments_version_check', sql`${table.version} >= 1`),
+    index('idx_supplier_payments_supplier_time').on(
+      table.storeId,
+      table.supplierId,
+      table.paymentAt.desc(),
+      table.status,
+    ),
+  ],
+);
+
 export const supplierLedgerEntries = ledgerSchema.table(
   'supplier_ledger_entries',
   {
@@ -295,5 +415,72 @@ export const supplierLedgerEntries = ledgerSchema.table(
       table.occurredAt.desc(),
     ),
     index('idx_supplier_ledger_time_brin').using('brin', table.occurredAt),
+  ],
+);
+
+export const supplierPaymentAllocations = ledgerSchema.table(
+  'supplier_payment_allocations',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    supplierPaymentId: uuid('supplier_payment_id').notNull(),
+    purchaseInvoiceId: uuid('purchase_invoice_id'),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    supplierLedgerEntryId: uuid('supplier_ledger_entry_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    openingPayableLedgerEntryId: uuid('opening_payable_ledger_entry_id'),
+  },
+  (table) => [
+    unique('supplier_payment_allocations_store_id_id_key').on(table.storeId, table.id),
+    unique('supplier_payment_allocations_store_id_supplier_ledger_entry_key').on(
+      table.storeId,
+      table.supplierLedgerEntryId,
+    ),
+    unique('supplier_payment_allocations_supplier_payment_id_purchase_i_key').on(
+      table.supplierPaymentId,
+      table.purchaseInvoiceId,
+    ),
+    unique('supplier_payment_allocations_payment_opening_key').on(
+      table.supplierPaymentId,
+      table.openingPayableLedgerEntryId,
+    ),
+    foreignKey({
+      name: 'supplier_payment_allocations_store_id_supplier_payment_id_fkey',
+      columns: [table.storeId, table.supplierPaymentId],
+      foreignColumns: [supplierPayments.storeId, supplierPayments.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payment_allocations_store_id_purchase_invoice_id_fkey',
+      columns: [table.storeId, table.purchaseInvoiceId],
+      foreignColumns: [purchaseInvoices.storeId, purchaseInvoices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payment_allocations_store_id_supplier_ledger_entr_fkey',
+      columns: [table.storeId, table.supplierLedgerEntryId],
+      foreignColumns: [supplierLedgerEntries.storeId, supplierLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'supplier_payment_allocations_store_opening_payable_fkey',
+      columns: [table.storeId, table.openingPayableLedgerEntryId],
+      foreignColumns: [supplierLedgerEntries.storeId, supplierLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    check('supplier_payment_allocations_amount_minor_check', sql`${table.amountMinor} > 0`),
+    check(
+      'supplier_payment_allocations_target_xor_check',
+      sql`(${table.purchaseInvoiceId} is not null)::integer + (${table.openingPayableLedgerEntryId} is not null)::integer = 1`,
+    ),
+    index('idx_supplier_allocations_invoice').on(table.storeId, table.purchaseInvoiceId),
+    index('idx_supplier_allocations_opening_payable').on(
+      table.storeId,
+      table.openingPayableLedgerEntryId,
+    ),
   ],
 );
