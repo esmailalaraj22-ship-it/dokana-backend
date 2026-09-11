@@ -424,6 +424,11 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   again. S13.3 completed explicit, replay-safe payment posting; S13.4 added tenant-safe
   payment history/detail reads and ledger/allocation-derived settlement state; S13.5 added
   immutable whole-payment cancellation/replacement with active-leaf concurrency control.
+- **Deferred capability:** Supplier Credit / Advance. Future owner-authorized overpayment
+  or payment in advance may let the Store hold positive credit with a Supplier and later
+  apply it to Supplier Invoices. Current S13 rejects over-allocation and does not support
+  unallocated advances; Supplier Credit must be an explicit financial authority, not a
+  negative Supplier Payable.
 - **Start condition:** S10 and S12 closed with payment/allocation policy approved.
 - **Closure intent:** Least-privileged, replay-safe supplier settlement.
 
