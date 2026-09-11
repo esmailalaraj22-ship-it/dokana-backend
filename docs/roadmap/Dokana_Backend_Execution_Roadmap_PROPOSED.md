@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S12.4 starting checkpoint | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
-| Closed execution history  | Stations S0 through S12                    |
-| Next candidate            | S13.5 - NEXT / NOT STARTED                 |
+| S13.5 starting checkpoint | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
+| Closed execution history  | Stations S0 through S13                    |
+| Next candidate            | S14 - NEXT / NOT STARTED                   |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,22 +61,22 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S12.4 starting HEAD             | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
-| Starting `origin/main`          | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
+| S13.5 starting HEAD             | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
+| Starting `origin/main`          | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 11 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S12                                        |
-| Next Station started            | Yes; S13.1-S13.4 closed                    |
+| Last fully closed Station       | S13                                        |
+| Next Station started            | No; S14 is next / not started              |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S12
+## 5. Completed Stations S0-S13
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -96,9 +96,10 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S10 - Money Posting, Opening Balances, and Owner Ledger | CLOSED | Authoritative money movements and balances, owner ledger, internal transfers, opening balances, and same-domain corrections                                                       | Historical money and owner-ledger foundation                       | [Money Posting Contract v1](../contracts/money-posting-v1.md), current implementation, and migration `0006`                                                                                                                                                           |
 | S11 - Manual Inventory, Stock Projection, and Costing   | CLOSED | Independent manual inventory posting, protected stock projection, costing, stock counts, and correction workflows                                                                 | Historical manual inventory and costing foundation                 | Current inventory implementation, tests, and migrations `0007`-`0008`                                                                                                                                                                                                 |
 | S12 - Supplier Invoices and Payables                    | CLOSED | Supplier financial reads, opening payables, payable-only invoice posting, immutable edit/cancel correction chains, and zero automatic inventory or money effects                  | Historical supplier-invoice and payable recognition                | Current Supplier financial implementation, tests, and migrations `0009`-`0010`                                                                                                                                                                                        |
+| S13 - Supplier Payments and Allocations                 | CLOSED | Explicit Invoice/Opening Payable allocations, Money Account or owner funding, settlement reads, and immutable payment cancellation/replacement chains                             | Historical supplier settlement                                     | Current Supplier Payment implementation, tests, and migration `0011`                                                                                                                                                                                                  |
 
-The safe completed boundary does not include subscription lifecycle, Supplier Payment
-business flows, sales, expenses, generic synchronization, reporting, or recovery.
+The safe completed boundary does not include subscription lifecycle, sales, expenses,
+generic synchronization, reporting, or recovery.
 
 ## 6. Historical Roadmap Reconciliation
 
@@ -107,15 +108,15 @@ business flows, sales, expenses, generic synchronization, reporting, or recovery
 | Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
 | PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
 | NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S12                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S13                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
 | Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
 | Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
 | Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
 | Sales/receivables                       | SPLIT, STILL REQUIRED   | Prerequisites only                                                      | Sale posting, receivables, collections                 | S14-S15               |
-| Supplier invoices/payables              | PARTIAL, SPLIT          | Supplier invoice/payable recognition S12                                | Supplier settlement                                    | S13                   |
+| Supplier invoices/payables              | SPLIT, COMPLETE         | Supplier invoice/payable recognition S12; settlement S13                | None                                                   | None                  |
 | Manual inventory/costing                | DONE                    | S11                                                                     | None                                                   | None                  |
 | Expenses/owner ledger                   | SPLIT, PARTIAL          | Money and owner-ledger foundation S10                                   | Expenses                                               | S16                   |
-| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S12                  | Cross-domain corrections                               | S17                   |
+| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S13                  | Cross-domain corrections                               | S17                   |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
 | Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
@@ -145,7 +146,8 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 - Supplier financial reads, opening payables, payable-only invoice posting, and
   immutable invoice/opening-payable edit and cancellation chains.
 - Supplier Payment posting with explicit Invoice/Opening Payable allocations,
-  Money Account or owner funding, and active-allocation correction guards.
+  Money Account or owner funding, active-allocation correction guards, tenant-safe reads,
+  and immutable cancellation/replacement chains.
 - Domain mutation foundations using stable UUIDs, `operationId`, canonical request
   hashes, exact/rejected replay, versions, processed operations, audit effects, and
   change events.
@@ -161,39 +163,38 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 
 ### Still required
 
-Supplier Payment reads and correction/reversal lifecycle, sales/receivables,
-collections, expenses, cross-domain returns/corrections, platform lifecycle, generic
-synchronization, reports, notifications, attachments, backup/restore, and final release
-validation.
+Sales/receivables, collections, expenses, cross-domain returns/corrections, platform
+lifecycle, generic synchronization, reports, notifications, attachments, backup/restore,
+and final release validation.
 
 ## 8. Remaining PRD Coverage and Completeness Map
 
-| PRD capability                                     | Current state                                 | Execution owner              |
-| -------------------------------------------------- | --------------------------------------------- | ---------------------------- |
-| Authentication/session/device foundation           | Implemented                                   | S3; platform extensions S18  |
-| Tenant isolation/business-write authorization      | Implemented                                   | Reused by every domain       |
-| Customer master data                               | Implemented                                   | S4; attachment support S21   |
-| Product and Product Unit catalog                   | Implemented                                   | S5; attachment support S21   |
-| Supplier master data                               | Implemented                                   | S6; settlement workflows S13 |
-| Store operational settings                         | Implemented                                   | S7 (closed)                  |
-| Money Account catalog                              | Implemented                                   | S8 (closed)                  |
-| Accounting periods/posting controls                | Implemented                                   | S9 (closed)                  |
-| Money movements/transfers/balances/owner ledger    | Implemented                                   | S10 (closed)                 |
-| Manual inventory/stock projection/costing          | Implemented                                   | S11 (closed)                 |
-| Supplier invoices/payables                         | Implemented                                   | S12 (closed)                 |
-| Supplier payments/allocations/credits              | Posting/reads implemented; corrections remain | S13                          |
-| Sales and customer receivables                     | Still required                                | S14                          |
-| Customer collections/credit/settlement             | Still required                                | S15                          |
-| Expenses and expense payments                      | Still required                                | S16                          |
-| Returns/reversals/corrections                      | Still required                                | S17 and each source Station  |
-| Subscription/offline licensing/SaaS administration | Partially implemented                         | S18                          |
-| Generic sync and consistent data bootstrap         | Partially implemented foundation              | S19                          |
-| Dashboard/reports/search/documents/export          | Still required                                | S20                          |
-| Notifications/attachments/audit access             | Partially implemented infrastructure          | S21                          |
-| Backup/restore/recovery                            | Still required                                | S22                          |
-| Final security/recovery/release validation         | Still required                                | S23                          |
-| Automatic or partial invoice goods receipt         | Superseded by approved design                 | No future owner              |
-| Flutter/Drift/SQLite mobile implementation         | Outside backend scope                         | Mobile project               |
+| PRD capability                                     | Current state                        | Execution owner              |
+| -------------------------------------------------- | ------------------------------------ | ---------------------------- |
+| Authentication/session/device foundation           | Implemented                          | S3; platform extensions S18  |
+| Tenant isolation/business-write authorization      | Implemented                          | Reused by every domain       |
+| Customer master data                               | Implemented                          | S4; attachment support S21   |
+| Product and Product Unit catalog                   | Implemented                          | S5; attachment support S21   |
+| Supplier master data                               | Implemented                          | S6; settlement workflows S13 |
+| Store operational settings                         | Implemented                          | S7 (closed)                  |
+| Money Account catalog                              | Implemented                          | S8 (closed)                  |
+| Accounting periods/posting controls                | Implemented                          | S9 (closed)                  |
+| Money movements/transfers/balances/owner ledger    | Implemented                          | S10 (closed)                 |
+| Manual inventory/stock projection/costing          | Implemented                          | S11 (closed)                 |
+| Supplier invoices/payables                         | Implemented                          | S12 (closed)                 |
+| Supplier payments/allocations/credits              | Implemented                          | S13 (closed)                 |
+| Sales and customer receivables                     | Still required                       | S14                          |
+| Customer collections/credit/settlement             | Still required                       | S15                          |
+| Expenses and expense payments                      | Still required                       | S16                          |
+| Returns/reversals/corrections                      | Still required                       | S17 and each source Station  |
+| Subscription/offline licensing/SaaS administration | Partially implemented                | S18                          |
+| Generic sync and consistent data bootstrap         | Partially implemented foundation     | S19                          |
+| Dashboard/reports/search/documents/export          | Still required                       | S20                          |
+| Notifications/attachments/audit access             | Partially implemented infrastructure | S21                          |
+| Backup/restore/recovery                            | Still required                       | S22                          |
+| Final security/recovery/release validation         | Still required                       | S23                          |
+| Automatic or partial invoice goods receipt         | Superseded by approved design        | No future owner              |
+| Flutter/Drift/SQLite mobile implementation         | Outside backend scope                | Mobile project               |
 
 If S9-S23 are completed against their approved future contracts, every material backend
 PRD capability has an execution owner. No material capability is intentionally orphaned.
@@ -405,7 +406,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S13 - Supplier Payments and Allocations
 
-- **Status:** IN PROGRESS - S13.1 CLOSED / ASSESSMENT COMPLETE; S13.2-S13.4 CLOSED; S13.5 NEXT / NOT STARTED.
+- **Status:** CLOSED; S13.1-S13.5 CLOSED.
 - **Purpose:** Settle supplier liabilities atomically against approved money sources.
 - **Distinct boundary:** Payment/allocation replay and locking differ from invoice
   recognition and deserve independent verification.
@@ -420,9 +421,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 - **Known risks/migrations:** Migration `0011` adds the XOR physical allocation target for
   either a Purchase Invoice or an active original Opening Supplier Payable. Payment must
   reduce payable and money exactly once and must not alter inventory or recognize expense
-  again. S13.3 completed explicit, replay-safe payment posting. S13.4 added tenant-safe
-  payment history/detail reads and ledger/allocation-derived settlement state; later
-  correction/reversal behavior remains outside that completed boundary.
+  again. S13.3 completed explicit, replay-safe payment posting; S13.4 added tenant-safe
+  payment history/detail reads and ledger/allocation-derived settlement state; S13.5 added
+  immutable whole-payment cancellation/replacement with active-leaf concurrency control.
 - **Start condition:** S10 and S12 closed with payment/allocation policy approved.
 - **Closure intent:** Least-privileged, replay-safe supplier settlement.
 
@@ -654,21 +655,20 @@ foundation.
 
 ## 13. Deferred and Future-Owned Work
 
-| Deferred capability                      | Reason                                              | Future owner |
-| ---------------------------------------- | --------------------------------------------------- | ------------ |
-| Period controls                          | Required before posting                             | S9           |
-| Money/owner ledger/opening balances      | Requires accounts and periods                       | S10          |
-| Inventory/costing/opening stock          | Requires Products, settings, and periods            | S11          |
-| Supplier invoices/payments               | Requires Supplier master and accounting foundations | S12-S13      |
-| Sales/receivables/collections            | Requires inventory, money, and periods              | S14-S15      |
-| Expenses                                 | Requires money/owner authority                      | S16          |
-| Returns/corrections                      | Requires source workflows                           | S17          |
-| Subscription/license/SaaS administration | Store-status enforcement is only partial            | S18          |
-| Generic sync/business-data bootstrap     | Mutation contracts must stabilize                   | S19          |
-| Reports/search/export/OpenAPI debt       | Requires authoritative domain data                  | S20          |
-| Notifications/attachments/audit access   | Requires stable causes and permissions              | S21          |
-| Backup/restore/recovery                  | Requires sync/bootstrap and stable schema           | S22          |
-| Final release validation                 | Requires all capabilities                           | S23          |
+| Deferred capability                      | Reason                                    | Future owner |
+| ---------------------------------------- | ----------------------------------------- | ------------ |
+| Period controls                          | Required before posting                   | S9           |
+| Money/owner ledger/opening balances      | Requires accounts and periods             | S10          |
+| Inventory/costing/opening stock          | Requires Products, settings, and periods  | S11          |
+| Sales/receivables/collections            | Requires inventory, money, and periods    | S14-S15      |
+| Expenses                                 | Requires money/owner authority            | S16          |
+| Returns/corrections                      | Requires source workflows                 | S17          |
+| Subscription/license/SaaS administration | Store-status enforcement is only partial  | S18          |
+| Generic sync/business-data bootstrap     | Mutation contracts must stabilize         | S19          |
+| Reports/search/export/OpenAPI debt       | Requires authoritative domain data        | S20          |
+| Notifications/attachments/audit access   | Requires stable causes and permissions    | S21          |
+| Backup/restore/recovery                  | Requires sync/bootstrap and stable schema | S22          |
+| Final release validation                 | Requires all capabilities                 | S23          |
 
 The Station 3 sync observation remains owned by S19. Existing non-blocking
 machine-readable Customer/OpenAPI documentation debt is assigned to S20 with final
@@ -727,8 +727,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S12 are closed. S13.1 is closed /
-assessment complete, S13.2-S13.4 are closed, and S13.5 is next / not started.
+No roadmap-level owner decision is open. Stations S0-S13 are closed. S14 is next / not
+started and still requires its explicit orientation and execution approval.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -736,11 +736,10 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S12 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S13 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
 - Future Stations S14-S23 remain proposed until the backend owner approves each Station's
-  orientation and contract boundary. S13 remains limited to its separately approved Task
-  boundaries.
+  orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
   dependency review, independent review, and backend-owner approval.
@@ -756,13 +755,12 @@ decision does not authorize an implementer to invent policy.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S12 - Supplier Invoices and Payables       |
-| S12.4 starting checkpoint           | `d47009cf6abb0e3161c9d246816de14ee36b7b47` |
-| Safe completed capabilities         | S0-S12 boundaries documented above         |
-| First incomplete release dependency | S13.5 - Supplier Payment corrections       |
-| Next candidate                      | S13.5 - NEXT / NOT STARTED                 |
-| S12 current status                  | CLOSED - S12.1-S12.4 closed                |
-| S13 current status                  | S13.1-S13.4 closed; S13.5 next             |
+| Last fully closed Station           | S13 - Supplier Payments and Allocations    |
+| S13.5 starting checkpoint           | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
+| Safe completed capabilities         | S0-S13 boundaries documented above         |
+| First incomplete release dependency | S14 - Sales Posting and Receivables        |
+| Next candidate                      | S14 - NEXT / NOT STARTED                   |
+| S13 current status                  | CLOSED - S13.1-S13.5 closed                |
 
-Do not start S13.5 from this document. It requires an explicit backend-owner execution
-prompt; Supplier Payment correction/reversal remains outside the completed S13.4 boundary.
+Do not start S14 from this document. It requires an explicit backend-owner orientation and
+execution prompt.

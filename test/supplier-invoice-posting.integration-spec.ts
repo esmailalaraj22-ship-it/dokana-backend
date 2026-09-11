@@ -30,7 +30,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0010_supplier_invoice_optional_product_links.sql';
+const migrationFilename = '0011_supplier_opening_payable_allocations.sql';
 const invoiceInstant = '2026-07-15T10:00:00Z';
 
 interface TestIdentity {

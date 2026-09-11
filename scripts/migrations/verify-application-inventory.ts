@@ -52,6 +52,7 @@ export async function verifyApplicationInventory(
   // The baseline inventory remains frozen. Versioned additions are admitted only
   // after their exact migration is registered, without accepting arbitrary objects.
   let inventoryFoundationApplied = false;
+  let supplierPaymentAllocationFoundationApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -63,6 +64,18 @@ export async function verifyApplicationInventory(
         throw new Error('Inventory foundation migration checksum mismatch.');
       }
       inventoryFoundationApplied = true;
+    }
+
+    const supplierPaymentAllocationApplied = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0011_supplier_opening_payable_allocations.sql'`,
+    );
+    if (supplierPaymentAllocationApplied.rows[0]) {
+      const file = await readMigrationFile('0011_supplier_opening_payable_allocations.sql');
+      if (supplierPaymentAllocationApplied.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Supplier Payment allocation migration checksum mismatch.');
+      }
+      supplierPaymentAllocationFoundationApplied = true;
     }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
@@ -150,6 +163,9 @@ export async function verifyApplicationInventory(
             'ledger.guard_inventory_count_header()',
             'ledger.validate_inventory_count_facts()',
           ]
+        : []),
+      ...(supplierPaymentAllocationFoundationApplied
+        ? ['ledger.validate_supplier_payment_allocation_target()']
         : []),
     ],
   );

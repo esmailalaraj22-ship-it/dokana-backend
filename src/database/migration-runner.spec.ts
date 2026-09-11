@@ -34,6 +34,7 @@ describe('controlled migration runner', () => {
       '0008_stock_count_zero_establishment.sql',
       '0009_supplier_invoice_payable_foundation.sql',
       '0010_supplier_invoice_optional_product_links.sql',
+      '0011_supplier_opening_payable_allocations.sql',
     ]);
   });
 

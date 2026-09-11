@@ -764,6 +764,9 @@ export class SupplierFinancialReadRepository {
     if (settlement.settlementState === null) {
       throw new Error('Active Opening Payable has no obligation amount.');
     }
+    if (row.accountingPeriodId === null) {
+      throw new Error('Active Opening Payable has no Accounting Period.');
+    }
     return {
       id: row.id,
       accountingPeriodId: row.accountingPeriodId,

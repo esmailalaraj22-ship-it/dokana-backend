@@ -35,6 +35,8 @@ import type {
 } from './supplier-invoice-posting.types';
 import { SupplierPaymentPostingService } from './supplier-payment-posting.service';
 import type { SupplierPaymentPostingResponse } from './supplier-payment-posting.types';
+import { SupplierPaymentCorrectionService } from './supplier-payment-correction.service';
+import type { SupplierPaymentCorrectionResponse } from './supplier-payment-correction.types';
 import { SupplierPaymentIdParamDto } from './dto/supplier-payment-id-param.dto';
 import { SupplierPaymentReadService } from './supplier-payment-read.service';
 import type {
@@ -53,6 +55,7 @@ export class SuppliersController {
     private readonly supplierInvoiceCorrections: SupplierInvoiceCorrectionService,
     private readonly supplierInvoicePosting: SupplierInvoicePostingService,
     private readonly supplierPaymentPosting: SupplierPaymentPostingService,
+    private readonly supplierPaymentCorrections: SupplierPaymentCorrectionService,
     private readonly supplierPaymentReads: SupplierPaymentReadService,
     private readonly supplierReads: SupplierReadService,
     private readonly supplierWrites: SupplierWriteService,
@@ -154,6 +157,34 @@ export class SuppliersController {
       request.tenantContext,
       params.supplierId,
       params.paymentId,
+    );
+  }
+
+  @Post('payments/:targetOperationId/cancel')
+  cancelPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierPaymentCorrectionResponse> {
+    return this.supplierPaymentCorrections.cancel(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('payments/:targetOperationId/edit')
+  editPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierPaymentCorrectionResponse> {
+    return this.supplierPaymentCorrections.edit(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
     );
   }
 

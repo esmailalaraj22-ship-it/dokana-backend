@@ -137,13 +137,16 @@ describe('SupplierFinancialReadService', () => {
           postingDate: null,
         }),
       ],
-      openingPayable: expect.objectContaining({
+      openingPayable: {
         id: page.openingPayable?.id,
+        accountingPeriodId: page.openingPayable?.accountingPeriodId,
         amountMinor: '500',
         paidAmountMinor: '200',
         outstandingMinor: '300',
         settlementState: 'PARTIALLY_PAID',
-      }),
+        occurredAt: page.openingPayable?.occurredAt.toISOString(),
+        createdAt: page.openingPayable?.createdAt.toISOString(),
+      },
       nextCursor: null,
     });
     expect(repository.readSupplierFinancialPage).toHaveBeenCalledWith(context, supplierId, {

@@ -176,11 +176,11 @@ describe('S13.4 Supplier Payment reads on isolated PostgreSQL', () => {
     identity?: TestIdentity;
     source?: 'money_account' | 'owner_pocket';
     occurredAt: string;
-    allocations: Array<{
+    allocations: {
       targetType: 'purchase_invoice' | 'opening_payable';
       targetId: string;
       amountMinor: string;
-    }>;
+    }[];
   }): Promise<SupplierPaymentPostingResponse> {
     const identity = input.identity ?? ownerA;
     const source = input.source ?? 'money_account';
@@ -378,7 +378,7 @@ describe('S13.4 Supplier Payment reads on isolated PostgreSQL', () => {
     for (const [index, amountMinor] of ['200', '1000'].entries()) {
       const posted = await postPayment({
         supplierId: supplierIds.openingPaid,
-        occurredAt: `2026-09-17T${index + 10}:00:00Z`,
+        occurredAt: `2026-09-17T${String(index + 10)}:00:00Z`,
         allocations: [{ targetType: 'opening_payable', targetId: openings.paid.id, amountMinor }],
       });
       if (index === 0) payments.openingPaidFirst = posted.payment.id;
@@ -659,7 +659,9 @@ describe('S13.4 Supplier Payment reads on isolated PostgreSQL', () => {
       ownerA,
       `/v1/suppliers/${supplierIds.foreign}/payments`,
     ).expect(404);
-    expect(foreignSupplier.body.code).toBe(absentSupplier.body.code);
+    const foreignSupplierBody = foreignSupplier.body as { code: unknown };
+    const absentSupplierBody = absentSupplier.body as { code: unknown };
+    expect(foreignSupplierBody.code).toBe(absentSupplierBody.code);
 
     const absentPayment = await authorizedGet(
       ownerA,
@@ -669,7 +671,9 @@ describe('S13.4 Supplier Payment reads on isolated PostgreSQL', () => {
       ownerA,
       `/v1/suppliers/${supplierIds.invoiceStates}/payments/${payments.foreign}`,
     ).expect(404);
-    expect(foreignPayment.body.code).toBe(absentPayment.body.code);
+    const foreignPaymentBody = foreignPayment.body as { code: unknown };
+    const absentPaymentBody = absentPayment.body as { code: unknown };
+    expect(foreignPaymentBody.code).toBe(absentPaymentBody.code);
 
     const foreignInvoiceFilter = (await authorizedGet(
       ownerA,

@@ -193,16 +193,14 @@ describe('SupplierPaymentReadService', () => {
       supplierId.toUpperCase(),
       payment.id.toUpperCase(),
     );
-    expect(result.allocations).toEqual([
-      expect.objectContaining({
-        amountMinor: '200',
-        target: expect.objectContaining({ type: 'SUPPLIER_INVOICE', id: invoiceId }),
-      }),
-      expect.objectContaining({
-        amountMinor: '300',
-        target: expect.objectContaining({ type: 'OPENING_PAYABLE', amountMinor: '500' }),
-      }),
-    ]);
+    expect(result.allocations[0]).toMatchObject({
+      amountMinor: '200',
+      target: { type: 'SUPPLIER_INVOICE', id: invoiceId },
+    });
+    expect(result.allocations[1]).toMatchObject({
+      amountMinor: '300',
+      target: { type: 'OPENING_PAYABLE', amountMinor: '500' },
+    });
     expect(repository.findSupplierPayment).toHaveBeenCalledWith(context, supplierId, payment.id);
   });
 

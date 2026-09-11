@@ -79,7 +79,9 @@ interface FailureResult {
   error: SupplierPaymentFailure;
 }
 
-const failureDefinitions: Readonly<Record<SupplierPaymentFailureCode, SupplierPaymentFailure>> = {
+export const supplierPaymentFailureDefinitions: Readonly<
+  Record<SupplierPaymentFailureCode, SupplierPaymentFailure>
+> = {
   ACCOUNTING_PERIOD_INTEGRITY_CONFLICT: {
     code: 'ACCOUNTING_PERIOD_INTEGRITY_CONFLICT',
     message: 'Accounting Period identity or boundaries are inconsistent.',
@@ -142,7 +144,7 @@ const failureDefinitions: Readonly<Record<SupplierPaymentFailureCode, SupplierPa
   },
 };
 
-class SupplierPaymentRejectedError extends Error {
+export class SupplierPaymentRejectedError extends Error {
   constructor(readonly result: FailureResult) {
     super(result.error.message);
     this.name = 'SupplierPaymentRejectedError';
@@ -150,7 +152,7 @@ class SupplierPaymentRejectedError extends Error {
 }
 
 function failure(code: SupplierPaymentFailureCode): FailureResult {
-  return { ok: false, error: failureDefinitions[code] };
+  return { ok: false, error: supplierPaymentFailureDefinitions[code] };
 }
 
 function reject(code: SupplierPaymentFailureCode): never {
@@ -183,7 +185,7 @@ export class SupplierPaymentPostingRepository {
 
       try {
         const response = await transaction.transaction((savepoint) =>
-          this.insertPayment(savepoint, context, command, postingDate, paymentId),
+          this.insertPaymentWithinTransaction(savepoint, context, command, postingDate),
         );
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
         return { ok: true, response };
@@ -193,13 +195,13 @@ export class SupplierPaymentPostingRepository {
     });
   }
 
-  private async insertPayment(
+  async insertPaymentWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: SupplierPaymentPostingCommand,
     postingDate: string,
-    paymentId: string,
   ): Promise<SupplierPaymentPostingResponse> {
+    const paymentId = deriveMoneyFactId(command.operationId, 'supplier-payment');
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
     await this.lockSupplier(transaction, context.storeId, command.supplierId);
     await this.lockAndValidateTargets(transaction, context.storeId, command);
@@ -713,14 +715,14 @@ export class SupplierPaymentPostingRepository {
     const body = existing.responseBody;
     if (
       !code ||
-      !(code in failureDefinitions) ||
+      !(code in supplierPaymentFailureDefinitions) ||
       !isRecord(body) ||
       body.code !== code ||
       typeof body.message !== 'string'
     ) {
       throw new Error('Stored Supplier Payment rejection is invalid.');
     }
-    const definition = failureDefinitions[code as SupplierPaymentFailureCode];
+    const definition = supplierPaymentFailureDefinitions[code as SupplierPaymentFailureCode];
     if (existing.responseCode !== definition.statusCode) {
       throw new Error('Stored Supplier Payment rejection status is invalid.');
     }
