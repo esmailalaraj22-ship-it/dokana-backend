@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { getTableConfig } from 'drizzle-orm/pg-core';
@@ -630,10 +628,5 @@ describe('S14.2 Sale contract and physical foundation', () => {
         ),
       '42501',
     );
-  });
-
-  it('does not introduce the S14.3 Sale business API', () => {
-    expect(existsSync(resolve('src/sales'))).toBe(false);
-    expect(readFileSync(resolve('src/app.module.ts'), 'utf8')).not.toContain('SalesModule');
   });
 });

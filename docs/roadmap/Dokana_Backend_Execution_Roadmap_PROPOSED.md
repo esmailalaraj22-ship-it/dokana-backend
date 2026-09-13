@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S13.5 starting checkpoint | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
-| Closed execution history  | Stations S0-S13; S14.1-S14.2 tasks         |
-| Next candidate            | S14.3 - NEXT / NOT STARTED                 |
+| Closed execution history  | Stations S0-S13; S14.1-S14.3 tasks         |
+| Next candidate            | S14.4 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S13                                        |
-| Next Station started            | S14 in progress; S14.3 next / not started  |
+| Next Station started            | S14 in progress; S14.4 next / not started  |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -434,8 +434,8 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S14 - Sales Posting and Customer Receivables
 
-- **Status:** IN PROGRESS - S14.1 assessment and S14.2 foundation CLOSED; S14.3 NEXT /
-  NOT STARTED.
+- **Status:** IN PROGRESS - S14.1 assessment, S14.2 foundation, and S14.3 Sale posting
+  and receivable origination CLOSED; S14.4 NEXT / NOT STARTED.
 - **Purpose:** Post paid, partial, and credit sales with atomic accounting and inventory
   effects.
 - **Distinct boundary:** Sale creation differs from later receivable collection and
@@ -454,7 +454,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   Products and forbid Sale inventory movements for untracked Products and manual lines.
   Current MVP Sale total must be positive; explicit zero remains distinct from missing
   input. Archived Customers, Products, and Product Units remain historically readable but
-  cannot participate in applicable new S14 writes.
+  cannot participate in applicable new S14 writes. S14.3 implements owner-authorized,
+  replay-safe fully paid, partial, credit, and split-tender Sale posting; Customer Opening
+  Receivable remains an independent immutable ledger fact rather than a fake Sale.
 - **Start condition:** S10-S11 closed and sales posting contract independently reviewed.
 - **Closure intent:** Correct, tenant-safe, offline-compatible sale posting.
 
@@ -738,9 +740,9 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S13 are closed. S14.1 and S14.2 are
-closed Task checkpoints within active S14; S14.3 is next / not started and requires its
-explicit execution approval.
+No roadmap-level owner decision is open. Stations S0-S13 are closed. S14.1 through S14.3
+are closed Task checkpoints within active S14; S14.4 is next / not started and requires
+its explicit execution approval.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -769,10 +771,10 @@ decision does not authorize an implementer to invent policy.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S13 - Supplier Payments and Allocations    |
 | S13.5 starting checkpoint           | `e4431c518053b20f1b57d9c63be6db82f7795d4d` |
-| Safe completed capabilities         | S0-S13 plus S14.1-S14.2 foundation         |
+| Safe completed capabilities         | S0-S13 plus S14.1-S14.3                    |
 | First incomplete release dependency | S14 - Sales Posting and Receivables        |
-| Next candidate                      | S14.3 - NEXT / NOT STARTED                 |
-| S14 current status                  | IN PROGRESS - S14.1-S14.2 closed           |
+| Next candidate                      | S14.4 - NEXT / NOT STARTED                 |
+| S14 current status                  | IN PROGRESS - S14.1-S14.3 closed           |
 
-Do not start S14.3 from this document. It requires an explicit backend-owner execution
+Do not start S14.4 from this document. It requires an explicit backend-owner execution
 prompt.
