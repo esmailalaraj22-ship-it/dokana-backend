@@ -367,6 +367,15 @@ export class SaleReadRepository {
               from ledger.customer_ledger_entries adjustment
               where adjustment.store_id=origin.store_id
                 and adjustment.reversal_of_id=origin.id
+            ), 0) - coalesce((
+              select sum(allocation.amount_minor)
+              from ledger.customer_payment_allocations allocation
+              inner join ledger.customer_payments payment
+                on payment.store_id=allocation.store_id
+                and payment.id=allocation.customer_payment_id
+              where allocation.store_id=origin.store_id
+                and allocation.opening_receivable_ledger_entry_id=origin.id
+                and payment.status='posted'
             ), 0)
           end::text as "outstandingMinor",
           sale.id as "saleId",

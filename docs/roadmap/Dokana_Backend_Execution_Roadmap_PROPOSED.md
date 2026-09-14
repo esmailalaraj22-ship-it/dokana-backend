@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S15.2 starting checkpoint | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
-| Closed execution history  | Stations S0-S14; S15.1-S15.2               |
-| Next candidate            | S15.3 - NEXT / NOT STARTED                 |
+| S15.3 starting checkpoint | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
+| Closed execution history  | Stations S0-S14; S15.1-S15.3               |
+| Next candidate            | S15.4 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S15.2 starting HEAD             | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
-| Starting `origin/main`          | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
+| S15.3 starting HEAD             | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
+| Starting `origin/main`          | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 14 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S14                                        |
-| Next task                       | S15.3 next; S15 open                       |
+| Next task                       | S15.4 next; S15 open                       |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -474,7 +474,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** OPEN; S15.1-S15.2 CLOSED; S15.3 NEXT - NOT STARTED.
+- **Status:** OPEN; S15.1-S15.3 CLOSED; S15.4 NEXT - NOT STARTED.
 - **Purpose:** Settle existing Customer receivables independently from sale posting.
 - **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
   accounting transaction boundary.
@@ -499,6 +499,15 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   Credit is a distinct Store liability to the Customer. Debt waiver is an independent
   non-cash Receivable Settlement. Ordinary new S15 activity requires an archived Customer
   to be restored first. Historical S15 correction behavior remains owned by S15.5.
+- **S15.3 delivered:** Later Customer money collection through one or mixed current
+  receiving Money Accounts; Sale and Opening Receivable allocation; deterministic FIFO
+  and explicit CUSTOM allocation; partial and full debt settlement; locked remaining-
+  balance protection; exact Money Movement integration; replay/idempotency; concurrency
+  protection; atomic rollback; core Customer Payment list/detail and outstanding reads;
+  and no Revenue, Inventory, or COGS effects.
+- **Still not implemented:** Overpayment Customer Credit, zero-debt advance, Customer
+  Credit consumption, excess/credit refund, debt waiver/Settlement, and Customer Payment
+  corrections.
 - **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
 - **Closure intent:** Replay-safe receivable settlement with auditable balances.
 
@@ -764,8 +773,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.2 are
-closed, and S15 remains open with S15.3 next and not started.
+No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.3 are
+closed, and S15 remains open with S15.4 next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -794,11 +803,11 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S14 - Sales Posting and Receivables        |
-| S15.2 starting checkpoint           | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
-| Safe completed capabilities         | S0-S14                                     |
+| S15.3 starting checkpoint           | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
+| Safe completed capabilities         | S0-S14; S15.1-S15.3                        |
 | First incomplete release dependency | S15 - Customer Collections and Settlement  |
-| Next candidate                      | S15.3 - NEXT / NOT STARTED                 |
+| Next candidate                      | S15.4 - NEXT / NOT STARTED                 |
 | S14 current status                  | CLOSED                                     |
 
-Do not start S15.3 from this document. It requires an explicit backend-owner execution
+Do not start S15.4 from this document. It requires an explicit backend-owner execution
 prompt.

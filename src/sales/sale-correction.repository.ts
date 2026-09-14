@@ -260,6 +260,7 @@ export class SaleCorrectionRepository {
     );
     const descriptor = this.resolveTarget(targetOperation, command.targetOperationId);
     await this.assertTargetIsActive(transaction, context.storeId, command.targetOperationId);
+    await this.lockCorrectionCustomersBeforeSale(transaction, context.storeId, descriptor, command);
     const target = await this.loadAndValidateTarget(
       transaction,
       context.storeId,
@@ -713,20 +714,6 @@ export class SaleCorrectionRepository {
     command: SaleCorrectionCommand,
   ): Promise<void> {
     const replacementItems = command.kind === 'edit' ? command.replacement.items : [];
-    const customerIds = new Set<string>();
-    if (target.sale.customerId) customerIds.add(target.sale.customerId);
-    if (command.kind === 'edit' && command.replacement.customerId) {
-      customerIds.add(command.replacement.customerId);
-    }
-    for (const id of [...customerIds].sort()) {
-      await transaction
-        .select({ id: customers.id })
-        .from(customers)
-        .where(and(eq(customers.storeId, storeId), eq(customers.id, id)))
-        .limit(1)
-        .for('update');
-    }
-
     const productIds = new Set(
       target.items.flatMap((item) => (item.productId ? [item.productId] : [])),
     );
@@ -783,6 +770,36 @@ export class SaleCorrectionRepository {
         .select({ id: moneyAccounts.id })
         .from(moneyAccounts)
         .where(and(eq(moneyAccounts.storeId, storeId), eq(moneyAccounts.id, id)))
+        .limit(1)
+        .for('update');
+    }
+  }
+
+  // Sale correction and later Customer collection both serialize Customer-owned
+  // receivable state before locking the Sale. This prevents a correction from passing
+  // its dependent-allocation check concurrently with a new collection.
+  private async lockCorrectionCustomersBeforeSale(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    descriptor: TargetDescriptor,
+    command: SaleCorrectionCommand,
+  ): Promise<void> {
+    const saleRows = await transaction
+      .select({ customerId: sales.customerId })
+      .from(sales)
+      .where(and(eq(sales.storeId, storeId), eq(sales.id, descriptor.saleId)))
+      .limit(1);
+    const customerIds = new Set<string>();
+    const existingCustomerId = saleRows[0]?.customerId;
+    if (existingCustomerId) customerIds.add(existingCustomerId);
+    if (command.kind === 'edit' && command.replacement.customerId) {
+      customerIds.add(command.replacement.customerId);
+    }
+    for (const id of [...customerIds].sort()) {
+      await transaction
+        .select({ id: customers.id })
+        .from(customers)
+        .where(and(eq(customers.storeId, storeId), eq(customers.id, id)))
         .limit(1)
         .for('update');
     }

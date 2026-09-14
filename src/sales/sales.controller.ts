@@ -2,7 +2,16 @@ import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nest
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import { CustomerIdParamDto } from '../customers/dto/customer-id-param.dto';
+import { CustomerPaymentPostingService } from './customer-payment-posting.service';
+import type { CustomerCollectionPostingResponse } from './customer-payment-posting.types';
+import { CustomerPaymentReadService } from './customer-payment-read.service';
+import type {
+  CustomerPaymentDetailResponse,
+  CustomerPaymentListResponse,
+} from './customer-payment-read.types';
+import { CustomerPaymentIdParamDto } from './dto/customer-payment-id-param.dto';
 import { ListCustomerReceivablesQueryDto } from './dto/list-customer-receivables-query.dto';
+import { ListCustomerPaymentsQueryDto } from './dto/list-customer-payments-query.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { SaleIdParamDto } from './dto/sale-id-param.dto';
 import { SaleCorrectionService } from './sale-correction.service';
@@ -23,6 +32,8 @@ export class SalesController {
     private readonly posting: SalePostingService,
     private readonly reads: SaleReadService,
     private readonly corrections: SaleCorrectionService,
+    private readonly customerPaymentPosting: CustomerPaymentPostingService,
+    private readonly customerPaymentReads: CustomerPaymentReadService,
   ) {}
 
   @Get('sales')
@@ -97,6 +108,47 @@ export class SalesController {
       request.tenantContext,
       params.customerId,
       body,
+    );
+  }
+
+  @Post('customers/:customerId/payments')
+  postCustomerPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerCollectionPostingResponse> {
+    return this.customerPaymentPosting.post(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
+  }
+
+  @Get('customers/:customerId/payments')
+  listCustomerPayments(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Query() query: ListCustomerPaymentsQueryDto,
+  ): Promise<CustomerPaymentListResponse> {
+    return this.customerPaymentReads.list(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      query,
+    );
+  }
+
+  @Get('customers/:customerId/payments/:paymentId')
+  getCustomerPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerPaymentIdParamDto,
+  ): Promise<CustomerPaymentDetailResponse> {
+    return this.customerPaymentReads.getById(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.paymentId,
     );
   }
 }

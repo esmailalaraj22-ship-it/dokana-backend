@@ -5,6 +5,10 @@ import { AuthenticationModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
 import { MoneyMovementsModule } from '../money-movements/money-movements.module';
 import { SettingsModule } from '../settings/settings.module';
+import { CustomerPaymentPostingRepository } from './customer-payment-posting.repository';
+import { CustomerPaymentPostingService } from './customer-payment-posting.service';
+import { CustomerPaymentReadRepository } from './customer-payment-read.repository';
+import { CustomerPaymentReadService } from './customer-payment-read.service';
 import { SalePostingRepository } from './sale-posting.repository';
 import { SalePostingService } from './sale-posting.service';
 import { SaleCorrectionRepository } from './sale-correction.repository';
@@ -29,6 +33,10 @@ import { SalesController } from './sales.controller';
     SaleReadService,
     SaleCorrectionRepository,
     SaleCorrectionService,
+    CustomerPaymentPostingRepository,
+    CustomerPaymentPostingService,
+    CustomerPaymentReadRepository,
+    CustomerPaymentReadService,
   ],
 })
 export class SalesModule {}
