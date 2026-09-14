@@ -28,6 +28,9 @@ import {
 export const salePaymentStatuses = ['paid', 'partial', 'credit'] as const;
 export type SalePaymentStatus = (typeof salePaymentStatuses)[number];
 
+export const customerPaymentStatuses = ['draft', 'posted', 'cancelled'] as const;
+export type CustomerPaymentStatus = (typeof customerPaymentStatuses)[number];
+
 export const saleStatuses = ['draft', 'posted', 'cancelled', 'corrected'] as const;
 export type SaleStatus = (typeof saleStatuses)[number];
 
@@ -326,6 +329,97 @@ export const salePayments = ledgerSchema.table(
   ],
 );
 
+export const customerPayments = ledgerSchema.table(
+  'customer_payments',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    accountingPeriodId: uuid('accounting_period_id'),
+    moneyAccountId: uuid('money_account_id').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    allocatedTotalMinor: bigint('allocated_total_minor', { mode: 'bigint' }).notNull().default(0n),
+    creditCreatedMinor: bigint('credit_created_minor', { mode: 'bigint' }).notNull().default(0n),
+    paymentAt: timestamp('payment_at', { withTimezone: true, mode: 'date' }).notNull(),
+    senderAccountName: text('sender_account_name'),
+    externalReference: text('external_reference'),
+    notes: text('notes'),
+    status: text('status').$type<CustomerPaymentStatus>().notNull().default('draft'),
+    moneyMovementId: uuid('money_movement_id'),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
+    deviceId: uuid('device_id'),
+    operationId: uuid('operation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    unique('customer_payments_store_id_id_key').on(table.storeId, table.id),
+    unique('customer_payments_store_id_money_movement_id_key').on(
+      table.storeId,
+      table.moneyMovementId,
+    ),
+    unique('customer_payments_store_id_operation_id_key').on(table.storeId, table.operationId),
+    foreignKey({
+      name: 'customer_payments_store_id_customer_id_fkey',
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customers.storeId, customers.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payments_store_id_accounting_period_id_fkey',
+      columns: [table.storeId, table.accountingPeriodId],
+      foreignColumns: [accountingPeriods.storeId, accountingPeriods.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payments_store_id_money_account_id_fkey',
+      columns: [table.storeId, table.moneyAccountId],
+      foreignColumns: [moneyAccounts.storeId, moneyAccounts.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payments_store_id_money_movement_id_fkey',
+      columns: [table.storeId, table.moneyMovementId],
+      foreignColumns: [moneyMovements.storeId, moneyMovements.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payments_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    check('customer_payments_amount_minor_check', sql`${table.amountMinor} > 0`),
+    check('customer_payments_allocated_total_minor_check', sql`${table.allocatedTotalMinor} >= 0`),
+    check('customer_payments_credit_created_minor_check', sql`${table.creditCreatedMinor} >= 0`),
+    check(
+      'customer_payments_status_check',
+      sql`${table.status} in ('draft', 'posted', 'cancelled')`,
+    ),
+    check(
+      'customer_payments_check',
+      sql`${table.status} <> 'posted' or ${table.allocatedTotalMinor} + ${table.creditCreatedMinor} = ${table.amountMinor}`,
+    ),
+    check(
+      'customer_payments_check1',
+      sql`(${table.status} = 'cancelled' and ${table.cancelledAt} is not null) or ${table.status} <> 'cancelled'`,
+    ),
+    check('customer_payments_version_check', sql`${table.version} >= 1`),
+    index('idx_customer_payments_customer_time').on(
+      table.storeId,
+      table.customerId,
+      table.paymentAt.desc(),
+      table.status,
+    ),
+  ],
+);
+
 export const customerLedgerEntries = ledgerSchema.table(
   'customer_ledger_entries',
   {
@@ -411,7 +505,76 @@ export const customerLedgerEntries = ledgerSchema.table(
   ],
 );
 
+export const customerPaymentAllocations = ledgerSchema.table(
+  'customer_payment_allocations',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    customerPaymentId: uuid('customer_payment_id').notNull(),
+    saleId: uuid('sale_id'),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    customerLedgerEntryId: uuid('customer_ledger_entry_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    openingReceivableLedgerEntryId: uuid('opening_receivable_ledger_entry_id'),
+  },
+  (table) => [
+    unique('customer_payment_allocations_store_id_id_key').on(table.storeId, table.id),
+    unique('customer_payment_allocations_store_id_customer_ledger_entry_key').on(
+      table.storeId,
+      table.customerLedgerEntryId,
+    ),
+    unique('customer_payment_allocations_customer_payment_id_sale_id_key').on(
+      table.customerPaymentId,
+      table.saleId,
+    ),
+    unique('customer_payment_allocations_payment_opening_key').on(
+      table.customerPaymentId,
+      table.openingReceivableLedgerEntryId,
+    ),
+    foreignKey({
+      name: 'customer_payment_allocations_store_id_customer_payment_id_fkey',
+      columns: [table.storeId, table.customerPaymentId],
+      foreignColumns: [customerPayments.storeId, customerPayments.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payment_allocations_store_id_sale_id_fkey',
+      columns: [table.storeId, table.saleId],
+      foreignColumns: [sales.storeId, sales.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payment_allocations_store_id_customer_ledger_entr_fkey',
+      columns: [table.storeId, table.customerLedgerEntryId],
+      foreignColumns: [customerLedgerEntries.storeId, customerLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'customer_payment_allocations_store_opening_receivable_fkey',
+      columns: [table.storeId, table.openingReceivableLedgerEntryId],
+      foreignColumns: [customerLedgerEntries.storeId, customerLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    check('customer_payment_allocations_amount_minor_check', sql`${table.amountMinor} > 0`),
+    check(
+      'customer_payment_allocations_target_xor_check',
+      sql`(${table.saleId} is not null)::integer + (${table.openingReceivableLedgerEntryId} is not null)::integer = 1`,
+    ),
+    index('idx_customer_allocations_sale').on(table.storeId, table.saleId),
+    index('idx_customer_allocations_opening_receivable').on(
+      table.storeId,
+      table.openingReceivableLedgerEntryId,
+    ),
+  ],
+);
+
 export type Sale = typeof sales.$inferSelect;
 export type SaleItem = typeof saleItems.$inferSelect;
 export type SalePayment = typeof salePayments.$inferSelect;
+export type CustomerPayment = typeof customerPayments.$inferSelect;
 export type CustomerLedgerEntry = typeof customerLedgerEntries.$inferSelect;
+export type CustomerPaymentAllocation = typeof customerPaymentAllocations.$inferSelect;

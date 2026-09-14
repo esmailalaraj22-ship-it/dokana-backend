@@ -735,24 +735,29 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
     const dependentCommand = manualSale({ customerId: customers.active });
     const dependent = (await postSale(dependentCommand).expect(201)).body as SalePostingResponse;
     if (!dependent.receivable) throw new Error('Expected dependent Sale receivable.');
+    const dependencyAccount = await createAccount();
+    const customerPaymentId = randomUUID();
     await db().admin.query(
-      `insert into ledger.customer_ledger_entries(
-         id,store_id,customer_id,accounting_period_id,entry_type,receivable_delta_minor,
-         credit_delta_minor,source_sale_id,reference_type,reference_id,transaction_group_id,
-         occurred_at,reason,device_id,operation_id)
-       values($1,$2,$3,$4,'correction',1,0,$5,'test_dependency',$5,$6,$7,
-         'S14.5 dependent fixture',$8,$9)`,
+      `insert into ledger.customer_payments(
+         id,store_id,customer_id,accounting_period_id,money_account_id,amount_minor,
+         allocated_total_minor,payment_at,status,device_id,operation_id)
+       values($1,$2,$3,$4,$5,1,1,$6,'draft',$7,$8)`,
       [
-        randomUUID(),
+        customerPaymentId,
         owner.storeId,
         customers.active,
         dependent.accountingPeriodId,
-        dependent.sale.id,
-        randomUUID(),
+        dependencyAccount,
         augustInstant,
         owner.deviceId,
         randomUUID(),
       ],
+    );
+    await db().admin.query(
+      `insert into ledger.customer_payment_allocations(
+         id,store_id,customer_payment_id,sale_id,amount_minor)
+       values($1,$2,$3,$4,1)`,
+      [randomUUID(), owner.storeId, customerPaymentId, dependent.sale.id],
     );
     await cancelSale(dependentCommand.operationId as string, {
       operationId: randomUUID(),

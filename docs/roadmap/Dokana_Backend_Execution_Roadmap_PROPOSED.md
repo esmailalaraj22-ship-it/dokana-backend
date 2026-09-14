@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S14.5 starting checkpoint | `f6b4b84d5a7eca25671d4e783d52724388f03097` |
-| Closed execution history  | Stations S0-S14                            |
-| Next candidate            | S15 - NEXT / NOT STARTED                   |
+| S15.2 starting checkpoint | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
+| Closed execution history  | Stations S0-S14; S15.1-S15.2               |
+| Next candidate            | S15.3 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S14.5 starting HEAD             | `f6b4b84d5a7eca25671d4e783d52724388f03097` |
-| Starting `origin/main`          | `f6b4b84d5a7eca25671d4e783d52724388f03097` |
+| S15.2 starting HEAD             | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
+| Starting `origin/main`          | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
-| Migrations                      | 13 applied, 0 pending                      |
+| Migrations                      | 14 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S14                                        |
-| Next Station                    | S15 next; not started                      |
+| Next task                       | S15.3 next; S15 open                       |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -474,7 +474,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** NEXT - NOT STARTED.
+- **Status:** OPEN; S15.1-S15.2 CLOSED; S15.3 NEXT - NOT STARTED.
 - **Purpose:** Settle existing Customer receivables independently from sale posting.
 - **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
   accounting transaction boundary.
@@ -485,8 +485,20 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   records; money effects; reversal and concurrency tests.
 - **Explicit non-scope:** Sale creation and destructive receivable edits.
 - **Coverage:** PRD customer collection, allocation, credit, and settlement rules.
-- **Known risks/migrations:** Allocations cannot exceed payment or remaining receivable;
-  Customer debt is not expense and credit receipt is not sale revenue.
+- **Known risks/migrations:** S15.1 verified the S14-to-S15 boundary, froze the approved
+  settlement policies, and proved that the Sale-only allocation shape could not represent
+  an Opening Receivable. Migration `0014` adds a nullable typed Opening Receivable origin
+  to `customer_payment_allocations`, makes the Sale and Opening targets mutually exclusive,
+  and enforces Store/Customer target identity while preserving payment-effect ledger
+  lineage and S14 Sale-correction dependencies. Customer Payment and allocation Drizzle
+  mappings now match PostgreSQL. The PostgreSQL reference remains unchanged; SQLite parity
+  is deferred to S19. Allocations cannot exceed payment or remaining receivable; Customer
+  debt is not expense and credit receipt is not sale revenue.
+- **Approved S15 policies:** Overpayment requires an explicit Customer Credit or Refund
+  choice. A zero-debt advance requires explicit advance/Customer Credit intent. Customer
+  Credit is a distinct Store liability to the Customer. Debt waiver is an independent
+  non-cash Receivable Settlement. Ordinary new S15 activity requires an archived Customer
+  to be restored first. Historical S15 correction behavior remains owned by S15.5.
 - **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
 - **Closure intent:** Replay-safe receivable settlement with auditable balances.
 
@@ -752,9 +764,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S14 are closed. S15 is next and not
-started; it requires separate orientation, contract review, and backend-owner
-execution approval.
+No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.2 are
+closed, and S15 remains open with S15.3 next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -764,8 +775,9 @@ decision does not authorize an implementer to invent policy.
 
 - Completed Stations S0-S14 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S15-S23 remain proposed until the backend owner approves each Station's
-  orientation and contract boundary.
+- S15 remains active only within separately approved task boundaries. Future Stations
+  S16-S23 remain proposed until the backend owner approves each Station's orientation and
+  contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
   dependency review, independent review, and backend-owner approval.
@@ -782,11 +794,11 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S14 - Sales Posting and Receivables        |
-| S14.5 starting checkpoint           | `f6b4b84d5a7eca25671d4e783d52724388f03097` |
+| S15.2 starting checkpoint           | `47fffe247512b7503b8ad05c1d8856992f1f7c3c` |
 | Safe completed capabilities         | S0-S14                                     |
 | First incomplete release dependency | S15 - Customer Collections and Settlement  |
-| Next candidate                      | S15 - NEXT / NOT STARTED                   |
+| Next candidate                      | S15.3 - NEXT / NOT STARTED                 |
 | S14 current status                  | CLOSED                                     |
 
-Do not start S15 from this document. It requires an explicit backend-owner orientation
-and execution prompt.
+Do not start S15.3 from this document. It requires an explicit backend-owner execution
+prompt.
