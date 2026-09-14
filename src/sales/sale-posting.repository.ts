@@ -235,7 +235,7 @@ export class SalePostingRepository {
             command.operationId,
             postingDate,
           );
-          return this.insertSale(savepoint, context, command, posting, saleId);
+          return this.insertSale(savepoint, context, command, posting, saleId, null);
         });
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
         return { ok: true, response };
@@ -307,12 +307,30 @@ export class SalePostingRepository {
     });
   }
 
+  insertCorrectionReplacementWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: SalePostingCommand,
+    posting: AccountingPeriodPostingContext,
+    correctionOfId: string,
+  ): Promise<SalePostingResponse> {
+    return this.insertSale(
+      transaction,
+      context,
+      command,
+      posting,
+      deriveMoneyFactId(command.operationId, 'sale'),
+      correctionOfId,
+    );
+  }
+
   private async insertSale(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: SalePostingCommand,
     posting: AccountingPeriodPostingContext,
     saleId: string,
+    correctionOfId: string | null,
   ): Promise<SalePostingResponse> {
     const customer =
       command.customerId === null
@@ -375,6 +393,7 @@ export class SalePostingRepository {
       paymentStatus: command.paymentStatus,
       status: 'draft',
       notes: command.notes,
+      correctionOfId,
       deviceId: context.deviceId,
       operationId: command.operationId,
     });

@@ -5,6 +5,8 @@ import { CustomerIdParamDto } from '../customers/dto/customer-id-param.dto';
 import { ListCustomerReceivablesQueryDto } from './dto/list-customer-receivables-query.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { SaleIdParamDto } from './dto/sale-id-param.dto';
+import { SaleCorrectionService } from './sale-correction.service';
+import type { SaleCorrectionResponse } from './sale-correction.types';
 import { SaleReadService } from './sale-read.service';
 import type {
   CustomerReceivableListResponse,
@@ -20,6 +22,7 @@ export class SalesController {
   constructor(
     private readonly posting: SalePostingService,
     private readonly reads: SaleReadService,
+    private readonly corrections: SaleCorrectionService,
   ) {}
 
   @Get('sales')
@@ -58,6 +61,29 @@ export class SalesController {
     @Body() body: unknown,
   ): Promise<SalePostingResponse> {
     return this.posting.postSale(request.principal, request.tenantContext, body);
+  }
+
+  @Post('sales/:targetOperationId/cancel')
+  cancelSale(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SaleCorrectionResponse> {
+    return this.corrections.cancel(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('sales/:targetOperationId/edit')
+  editSale(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SaleCorrectionResponse> {
+    return this.corrections.edit(request.principal, request.tenantContext, targetOperationId, body);
   }
 
   @Post('customers/:customerId/opening-receivables')
