@@ -19,6 +19,16 @@ const receivable = z
     createdAt: z.string(),
   })
   .strict();
+const customerCreditTender = z
+  .object({
+    id: identifier,
+    customerId: identifier,
+    amountMinor: integer,
+    customerLedgerEntryId: identifier,
+    appliedAt: z.string(),
+    createdAt: z.string(),
+  })
+  .strict();
 const common = {
   operationId: identifier,
   businessDate: z.string(),
@@ -88,6 +98,7 @@ const saleResponse = z
         })
         .strict(),
     ),
+    customerCreditTender: customerCreditTender.nullable().optional().default(null),
     receivable: receivable.nullable(),
   })
   .strict();

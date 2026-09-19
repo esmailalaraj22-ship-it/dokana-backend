@@ -20,6 +20,7 @@ import {
   inventoryMovements,
   products,
   productUnits,
+  saleCustomerCreditApplications,
   saleItems,
   salePayments,
   sales,
@@ -50,6 +51,7 @@ import {
 import type {
   CustomerOpeningReceivableResult,
   PostedCustomerReceivable,
+  PostedSaleCustomerCreditTender,
   PostedSaleItem,
   PostedSalePayment,
   SalePostingFailure,
@@ -58,6 +60,7 @@ import type {
   SalePostingResult,
   SalePostingStoredResponse,
 } from './sale-posting.types';
+import { CustomerReceivableSettlementRepository } from './customer-receivable-settlement.repository';
 
 interface ProcessedOperationRow extends Record<string, unknown> {
   deviceId: string;
@@ -124,6 +127,11 @@ const failures: Readonly<Record<SalePostingFailureCode, SalePostingFailure>> = {
   CUSTOMER_CREDIT_LIMIT_EXCEEDED: {
     code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED',
     message: 'Customer credit limit would be exceeded.',
+    statusCode: 409,
+  },
+  CUSTOMER_CREDIT_INSUFFICIENT: {
+    code: 'CUSTOMER_CREDIT_INSUFFICIENT',
+    message: 'Customer Credit is insufficient.',
     statusCode: 409,
   },
   CUSTOMER_NOT_FOUND: {
@@ -209,6 +217,7 @@ export class SalePostingRepository {
     private readonly database: DatabaseService,
     private readonly postingContext: AccountingPeriodPostingContextService,
     private readonly moneyMovements: MoneyMovementPostingRepository,
+    private readonly receivables: CustomerReceivableSettlementRepository,
   ) {}
 
   postSale(
@@ -336,6 +345,17 @@ export class SalePostingRepository {
       command.customerId === null
         ? null
         : await this.lockCustomer(transaction, context.storeId, command.customerId);
+    if (command.customerCreditAmountMinor > 0n) {
+      if (!customer) reject('CUSTOMER_NOT_FOUND');
+      const availableCredit = await this.receivables.readAvailableCredit(
+        transaction,
+        context.storeId,
+        customer.id,
+      );
+      if (command.customerCreditAmountMinor > availableCredit) {
+        reject('CUSTOMER_CREDIT_INSUFFICIENT');
+      }
+    }
     if (command.creditTotalMinor > 0n) {
       if (!customer) reject('CUSTOMER_NOT_FOUND');
       await this.assertCreditLimit(
@@ -343,6 +363,7 @@ export class SalePostingRepository {
         context.storeId,
         customer,
         command.creditTotalMinor,
+        command.customerCreditAmountMinor,
       );
     }
 
@@ -468,6 +489,17 @@ export class SalePostingRepository {
       postedPayments.push(this.paymentResponse(paymentId, payment, movement));
     }
 
+    const customerCreditTender =
+      command.customerCreditAmountMinor === 0n || command.customerId === null
+        ? null
+        : await this.insertCustomerCreditApplication(transaction, context, {
+            command,
+            saleId,
+            customerId: command.customerId,
+            accountingPeriodId: posting.accountingPeriodId,
+            transactionGroupId,
+          });
+
     const receivable =
       command.creditTotalMinor === 0n || command.customerId === null
         ? null
@@ -529,6 +561,7 @@ export class SalePostingRepository {
       },
       items: postedItems,
       payments: postedPayments,
+      customerCreditTender,
       receivable,
     };
   }
@@ -846,6 +879,7 @@ export class SalePostingRepository {
     storeId: string,
     customer: LockedCustomer,
     newReceivable: bigint,
+    consumedCredit: bigint,
   ): Promise<void> {
     const [settings] = await transaction
       .select({
@@ -864,9 +898,76 @@ export class SalePostingRepository {
       from ledger.customer_ledger_entries
       where store_id=${storeId}::uuid and customer_id=${customer.id}::uuid
     `);
-    if (BigInt(outstanding.rows[0]?.amount ?? '0') + newReceivable > limit) {
+    if (BigInt(outstanding.rows[0]?.amount ?? '0') + consumedCredit + newReceivable > limit) {
       reject('CUSTOMER_CREDIT_LIMIT_EXCEEDED');
     }
+  }
+
+  private async insertCustomerCreditApplication(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    input: {
+      command: SalePostingCommand;
+      saleId: string;
+      customerId: string;
+      accountingPeriodId: string;
+      transactionGroupId: string;
+    },
+  ): Promise<PostedSaleCustomerCreditTender> {
+    const ledgerDiscriminator = 'sale-customer-credit-ledger';
+    const ledgerEntryId = deriveMoneyFactId(input.command.operationId, ledgerDiscriminator);
+    const ledgerRows = await transaction
+      .insert(customerLedgerEntries)
+      .values({
+        id: ledgerEntryId,
+        storeId: context.storeId,
+        customerId: input.customerId,
+        accountingPeriodId: input.accountingPeriodId,
+        entryType: 'credit_used',
+        receivableDeltaMinor: 0n,
+        creditDeltaMinor: -input.command.customerCreditAmountMinor,
+        sourceSaleId: input.saleId,
+        referenceType: 'sale',
+        referenceId: input.saleId,
+        transactionGroupId: input.transactionGroupId,
+        occurredAt: input.command.occurredAt,
+        reason: input.command.notes,
+        deviceId: context.deviceId,
+        operationId: deriveMoneyFactOperationId(input.command.operationId, ledgerDiscriminator),
+      })
+      .returning({ createdAt: customerLedgerEntries.createdAt });
+    if (!ledgerRows[0]) {
+      throw new Error('Sale Customer Credit ledger insertion did not return a row.');
+    }
+
+    const applicationId = deriveMoneyFactId(
+      input.command.operationId,
+      'sale-customer-credit-application',
+    );
+    const applicationRows = await transaction
+      .insert(saleCustomerCreditApplications)
+      .values({
+        id: applicationId,
+        storeId: context.storeId,
+        saleId: input.saleId,
+        customerId: input.customerId,
+        customerLedgerEntryId: ledgerEntryId,
+        amountMinor: input.command.customerCreditAmountMinor,
+        appliedAt: input.command.occurredAt,
+      })
+      .returning({ createdAt: saleCustomerCreditApplications.createdAt });
+    const application = applicationRows[0];
+    if (!application) {
+      throw new Error('Sale Customer Credit application insertion did not return a row.');
+    }
+    return {
+      id: applicationId,
+      customerId: input.customerId,
+      amountMinor: input.command.customerCreditAmountMinor.toString(),
+      customerLedgerEntryId: ledgerEntryId,
+      appliedAt: input.command.occurredAt.toISOString(),
+      createdAt: application.createdAt.toISOString(),
+    };
   }
 
   private async insertReceivable(

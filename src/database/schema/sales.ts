@@ -505,6 +505,57 @@ export const customerLedgerEntries = ledgerSchema.table(
   ],
 );
 
+export const saleCustomerCreditApplications = ledgerSchema.table(
+  'sale_customer_credit_applications',
+  {
+    id: uuid('id').primaryKey(),
+    storeId: uuid('store_id').notNull(),
+    saleId: uuid('sale_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    customerLedgerEntryId: uuid('customer_ledger_entry_id').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+    appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('sale_customer_credit_applications_store_id_id_key').on(table.storeId, table.id),
+    unique('sale_customer_credit_applications_store_sale_key').on(table.storeId, table.saleId),
+    unique('sale_customer_credit_applications_store_ledger_entry_key').on(
+      table.storeId,
+      table.customerLedgerEntryId,
+    ),
+    foreignKey({
+      name: 'sale_customer_credit_applications_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'sale_customer_credit_applications_store_sale_fkey',
+      columns: [table.storeId, table.saleId],
+      foreignColumns: [sales.storeId, sales.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'sale_customer_credit_applications_store_customer_fkey',
+      columns: [table.storeId, table.customerId],
+      foreignColumns: [customers.storeId, customers.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    foreignKey({
+      name: 'sale_customer_credit_applications_store_ledger_entry_fkey',
+      columns: [table.storeId, table.customerLedgerEntryId],
+      foreignColumns: [customerLedgerEntries.storeId, customerLedgerEntries.id],
+    })
+      .onUpdate('cascade')
+      .onDelete('restrict'),
+    check('sale_customer_credit_applications_amount_check', sql`${table.amountMinor} > 0`),
+  ],
+);
+
 export const customerPaymentAllocations = ledgerSchema.table(
   'customer_payment_allocations',
   {
@@ -577,4 +628,5 @@ export type SaleItem = typeof saleItems.$inferSelect;
 export type SalePayment = typeof salePayments.$inferSelect;
 export type CustomerPayment = typeof customerPayments.$inferSelect;
 export type CustomerLedgerEntry = typeof customerLedgerEntries.$inferSelect;
+export type SaleCustomerCreditApplication = typeof saleCustomerCreditApplications.$inferSelect;
 export type CustomerPaymentAllocation = typeof customerPaymentAllocations.$inferSelect;

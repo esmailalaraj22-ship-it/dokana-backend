@@ -78,13 +78,19 @@ export class CustomerCreditReadService {
 
   private mapEntry(row: CustomerCreditHistoryRow): CustomerCreditHistoryEntryResponse {
     const targetType =
-      row.sourceSaleId !== null
-        ? ('sale_receivable' as const)
-        : row.referenceType === 'customer_opening_receivable'
-          ? ('opening_receivable' as const)
-          : null;
+      row.saleCreditApplicationId !== null
+        ? ('sale_tender' as const)
+        : row.sourceSaleId !== null
+          ? ('sale_receivable' as const)
+          : row.referenceType === 'customer_opening_receivable'
+            ? ('opening_receivable' as const)
+            : null;
     const targetId =
-      targetType === 'sale_receivable' ? row.sourceSaleId : targetType ? row.referenceId : null;
+      targetType === 'sale_receivable' || targetType === 'sale_tender'
+        ? row.sourceSaleId
+        : targetType
+          ? row.referenceId
+          : null;
     if ((row.moneyAccountId === null) !== (row.moneyAccountName === null)) {
       throw new Error('Customer Credit refund account presentation is inconsistent.');
     }

@@ -24,7 +24,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0013_historical_inventory_reversal_lifecycle.sql';
+const migrationFilename = '0015_sale_customer_credit_tender.sql';
 const augustInstant = '2026-08-15T10:00:00Z';
 const augustCorrectionInstant = '2026-08-16T10:00:00Z';
 
@@ -129,6 +129,7 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
     operationId?: string;
     customerId?: string;
     totalMinor?: string;
+    customerCreditAmountMinor?: string;
     payments?: { moneyAccountId: string; amountMinor: string }[];
     occurredAt?: string;
   }): Record<string, unknown> {
@@ -149,7 +150,39 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
       ],
       payments: input.payments ?? [],
       totalMinor,
+      ...(input.customerCreditAmountMinor === undefined
+        ? {}
+        : { customerCreditAmountMinor: input.customerCreditAmountMinor }),
     };
+  }
+
+  async function createCustomer(): Promise<string> {
+    const id = randomUUID();
+    await db().admin.query(
+      `insert into ledger.customers(
+         id,store_id,name,normalized_name,phone,normalized_phone,status,device_id,operation_id
+       ) values($1,$2,$1::uuid::text,$1::uuid::text,$1::uuid::text,$1::uuid::text,
+         'active',$3,$4)`,
+      [id, owner.storeId, owner.deviceId, randomUUID()],
+    );
+    return id;
+  }
+
+  async function createCustomerCredit(
+    customerId: string,
+    accountId: string,
+    amountMinor: string,
+  ): Promise<void> {
+    await request(server)
+      .post(`/v1/customers/${customerId}/payments`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .send({
+        operationId: randomUUID(),
+        occurredAt: '2026-08-14T10:00:00Z',
+        intent: 'customer_advance',
+        tenders: [{ moneyAccountId: accountId, amountMinor }],
+      })
+      .expect(201);
   }
 
   function productSale(input: {
@@ -729,6 +762,209 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
         )
       ).rows[0],
     ).toEqual({ status: 'posted', reversals: 0 });
+  });
+
+  it('reverses Sale-owned Customer Credit tenders exactly through cancellation and replacement', async () => {
+    const account = await createAccount();
+
+    const fullCustomer = await createCustomer();
+    await createCustomerCredit(fullCustomer, account, '500');
+    const fullCommand = manualSale({
+      customerId: fullCustomer,
+      customerCreditAmountMinor: '500',
+    });
+    const full = (await postSale(fullCommand).expect(201)).body as SalePostingResponse;
+    const fullCorrection = { operationId: randomUUID(), occurredAt: augustCorrectionInstant };
+    const cancelled = await cancelSale(fullCommand.operationId as string, fullCorrection).expect(
+      201,
+    );
+    expect(cancelled.body).toMatchObject({ intent: 'cancel', outcome: { status: 'cancelled' } });
+    await cancelSale(fullCommand.operationId as string, fullCorrection).expect(201);
+    expect(
+      (
+        await db().admin.query(
+          `select credit_minor::text as credit from ledger.v_customer_balances
+           where store_id=$1 and customer_id=$2`,
+          [owner.storeId, fullCustomer],
+        )
+      ).rows[0],
+    ).toEqual({ credit: '500' });
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count from ledger.customer_ledger_entries
+           where store_id=$1 and reversal_of_id=$2`,
+          [owner.storeId, full.customerCreditTender?.customerLedgerEntryId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+
+    const cashCreditCustomer = await createCustomer();
+    await createCustomerCredit(cashCreditCustomer, account, '200');
+    const cashCreditCommand = manualSale({
+      customerId: cashCreditCustomer,
+      customerCreditAmountMinor: '200',
+      payments: [{ moneyAccountId: account, amountMinor: '300' }],
+    });
+    const cashCredit = (await postSale(cashCreditCommand).expect(201)).body as SalePostingResponse;
+    await cancelSale(cashCreditCommand.operationId as string, {
+      operationId: randomUUID(),
+      occurredAt: augustCorrectionInstant,
+    }).expect(201);
+
+    const creditDebtCustomer = await createCustomer();
+    await createCustomerCredit(creditDebtCustomer, account, '200');
+    const creditDebtCommand = manualSale({
+      customerId: creditDebtCustomer,
+      customerCreditAmountMinor: '200',
+    });
+    const creditDebt = (await postSale(creditDebtCommand).expect(201)).body as SalePostingResponse;
+    await cancelSale(creditDebtCommand.operationId as string, {
+      operationId: randomUUID(),
+      occurredAt: augustCorrectionInstant,
+    }).expect(201);
+
+    const mixedCustomer = await createCustomer();
+    await createCustomerCredit(mixedCustomer, account, '200');
+    const mixedCommand = manualSale({
+      customerId: mixedCustomer,
+      customerCreditAmountMinor: '200',
+      payments: [{ moneyAccountId: account, amountMinor: '100' }],
+    });
+    const mixed = (await postSale(mixedCommand).expect(201)).body as SalePostingResponse;
+    await cancelSale(mixedCommand.operationId as string, {
+      operationId: randomUUID(),
+      occurredAt: augustCorrectionInstant,
+    }).expect(201);
+
+    const reversalFacts = (
+      await db().admin.query<{
+        money: number;
+        credit: number;
+        receivable: number;
+      }>(
+        `select
+          (select count(*)::int from ledger.money_movements
+             where store_id=$1 and reversal_of_id=any($2::uuid[])) as money,
+          (select count(*)::int from ledger.customer_ledger_entries
+             where store_id=$1 and reversal_of_id=any($3::uuid[])) as credit,
+          (select count(*)::int from ledger.customer_ledger_entries
+             where store_id=$1 and reversal_of_id=any($4::uuid[])) as receivable`,
+        [
+          owner.storeId,
+          [cashCredit.payments[0]?.moneyMovementId, mixed.payments[0]?.moneyMovementId],
+          [
+            cashCredit.customerCreditTender?.customerLedgerEntryId,
+            creditDebt.customerCreditTender?.customerLedgerEntryId,
+            mixed.customerCreditTender?.customerLedgerEntryId,
+          ],
+          [creditDebt.receivable?.id, mixed.receivable?.id],
+        ],
+      )
+    ).rows[0];
+    expect(reversalFacts).toEqual({ money: 2, credit: 3, receivable: 2 });
+
+    const replacementCustomer = await createCustomer();
+    await createCustomerCredit(replacementCustomer, account, '100');
+    const replacementSource = manualSale({
+      customerId: replacementCustomer,
+      totalMinor: '100',
+      customerCreditAmountMinor: '100',
+    });
+    const replacementOriginal = (await postSale(replacementSource).expect(201))
+      .body as SalePostingResponse;
+    const replacementOperationId = randomUUID();
+    const replaced = (
+      await editSale(replacementSource.operationId as string, {
+        operationId: replacementOperationId,
+        occurredAt: augustCorrectionInstant,
+        replacement: replacementBody(
+          manualSale({
+            customerId: replacementCustomer,
+            totalMinor: '50',
+            customerCreditAmountMinor: '50',
+          }),
+        ),
+      }).expect(201)
+    ).body as SaleCorrectionResponse;
+    expect(replaced).toMatchObject({
+      intent: 'edit',
+      currentSale: {
+        operationId: replacementOperationId,
+        customerCreditTender: { amountMinor: '50' },
+      },
+    });
+    expect(
+      (
+        await db().admin.query(
+          `select credit_minor::text as credit from ledger.v_customer_balances
+           where store_id=$1 and customer_id=$2`,
+          [owner.storeId, replacementCustomer],
+        )
+      ).rows[0],
+    ).toEqual({ credit: '50' });
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count from ledger.customer_ledger_entries
+           where store_id=$1 and reversal_of_id=$2`,
+          [owner.storeId, replacementOriginal.customerCreditTender?.customerLedgerEntryId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+
+    const archivedCustomer = await createCustomer();
+    await createCustomerCredit(archivedCustomer, account, '100');
+    const archivedCommand = manualSale({
+      customerId: archivedCustomer,
+      totalMinor: '100',
+      customerCreditAmountMinor: '100',
+    });
+    const archivedSale = (await postSale(archivedCommand).expect(201)).body as SalePostingResponse;
+    await db().admin.query(
+      `update ledger.customers set status='archived',archived_at=clock_timestamp() where id=$1`,
+      [archivedCustomer],
+    );
+    await cancelSale(archivedCommand.operationId as string, {
+      operationId: randomUUID(),
+      occurredAt: augustCorrectionInstant,
+    }).expect(201);
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count from ledger.customer_ledger_entries
+           where store_id=$1 and reversal_of_id=$2`,
+          [owner.storeId, archivedSale.customerCreditTender?.customerLedgerEntryId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+
+    const dependentCustomer = await createCustomer();
+    await createCustomerCredit(dependentCustomer, account, '100');
+    const dependentCommand = manualSale({
+      customerId: dependentCustomer,
+      totalMinor: '200',
+      customerCreditAmountMinor: '100',
+    });
+    await postSale(dependentCommand).expect(201);
+    await request(server)
+      .post(`/v1/customers/${dependentCustomer}/payments`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .send({
+        operationId: randomUUID(),
+        occurredAt: augustCorrectionInstant,
+        allocationMode: 'fifo',
+        tenders: [{ moneyAccountId: account, amountMinor: '1' }],
+      })
+      .expect(201);
+    await cancelSale(dependentCommand.operationId as string, {
+      operationId: randomUUID(),
+      occurredAt: augustCorrectionInstant,
+    })
+      .expect(409)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ code: 'SALE_CORRECTION_DEPENDENT_FACTS' }),
+      );
   });
 
   it('fails closed for dependent facts and preserves closed-period rejection replay', async () => {

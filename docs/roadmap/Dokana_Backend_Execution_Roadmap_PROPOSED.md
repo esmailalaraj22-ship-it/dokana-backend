@@ -2,14 +2,14 @@
 
 ## 1. Document Status and Governance
 
-| Field                     | Value                                      |
-| ------------------------- | ------------------------------------------ |
-| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
-| Repository                | `C:\Users\esmail\Desktop\Dokana`           |
-| Review branch             | `main`                                     |
-| S15.4 starting checkpoint | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
-| Closed execution history  | Stations S0-S14; S15.1-S15.4               |
-| Next candidate            | S15.5 - NEXT / NOT STARTED                 |
+| Field                      | Value                                      |
+| -------------------------- | ------------------------------------------ |
+| Status                     | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
+| Repository                 | `C:\Users\esmail\Desktop\Dokana`           |
+| Review branch              | `main`                                     |
+| S15.4A starting checkpoint | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
+| Closed execution history   | Stations S0-S14; S15.1-S15.4A              |
+| Next candidate             | S15.5 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,11 +61,11 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S15.4 starting HEAD             | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
-| Starting `origin/main`          | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
+| S15.4A starting HEAD            | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
+| Starting `origin/main`          | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
-| Migrations                      | 14 applied, 0 pending                      |
+| Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S14                                        |
@@ -474,7 +474,8 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** OPEN; S15.1-S15.4 CLOSED; S15.5 NEXT - NOT STARTED.
+- **Status:** OPEN; S15.1 CLOSED; S15.2 CLOSED; S15.3 CLOSED; S15.4 CORE COMPLETE;
+  S15.4A CLOSED; S15.5 NEXT - NOT STARTED.
 - **Purpose:** Settle existing Customer receivables independently from sale posting.
 - **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
   accounting transaction boundary.
@@ -511,14 +512,16 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   Opening Receivables without Money Movement; independent reasoned non-cash Receivable
   Settlement; balance/history reads; idempotency; rollback; and Customer-level
   concurrency protection. Database delta remains zero.
-- **Sale Credit integration:** PHYSICAL GAP - BACKEND-OWNER DATABASE DECISION REQUIRED
-  BEFORE S15 FINAL CLOSURE. The current Sale payment model requires a Money Account and
-  Money Movement and cannot safely represent Customer Credit as a non-money tender.
-  S15.4 does not fake this capability. The minimum future physical work is a typed,
-  lineage-preserving non-money Sale tender/effect integrated into the existing S14 Sale
-  posting authority.
-- **Still not implemented:** Customer Payment/Credit/Settlement immutable corrections and
-  the approved Customer Credit tender for a new Sale.
+- **S15.4A delivered:** Customer Credit may fund a new Sale through the typed, non-money
+  `sale_customer_credit_applications` tender relation and exact immutable Customer-ledger
+  Credit-use lineage. The existing S14 Sale authority supports Money + Credit + Receivable
+  combinations, locked Credit availability, reads, idempotency, rollback, concurrency,
+  and whole-Sale correction that restores Credit exactly once. The Credit portion creates
+  no Money Movement; `sale_payments` remains Money-only. Migration `0015` is the sole
+  physical delta, PostgreSQL is at 15 applied / 0 pending, the historical PostgreSQL
+  reference is unchanged, and SQLite parity remains deferred to S19.
+- **Still not implemented:** General Customer Payment/Credit/Settlement immutable
+  corrections owned by S15.5.
 - **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
 - **Closure intent:** Replay-safe receivable settlement with auditable balances.
 
@@ -784,10 +787,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.4 are
-closed, and S15 remains open with S15.5 next and not started. A bounded Station-local
-database decision remains required for Customer Credit as a non-money Sale tender before
-S15 final closure.
+No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.4 CORE
+are complete, S15.4A is closed, and S15 remains open with S15.5 next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -816,8 +817,8 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S14 - Sales Posting and Receivables        |
-| S15.4 starting checkpoint           | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
-| Safe completed capabilities         | S0-S14; S15.1-S15.4                        |
+| S15.4A starting checkpoint          | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
+| Safe completed capabilities         | S0-S14; S15.1-S15.4A                       |
 | First incomplete release dependency | S15 - Customer Collections and Settlement  |
 | Next candidate                      | S15.5 - NEXT / NOT STARTED                 |
 | S14 current status                  | CLOSED                                     |

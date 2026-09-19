@@ -31,6 +31,15 @@ export interface PostedSalePayment {
   moneyMovementId: string;
 }
 
+export interface PostedSaleCustomerCreditTender {
+  id: string;
+  customerId: string;
+  amountMinor: string;
+  customerLedgerEntryId: string;
+  appliedAt: string;
+  createdAt: string;
+}
+
 export interface PostedCustomerReceivable {
   id: string;
   customerId: string;
@@ -71,6 +80,7 @@ export interface SalePostingResponse {
   };
   items: PostedSaleItem[];
   payments: PostedSalePayment[];
+  customerCreditTender: PostedSaleCustomerCreditTender | null;
   receivable: PostedCustomerReceivable | null;
 }
 
@@ -89,6 +99,7 @@ export type SalePostingFailureCode =
   | 'ACCOUNTING_PERIOD_INTEGRITY_CONFLICT'
   | 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE'
   | 'CUSTOMER_CREDIT_LIMIT_EXCEEDED'
+  | 'CUSTOMER_CREDIT_INSUFFICIENT'
   | 'CUSTOMER_NOT_FOUND'
   | 'CUSTOMER_UNAVAILABLE'
   | 'MONEY_ACCOUNT_NOT_FOUND'

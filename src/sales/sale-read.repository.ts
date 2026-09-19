@@ -15,6 +15,7 @@ import type {
   CustomerReceivablePosition,
   CustomerReceivableRow,
   SaleDetailRow,
+  SaleCustomerCreditTenderReadRow,
   SaleItemReadRow,
   SaleListCriteria,
   SaleReadCustomerRow,
@@ -34,6 +35,8 @@ interface SaleSummaryPhysicalRow extends Record<string, unknown> {
   displayNumber: string;
   occurredAt: string;
   totalMinor: string;
+  moneyPaidTotalMinor: string;
+  customerCreditUsedMinor: string;
   paidTotalMinor: string;
   creditTotalMinor: string;
   receivableOutstandingMinor: string;
@@ -99,6 +102,15 @@ interface SaleTenderPhysicalRow extends Record<string, unknown> {
   version: string;
 }
 
+interface SaleCustomerCreditTenderPhysicalRow extends Record<string, unknown> {
+  id: string;
+  customerId: string;
+  amountMinor: string;
+  customerLedgerEntryId: string;
+  appliedAt: string;
+  createdAt: string;
+}
+
 interface CustomerReceivablePhysicalRow extends Record<string, unknown> {
   id: string;
   customerId: string;
@@ -159,6 +171,14 @@ export class SaleReadRepository {
           s.display_number as "displayNumber",
           s.sale_at as "occurredAt",
           s.total_minor::text as "totalMinor",
+          coalesce((select sum(payment.amount_minor)
+            from ledger.sale_payments payment
+            where payment.store_id=s.store_id and payment.sale_id=s.id),0)::text
+            as "moneyPaidTotalMinor",
+          coalesce((select application.amount_minor
+            from ledger.sale_customer_credit_applications application
+            where application.store_id=s.store_id and application.sale_id=s.id),0)::text
+            as "customerCreditUsedMinor",
           s.paid_total_minor::text as "paidTotalMinor",
           s.credit_total_minor::text as "creditTotalMinor",
           coalesce(outstanding.outstanding_minor, 0)::text as "receivableOutstandingMinor",
@@ -200,6 +220,14 @@ export class SaleReadRepository {
           s.invoice_discount_minor::text as "invoiceDiscountMinor",
           s.rounding_minor::text as "roundingMinor",
           s.total_minor::text as "totalMinor",
+          coalesce((select sum(payment.amount_minor)
+            from ledger.sale_payments payment
+            where payment.store_id=s.store_id and payment.sale_id=s.id),0)::text
+            as "moneyPaidTotalMinor",
+          coalesce((select application.amount_minor
+            from ledger.sale_customer_credit_applications application
+            where application.store_id=s.store_id and application.sale_id=s.id),0)::text
+            as "customerCreditUsedMinor",
           s.paid_total_minor::text as "paidTotalMinor",
           s.credit_total_minor::text as "creditTotalMinor",
           coalesce(outstanding.outstanding_minor, 0)::text as "receivableOutstandingMinor",
@@ -279,6 +307,18 @@ export class SaleReadRepository {
           and payment.sale_id=${saleId}::uuid
         order by payment.money_account_id asc, payment.id asc
       `);
+      const customerCreditTenderResult =
+        await transaction.execute<SaleCustomerCreditTenderPhysicalRow>(sql`
+          select application.id, application.customer_id as "customerId",
+            application.amount_minor::text as "amountMinor",
+            application.customer_ledger_entry_id as "customerLedgerEntryId",
+            application.applied_at as "appliedAt", application.created_at as "createdAt"
+          from ledger.sale_customer_credit_applications application
+          where application.store_id=${context.storeId}::uuid
+            and application.sale_id=${saleId}::uuid
+          order by application.id
+          limit 2
+        `);
       const receivableResult = await transaction.execute<CustomerReceivablePhysicalRow>(sql`
         select
           origin.id,
@@ -307,7 +347,13 @@ export class SaleReadRepository {
         limit 2
       `);
 
-      return this.mapSaleDetail(header, itemResult.rows, tenderResult.rows, receivableResult.rows);
+      return this.mapSaleDetail(
+        header,
+        itemResult.rows,
+        tenderResult.rows,
+        customerCreditTenderResult.rows,
+        receivableResult.rows,
+      );
     });
   }
 
@@ -467,9 +513,19 @@ export class SaleReadRepository {
       throw new Error('Operational Sale has an invalid status or Accounting Period.');
     }
     const customer = this.mapCustomer(row);
+    const moneyPaidTotalMinor = BigInt(row.moneyPaidTotalMinor);
+    const customerCreditUsedMinor = BigInt(row.customerCreditUsedMinor);
+    const paidTotalMinor = BigInt(row.paidTotalMinor);
     const creditTotalMinor = BigInt(row.creditTotalMinor);
     const outstandingMinor = BigInt(row.receivableOutstandingMinor);
-    if (outstandingMinor < 0n || outstandingMinor > creditTotalMinor) {
+    if (
+      moneyPaidTotalMinor < 0n ||
+      customerCreditUsedMinor < 0n ||
+      moneyPaidTotalMinor + customerCreditUsedMinor !== paidTotalMinor ||
+      (customerCreditUsedMinor > 0n && customer === null) ||
+      outstandingMinor < 0n ||
+      outstandingMinor > creditTotalMinor
+    ) {
       throw new Error('Sale receivable outstanding amount is inconsistent.');
     }
     return {
@@ -479,7 +535,9 @@ export class SaleReadRepository {
       displayNumber: row.displayNumber,
       occurredAt: new Date(row.occurredAt),
       totalMinor: BigInt(row.totalMinor),
-      paidTotalMinor: BigInt(row.paidTotalMinor),
+      moneyPaidTotalMinor,
+      customerCreditUsedMinor,
+      paidTotalMinor,
       creditTotalMinor,
       receivableOutstandingMinor: outstandingMinor,
       paymentStatus: row.paymentStatus,
@@ -518,14 +576,29 @@ export class SaleReadRepository {
     header: SaleDetailPhysicalRow,
     items: SaleItemPhysicalRow[],
     tenders: SaleTenderPhysicalRow[],
+    customerCreditTenders: SaleCustomerCreditTenderPhysicalRow[],
     receivables: CustomerReceivablePhysicalRow[],
   ): SaleDetailRow {
     const summary = this.mapSaleSummary(header);
     if (items.length === 0) throw new Error('Operational Sale has no items.');
     if (receivables.length > 1) throw new Error('Sale has multiple receivable origin facts.');
+    if (customerCreditTenders.length > 1) {
+      throw new Error('Sale has multiple Customer Credit tenders.');
+    }
     const receivable = receivables[0] ? this.mapReceivable(receivables[0]) : null;
+    const customerCreditTender = customerCreditTenders[0]
+      ? this.mapCustomerCreditTender(customerCreditTenders[0])
+      : null;
     if (summary.creditTotalMinor > 0n !== (receivable !== null)) {
       throw new Error('Sale receivable origin is inconsistent.');
+    }
+    if (
+      summary.customerCreditUsedMinor > 0n !== (customerCreditTender !== null) ||
+      (customerCreditTender !== null &&
+        (customerCreditTender.amountMinor !== summary.customerCreditUsedMinor ||
+          customerCreditTender.customerId !== summary.customer?.id))
+    ) {
+      throw new Error('Sale Customer Credit tender is inconsistent.');
     }
     return {
       ...summary,
@@ -542,6 +615,7 @@ export class SaleReadRepository {
       cancelledAt: header.cancelledAt === null ? null : new Date(header.cancelledAt),
       items: items.map((item) => this.mapItem(item)),
       tenders: tenders.map((tender) => this.mapTender(tender)),
+      customerCreditTender,
       receivable,
     };
   }
@@ -596,6 +670,23 @@ export class SaleReadRepository {
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt),
       version: BigInt(row.version),
+    };
+  }
+
+  private mapCustomerCreditTender(
+    row: SaleCustomerCreditTenderPhysicalRow,
+  ): SaleCustomerCreditTenderReadRow {
+    const amountMinor = BigInt(row.amountMinor);
+    if (amountMinor <= 0n) {
+      throw new Error('Sale Customer Credit tender amount is inconsistent.');
+    }
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      amountMinor,
+      customerLedgerEntryId: row.customerLedgerEntryId,
+      appliedAt: new Date(row.appliedAt),
+      createdAt: new Date(row.createdAt),
     };
   }
 

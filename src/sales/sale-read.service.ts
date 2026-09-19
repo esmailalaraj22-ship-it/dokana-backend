@@ -29,6 +29,8 @@ import type {
   CustomerReceivableRow,
   SaleDetailResponse,
   SaleDetailRow,
+  SaleCustomerCreditTenderReadResponse,
+  SaleCustomerCreditTenderReadRow,
   SaleItemReadResponse,
   SaleItemReadRow,
   SaleListResponse,
@@ -172,6 +174,9 @@ export class SaleReadService {
       },
       items: row.items.map((item) => this.mapItem(item)),
       tenders: row.tenders.map((tender) => this.mapTender(tender)),
+      customerCreditTender: row.customerCreditTender
+        ? this.mapCustomerCreditTender(row.customerCreditTender)
+        : null,
       receivable: row.receivable ? this.mapReceivable(row.receivable) : null,
     };
   }
@@ -190,6 +195,8 @@ export class SaleReadService {
       status: row.status,
       paymentStatus: row.paymentStatus,
       totalMinor: row.totalMinor.toString(),
+      moneyPaidTotalMinor: row.moneyPaidTotalMinor.toString(),
+      customerCreditUsedMinor: row.customerCreditUsedMinor.toString(),
       paidTotalMinor: row.paidTotalMinor.toString(),
       receivableOriginatedMinor: row.creditTotalMinor.toString(),
       receivableOutstandingMinor: row.receivableOutstandingMinor.toString(),
@@ -254,6 +261,19 @@ export class SaleReadService {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       version: row.version.toString(),
+    };
+  }
+
+  private mapCustomerCreditTender(
+    row: SaleCustomerCreditTenderReadRow,
+  ): SaleCustomerCreditTenderReadResponse {
+    return {
+      id: row.id,
+      customerId: row.customerId,
+      amountMinor: row.amountMinor.toString(),
+      customerLedgerEntryId: row.customerLedgerEntryId,
+      appliedAt: row.appliedAt.toISOString(),
+      createdAt: row.createdAt.toISOString(),
     };
   }
 

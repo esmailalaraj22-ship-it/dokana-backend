@@ -16,6 +16,7 @@ import {
   moneyMovements,
   products,
   productUnits,
+  saleCustomerCreditApplications,
   saleItems,
   salePayments,
   sales,
@@ -49,6 +50,7 @@ type SalePaymentRow = typeof salePayments.$inferSelect;
 type MoneyMovementRow = typeof moneyMovements.$inferSelect;
 type InventoryMovementRow = typeof inventoryMovements.$inferSelect;
 type CustomerLedgerEntryRow = typeof customerLedgerEntries.$inferSelect;
+type SaleCustomerCreditApplicationRow = typeof saleCustomerCreditApplications.$inferSelect;
 
 interface ProcessedOperationRow extends Record<string, unknown> {
   deviceId: string;
@@ -74,6 +76,8 @@ interface SaleCorrectionTarget {
   moneyMovements: MoneyMovementRow[];
   inventoryMovements: InventoryMovementRow[];
   receivable: CustomerLedgerEntryRow | null;
+  customerCreditApplication: SaleCustomerCreditApplicationRow | null;
+  customerCreditEffect: CustomerLedgerEntryRow | null;
 }
 
 interface FailureResult {
@@ -125,6 +129,11 @@ const postingFailures: Readonly<Record<SalePostingFailureCode, SaleCorrectionFai
   CUSTOMER_CREDIT_LIMIT_EXCEEDED: {
     code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED',
     message: 'Customer credit limit would be exceeded.',
+    statusCode: 409,
+  },
+  CUSTOMER_CREDIT_INSUFFICIENT: {
+    code: 'CUSTOMER_CREDIT_INSUFFICIENT',
+    message: 'Customer Credit is insufficient.',
     statusCode: 409,
   },
   CUSTOMER_NOT_FOUND: {
@@ -278,6 +287,7 @@ export class SaleCorrectionRepository {
     );
     await this.insertMoneyReversals(transaction, context, command, posting, target);
     await this.insertReceivableReversal(transaction, context, command, posting, target);
+    await this.insertCustomerCreditReversal(transaction, context, command, posting, target);
     await this.insertInventoryReversals(transaction, context, command, posting, target);
 
     if (command.kind === 'cancel') {
@@ -453,6 +463,15 @@ export class SaleCorrectionRepository {
       .select()
       .from(salePayments)
       .where(and(eq(salePayments.storeId, storeId), eq(salePayments.saleId, sale.id)));
+    const customerCreditApplications = await transaction
+      .select()
+      .from(saleCustomerCreditApplications)
+      .where(
+        and(
+          eq(saleCustomerCreditApplications.storeId, storeId),
+          eq(saleCustomerCreditApplications.saleId, sale.id),
+        ),
+      );
     const customerEntries = await transaction
       .select()
       .from(customerLedgerEntries)
@@ -485,12 +504,31 @@ export class SaleCorrectionRepository {
               and(eq(moneyMovements.storeId, storeId), inArray(moneyMovements.id, movementIds)),
             );
 
-    this.validateSaleFacts(sale, items, payments);
+    this.validateSaleFacts(sale, items, payments, customerCreditApplications);
     this.validateMoneyFacts(sale, payments, moneyFacts);
     this.validateInventoryFacts(sale, items, inventoryFacts);
     const receivable = this.validateReceivableFacts(sale, customerEntries);
-    await this.assertNoDependentFacts(transaction, storeId, sale.id, customerEntries, receivable);
-    await this.assertNoPriorReversals(transaction, storeId, moneyFacts, inventoryFacts, receivable);
+    const customerCredit = this.validateCustomerCreditFacts(
+      sale,
+      customerCreditApplications,
+      customerEntries,
+    );
+    await this.assertNoDependentFacts(
+      transaction,
+      storeId,
+      sale.id,
+      customerEntries,
+      receivable,
+      customerCredit.effect,
+    );
+    await this.assertNoPriorReversals(
+      transaction,
+      storeId,
+      moneyFacts,
+      inventoryFacts,
+      receivable,
+      customerCredit.effect,
+    );
     return {
       sale,
       items,
@@ -498,15 +536,24 @@ export class SaleCorrectionRepository {
       moneyMovements: moneyFacts,
       inventoryMovements: inventoryFacts,
       receivable,
+      customerCreditApplication: customerCredit.application,
+      customerCreditEffect: customerCredit.effect,
     };
   }
 
-  private validateSaleFacts(sale: SaleRow, items: SaleItemRow[], payments: SalePaymentRow[]): void {
+  private validateSaleFacts(
+    sale: SaleRow,
+    items: SaleItemRow[],
+    payments: SalePaymentRow[],
+    customerCreditApplications: SaleCustomerCreditApplicationRow[],
+  ): void {
     if (items.length === 0) reject('SALE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     const subtotal = items.reduce((sum, item) => sum + item.lineGrossMinor, 0n);
     const lineDiscounts = items.reduce((sum, item) => sum + item.lineDiscountMinor, 0n);
     const lineTotals = items.reduce((sum, item) => sum + item.lineTotalMinor, 0n);
-    const paid = payments.reduce((sum, payment) => sum + payment.amountMinor, 0n);
+    const paid =
+      payments.reduce((sum, payment) => sum + payment.amountMinor, 0n) +
+      customerCreditApplications.reduce((sum, application) => sum + application.amountMinor, 0n);
     const knownCost = items.reduce(
       (sum, item) => sum + (item.costStatus === 'known' ? (item.lineCostMinor ?? 0n) : 0n),
       0n,
@@ -633,14 +680,59 @@ export class SaleCorrectionRepository {
     return origin;
   }
 
+  private validateCustomerCreditFacts(
+    sale: SaleRow,
+    applications: SaleCustomerCreditApplicationRow[],
+    entries: CustomerLedgerEntryRow[],
+  ): {
+    application: SaleCustomerCreditApplicationRow | null;
+    effect: CustomerLedgerEntryRow | null;
+  } {
+    if (applications.length === 0) return { application: null, effect: null };
+    const application = applications[0];
+    if (!application || applications.length !== 1 || sale.customerId === null) {
+      reject('SALE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
+    }
+    const effects = entries.filter((entry) => entry.id === application.customerLedgerEntryId);
+    const effect = effects[0];
+    if (
+      effects.length !== 1 ||
+      !effect ||
+      application.customerId !== sale.customerId ||
+      application.amountMinor <= 0n ||
+      application.appliedAt.getTime() !== sale.saleAt.getTime() ||
+      effect.customerId !== application.customerId ||
+      effect.accountingPeriodId !== sale.accountingPeriodId ||
+      effect.entryType !== 'credit_used' ||
+      effect.receivableDeltaMinor !== 0n ||
+      effect.creditDeltaMinor !== -application.amountMinor ||
+      effect.sourceSaleId !== sale.id ||
+      effect.referenceType !== 'sale' ||
+      effect.referenceId !== sale.id ||
+      effect.transactionGroupId !== deriveTransactionGroupId(sale.operationId) ||
+      effect.occurredAt.getTime() !== sale.saleAt.getTime() ||
+      effect.deviceId !== sale.deviceId ||
+      effect.reversalOfId !== null
+    ) {
+      reject('SALE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
+    }
+    return { application, effect };
+  }
+
   private async assertNoDependentFacts(
     transaction: DatabaseTransaction,
     storeId: string,
     saleId: string,
     customerEntries: CustomerLedgerEntryRow[],
     receivable: CustomerLedgerEntryRow | null,
+    customerCreditEffect: CustomerLedgerEntryRow | null,
   ): Promise<void> {
-    if (customerEntries.some((entry) => entry.id !== receivable?.id)) {
+    const ownedEntryIds = new Set(
+      [receivable?.id, customerCreditEffect?.id].filter(
+        (id): id is string => typeof id === 'string',
+      ),
+    );
+    if (customerEntries.some((entry) => !ownedEntryIds.has(entry.id))) {
       reject('SALE_CORRECTION_DEPENDENT_FACTS');
     }
     const result = await transaction.execute<{ dependent: boolean }>(sql`
@@ -661,6 +753,7 @@ export class SaleCorrectionRepository {
     moneyFacts: MoneyMovementRow[],
     inventoryFacts: InventoryMovementRow[],
     receivable: CustomerLedgerEntryRow | null,
+    customerCreditEffect: CustomerLedgerEntryRow | null,
   ): Promise<void> {
     const moneyIds = moneyFacts.map((fact) => fact.id);
     const inventoryIds = inventoryFacts.map((fact) => fact.id);
@@ -702,7 +795,24 @@ export class SaleCorrectionRepository {
           )
           .limit(1)
       : [];
-    if (priorMoney.length || priorInventory.length || priorReceivable.length) {
+    const priorCustomerCredit = customerCreditEffect
+      ? await transaction
+          .select({ id: customerLedgerEntries.id })
+          .from(customerLedgerEntries)
+          .where(
+            and(
+              eq(customerLedgerEntries.storeId, storeId),
+              eq(customerLedgerEntries.reversalOfId, customerCreditEffect.id),
+            ),
+          )
+          .limit(1)
+      : [];
+    if (
+      priorMoney.length ||
+      priorInventory.length ||
+      priorReceivable.length ||
+      priorCustomerCredit.length
+    ) {
       reject('SALE_CORRECTION_TARGET_NOT_ACTIVE');
     }
   }
@@ -860,6 +970,36 @@ export class SaleCorrectionRepository {
       reason: `Sale ${command.kind}`,
       deviceId: context.deviceId,
       operationId: deriveMoneyFactOperationId(command.operationId, 'sale-receivable-reversal'),
+    });
+  }
+
+  private async insertCustomerCreditReversal(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: SaleCorrectionCommand,
+    posting: AccountingPeriodPostingContext,
+    target: SaleCorrectionTarget,
+  ): Promise<void> {
+    const effect = target.customerCreditEffect;
+    if (!effect) return;
+    const discriminator = `sale-customer-credit-reversal:${effect.id}`;
+    await transaction.insert(customerLedgerEntries).values({
+      id: deriveMoneyFactId(command.operationId, discriminator),
+      storeId: context.storeId,
+      customerId: effect.customerId,
+      accountingPeriodId: posting.accountingPeriodId,
+      entryType: 'correction',
+      receivableDeltaMinor: 0n,
+      creditDeltaMinor: -effect.creditDeltaMinor,
+      sourceSaleId: target.sale.id,
+      referenceType: 'sale_correction',
+      referenceId: target.sale.id,
+      transactionGroupId: deriveTransactionGroupId(command.operationId),
+      occurredAt: command.occurredAt,
+      reversalOfId: effect.id,
+      reason: `Sale ${command.kind}`,
+      deviceId: context.deviceId,
+      operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
     });
   }
 

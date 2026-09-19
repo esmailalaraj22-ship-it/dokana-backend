@@ -16,6 +16,7 @@ import { DATABASE_POOL } from '../src/database/database.constants';
 import {
   deriveMoneyFactId,
   deriveMoneyFactOperationId,
+  deriveTransactionGroupId,
 } from '../src/money-movements/money-movement-identity';
 import type {
   CustomerCreditHistoryResponse,
@@ -41,7 +42,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0014_customer_receivable_allocation_targets.sql';
+const migrationFilename = '0015_sale_customer_credit_tender.sql';
 
 interface Identity {
   storeId: string;
@@ -233,6 +234,61 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
       })
       .expect(201);
     return response.body as SalePostingResponse;
+  }
+
+  function customerCreditSaleRequest(input: {
+    customerId?: string;
+    totalMinor: string;
+    customerCreditAmountMinor?: string;
+    payments?: { moneyAccountId: string; amountMinor: string }[];
+    operationId?: string;
+  }): Record<string, unknown> {
+    return {
+      operationId: input.operationId ?? randomUUID(),
+      customerId: input.customerId,
+      occurredAt: '2026-09-15T13:00:00Z',
+      items: [
+        {
+          isManualLine: true,
+          description: 'Customer Credit Sale tender fixture',
+          unitName: 'service',
+          quantityMilli: '1000',
+          unitPriceMinor: input.totalMinor,
+          lineTotalMinor: input.totalMinor,
+        },
+      ],
+      payments: input.payments ?? [],
+      totalMinor: input.totalMinor,
+      ...(input.customerCreditAmountMinor === undefined
+        ? {}
+        : { customerCreditAmountMinor: input.customerCreditAmountMinor }),
+    };
+  }
+
+  function postSale(body: Record<string, unknown>, identity: Identity = owner): request.Test {
+    return request(server)
+      .post('/v1/sales')
+      .set('authorization', `Bearer ${identity.token}`)
+      .send(body);
+  }
+
+  async function createCustomerCredit(
+    customerId: string,
+    accountId: string,
+    amountMinor: string,
+    identity: Identity = owner,
+  ): Promise<CustomerCollectionPostingResponse> {
+    const response = await postCollection(
+      customerId,
+      {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T11:00:00Z',
+        intent: 'customer_advance',
+        tenders: [{ moneyAccountId: accountId, amountMinor }],
+      },
+      identity,
+    ).expect(201);
+    return response.body as CustomerCollectionPostingResponse;
   }
 
   function fifoRequest(
@@ -1383,6 +1439,444 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
       [owner.storeId, overpaymentCustomer],
     );
     expect(overpaymentBalance.rows[0]).toEqual({ credit: '50' });
+  });
+
+  it('posts Customer Credit as a non-Money Sale tender across the approved settlement combinations and reads', async () => {
+    const account = await createAccount();
+    const fullCustomer = await createCustomer();
+    const cashCreditCustomer = await createCustomer();
+    const creditDebtCustomer = await createCustomer();
+    const mixedCustomer = await createCustomer();
+    await Promise.all([
+      createCustomerCredit(fullCustomer, account, '300'),
+      createCustomerCredit(cashCreditCustomer, account, '100'),
+      createCustomerCredit(creditDebtCustomer, account, '100'),
+      createCustomerCredit(mixedCustomer, account, '100'),
+    ]);
+
+    const fullCommand = customerCreditSaleRequest({
+      customerId: fullCustomer,
+      totalMinor: '300',
+      customerCreditAmountMinor: '300',
+    });
+    const full = (await postSale(fullCommand).expect(201)).body as SalePostingResponse;
+    const cashCredit = (
+      await postSale(
+        customerCreditSaleRequest({
+          customerId: cashCreditCustomer,
+          totalMinor: '300',
+          customerCreditAmountMinor: '100',
+          payments: [{ moneyAccountId: account, amountMinor: '200' }],
+        }),
+      ).expect(201)
+    ).body as SalePostingResponse;
+    const creditDebt = (
+      await postSale(
+        customerCreditSaleRequest({
+          customerId: creditDebtCustomer,
+          totalMinor: '300',
+          customerCreditAmountMinor: '100',
+        }),
+      ).expect(201)
+    ).body as SalePostingResponse;
+    const mixed = (
+      await postSale(
+        customerCreditSaleRequest({
+          customerId: mixedCustomer,
+          totalMinor: '300',
+          customerCreditAmountMinor: '100',
+          payments: [{ moneyAccountId: account, amountMinor: '100' }],
+        }),
+      ).expect(201)
+    ).body as SalePostingResponse;
+    const moneyOnly = (
+      await postSale(
+        customerCreditSaleRequest({
+          totalMinor: '300',
+          payments: [{ moneyAccountId: account, amountMinor: '300' }],
+        }),
+      ).expect(201)
+    ).body as SalePostingResponse;
+
+    expect(full).toMatchObject({
+      sale: {
+        totalMinor: '300',
+        paidTotalMinor: '300',
+        creditTotalMinor: '0',
+        paymentStatus: 'paid',
+      },
+      payments: [],
+      customerCreditTender: { customerId: fullCustomer, amountMinor: '300' },
+      receivable: null,
+    });
+    expect(cashCredit).toMatchObject({
+      sale: { paidTotalMinor: '300', creditTotalMinor: '0', paymentStatus: 'paid' },
+      payments: [expect.objectContaining({ amountMinor: '200' })],
+      customerCreditTender: { customerId: cashCreditCustomer, amountMinor: '100' },
+      receivable: null,
+    });
+    expect(creditDebt).toMatchObject({
+      sale: { paidTotalMinor: '100', creditTotalMinor: '200', paymentStatus: 'partial' },
+      payments: [],
+      customerCreditTender: { customerId: creditDebtCustomer, amountMinor: '100' },
+    });
+    expect(creditDebt.receivable).toMatchObject({ receivableDeltaMinor: '200' });
+    expect(mixed).toMatchObject({
+      sale: { paidTotalMinor: '200', creditTotalMinor: '100', paymentStatus: 'partial' },
+      payments: [expect.objectContaining({ amountMinor: '100' })],
+      customerCreditTender: { customerId: mixedCustomer, amountMinor: '100' },
+    });
+    expect(mixed.receivable).toMatchObject({ receivableDeltaMinor: '100' });
+    expect(moneyOnly).toMatchObject({
+      payments: [expect.objectContaining({ amountMinor: '300' })],
+      customerCreditTender: null,
+      receivable: null,
+    });
+
+    const fullGroupId = deriveTransactionGroupId(fullCommand.operationId as string);
+    const fullFacts = (
+      await db().admin.query<{
+        moneyCount: number;
+        moneyAmount: string;
+        receivable: string;
+        credit: string;
+        inventoryCount: number;
+      }>(
+        `select
+          (select count(*)::int from ledger.money_movements
+             where store_id=$1 and transaction_group_id=$2) as "moneyCount",
+          (select coalesce(sum(amount_delta_minor),0)::text from ledger.money_movements
+             where store_id=$1 and transaction_group_id=$2) as "moneyAmount",
+          (select coalesce(sum(receivable_delta_minor),0)::text from ledger.customer_ledger_entries
+             where store_id=$1 and transaction_group_id=$2) as receivable,
+          (select coalesce(sum(credit_delta_minor),0)::text from ledger.customer_ledger_entries
+             where store_id=$1 and transaction_group_id=$2) as credit,
+          (select count(*)::int from ledger.inventory_movements
+             where store_id=$1 and transaction_group_id=$2) as "inventoryCount"`,
+        [owner.storeId, fullGroupId],
+      )
+    ).rows[0];
+    expect(fullFacts).toEqual({
+      moneyCount: 0,
+      moneyAmount: '0',
+      receivable: '0',
+      credit: '-300',
+      inventoryCount: 0,
+    });
+
+    const detail = (
+      await request(server)
+        .get(`/v1/sales/${mixed.sale.id}`)
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(200)
+    ).body as SaleDetailResponse;
+    expect(detail).toMatchObject({
+      sale: {
+        moneyPaidTotalMinor: '100',
+        customerCreditUsedMinor: '100',
+        paidTotalMinor: '200',
+        receivableOriginatedMinor: '100',
+      },
+      tenders: [expect.objectContaining({ amountMinor: '100' })],
+    });
+    expect(detail.customerCreditTender).toMatchObject({ amountMinor: '100' });
+    expect(detail.receivable).toMatchObject({ originalAmountMinor: '100' });
+    const list = (
+      await request(server)
+        .get('/v1/sales?limit=100')
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(200)
+    ).body as { items: SaleDetailResponse['sale'][] };
+    expect(list.items.find((item) => item.id === full.sale.id)).toMatchObject({
+      moneyPaidTotalMinor: '0',
+      customerCreditUsedMinor: '300',
+      paidTotalMinor: '300',
+      receivableOriginatedMinor: '0',
+    });
+    const history = (
+      await request(server)
+        .get(`/v1/customers/${fullCustomer}/credit-history`)
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(200)
+    ).body as CustomerCreditHistoryResponse;
+    expect(history.creditBalanceMinor).toBe('0');
+    expect(history.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entryType: 'credit_used',
+          creditDeltaMinor: '-300',
+          targetType: 'sale_tender',
+          targetId: full.sale.id,
+          moneyAccount: null,
+        }),
+      ]),
+    );
+  });
+
+  it('rejects invalid Sale Credit tenders, preserves exact replay, bigint, and atomic rollback', async () => {
+    const account = await createAccount();
+    const customerId = await createCustomer();
+    await createCustomerCredit(customerId, account, '100');
+    await postSale(
+      customerCreditSaleRequest({
+        customerId,
+        totalMinor: '101',
+        customerCreditAmountMinor: '101',
+      }),
+    )
+      .expect(409)
+      .expect(expectResponseCode('CUSTOMER_CREDIT_INSUFFICIENT'));
+
+    const zeroCreditCustomer = await createCustomer();
+    await postSale(
+      customerCreditSaleRequest({
+        customerId: zeroCreditCustomer,
+        totalMinor: '1',
+        customerCreditAmountMinor: '1',
+      }),
+    )
+      .expect(409)
+      .expect(expectResponseCode('CUSTOMER_CREDIT_INSUFFICIENT'));
+    await postSale(
+      customerCreditSaleRequest({ totalMinor: '1', customerCreditAmountMinor: '1' }),
+    ).expect(400);
+
+    const archivedCustomer = await createCustomer();
+    await createCustomerCredit(archivedCustomer, account, '1');
+    await db().admin.query(
+      `update ledger.customers set status='archived',archived_at=clock_timestamp() where id=$1`,
+      [archivedCustomer],
+    );
+    await postSale(
+      customerCreditSaleRequest({
+        customerId: archivedCustomer,
+        totalMinor: '1',
+        customerCreditAmountMinor: '1',
+      }),
+    )
+      .expect(409)
+      .expect(expectResponseCode('CUSTOMER_UNAVAILABLE'));
+
+    const foreignCustomer = await createCustomer(foreignOwner);
+    const foreignAccount = await createAccount(foreignOwner);
+    await createCustomerCredit(foreignCustomer, foreignAccount, '1', foreignOwner);
+    await postSale(
+      customerCreditSaleRequest({
+        customerId: foreignCustomer,
+        totalMinor: '1',
+        customerCreditAmountMinor: '1',
+      }),
+    )
+      .expect(404)
+      .expect(expectResponseCode('CUSTOMER_NOT_FOUND'));
+
+    const replayCustomer = await createCustomer();
+    await createCustomerCredit(replayCustomer, account, '100');
+    const replayCommand = customerCreditSaleRequest({
+      customerId: replayCustomer,
+      totalMinor: '100',
+      customerCreditAmountMinor: '100',
+      operationId: randomUUID(),
+    });
+    const first = await postSale(replayCommand).expect(201);
+    const replay = await postSale(replayCommand).expect(201);
+    expect(replay.body).toEqual(first.body);
+    await postSale({
+      ...replayCommand,
+      payments: [{ moneyAccountId: account, amountMinor: '1' }],
+      customerCreditAmountMinor: '99',
+    })
+      .expect(409)
+      .expect(expectResponseCode('OPERATION_ID_CONFLICT'));
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count from ledger.sale_customer_credit_applications
+           where store_id=$1 and sale_id=$2`,
+          [owner.storeId, (first.body as SalePostingResponse).sale.id],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+
+    const largeCustomer = await createCustomer();
+    const largeAmount = '9007199254740993';
+    await createCustomerCredit(largeCustomer, account, largeAmount);
+    const large = (
+      await postSale(
+        customerCreditSaleRequest({
+          customerId: largeCustomer,
+          totalMinor: largeAmount,
+          customerCreditAmountMinor: largeAmount,
+        }),
+      ).expect(201)
+    ).body as SalePostingResponse;
+    expect(large.customerCreditTender?.amountMinor).toBe(largeAmount);
+
+    const rollbackCustomer = await createCustomer();
+    const advance = await createCustomerCredit(rollbackCustomer, account, '100');
+    const rollbackOperationId = randomUUID();
+    const collidingId = deriveMoneyFactId(rollbackOperationId, 'sale-customer-credit-ledger');
+    await db().admin.query(
+      `insert into ledger.customer_ledger_entries(
+         id,store_id,customer_id,accounting_period_id,entry_type,
+         receivable_delta_minor,credit_delta_minor,reference_type,reference_id,
+         transaction_group_id,occurred_at,device_id,operation_id
+       ) values($1,$2,$3,$4,'credit_created',0,1,'fixture',$5,$5,$6,$7,$8)`,
+      [
+        collidingId,
+        owner.storeId,
+        rollbackCustomer,
+        advance.accountingPeriodId,
+        randomUUID(),
+        '2026-09-15T12:00:00Z',
+        owner.deviceId,
+        randomUUID(),
+      ],
+    );
+    const rollbackSaleId = deriveMoneyFactId(rollbackOperationId, 'sale');
+    await postSale(
+      customerCreditSaleRequest({
+        customerId: rollbackCustomer,
+        totalMinor: '100',
+        customerCreditAmountMinor: '100',
+        operationId: rollbackOperationId,
+      }),
+    ).expect(500);
+    const rollbackResidue = (
+      await db().admin.query<{ sales: number; relations: number; operations: number }>(
+        `select
+          (select count(*)::int from ledger.sales where store_id=$1 and id=$2) as sales,
+          (select count(*)::int from ledger.sale_customer_credit_applications
+             where store_id=$1 and sale_id=$2) as relations,
+          (select count(*)::int from sync.processed_operations
+             where store_id=$1 and operation_id=$3) as operations`,
+        [owner.storeId, rollbackSaleId, rollbackOperationId],
+      )
+    ).rows[0];
+    expect(rollbackResidue).toEqual({ sales: 0, relations: 0, operations: 0 });
+  });
+
+  it('serializes Sale Credit consumption against Sales, refunds, allocations, and Money lock order', async () => {
+    const accountA = await createAccount();
+    const accountB = await createAccount();
+
+    const saleRaceCustomer = await createCustomer();
+    await createCustomerCredit(saleRaceCustomer, accountA, '100');
+    const saleRace = await Promise.all([
+      postSale(
+        customerCreditSaleRequest({
+          customerId: saleRaceCustomer,
+          totalMinor: '100',
+          customerCreditAmountMinor: '100',
+        }),
+      ),
+      postSale(
+        customerCreditSaleRequest({
+          customerId: saleRaceCustomer,
+          totalMinor: '100',
+          customerCreditAmountMinor: '100',
+        }),
+      ),
+    ]);
+    expect(saleRace.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    const refundRaceCustomer = await createCustomer();
+    await createCustomerCredit(refundRaceCustomer, accountA, '100');
+    const refundRace = await Promise.all([
+      postSale(
+        customerCreditSaleRequest({
+          customerId: refundRaceCustomer,
+          totalMinor: '100',
+          customerCreditAmountMinor: '100',
+        }),
+      ),
+      postCustomerFinancial(refundRaceCustomer, 'credit/refunds', {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T13:00:00Z',
+        amountMinor: '100',
+        moneyAccountId: accountA,
+      }),
+    ]);
+    expect(refundRace.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    const allocationRaceCustomer = await createCustomer();
+    const opening = await postOpening(allocationRaceCustomer, '100', '2026-09-15T10:00:00Z');
+    await createCustomerCredit(allocationRaceCustomer, accountA, '100');
+    const allocationRace = await Promise.all([
+      postSale(
+        customerCreditSaleRequest({
+          customerId: allocationRaceCustomer,
+          totalMinor: '100',
+          customerCreditAmountMinor: '100',
+        }),
+      ),
+      postCustomerFinancial(
+        allocationRaceCustomer,
+        'credit/applications',
+        customerFinancialRequest('100', {
+          allocationMode: 'custom',
+          allocations: [
+            {
+              targetType: 'opening_receivable',
+              targetId: opening.receivable.id,
+              amountMinor: '100',
+            },
+          ],
+        }),
+      ),
+    ]);
+    expect(allocationRace.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    const replayCustomer = await createCustomer();
+    await createCustomerCredit(replayCustomer, accountA, '100');
+    const duplicateCommand = customerCreditSaleRequest({
+      customerId: replayCustomer,
+      totalMinor: '100',
+      customerCreditAmountMinor: '100',
+    });
+    const duplicate = await Promise.all([postSale(duplicateCommand), postSale(duplicateCommand)]);
+    expect(duplicate.every((response) => [201, 409].includes(response.status))).toBe(true);
+    expect(duplicate.filter((response) => response.status === 201).length).toBeGreaterThanOrEqual(
+      1,
+    );
+    const duplicateSaleId = deriveMoneyFactId(duplicateCommand.operationId as string, 'sale');
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count from ledger.sale_customer_credit_applications
+           where store_id=$1 and sale_id=$2`,
+          [owner.storeId, duplicateSaleId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+
+    const lockOrderCustomer = await createCustomer();
+    await createCustomerCredit(lockOrderCustomer, accountA, '200');
+    const lockOrder = await Promise.all([
+      postSale(
+        customerCreditSaleRequest({
+          customerId: lockOrderCustomer,
+          totalMinor: '300',
+          customerCreditAmountMinor: '100',
+          payments: [
+            { moneyAccountId: accountB, amountMinor: '100' },
+            { moneyAccountId: accountA, amountMinor: '100' },
+          ],
+        }),
+      ),
+      postSale(
+        customerCreditSaleRequest({
+          customerId: lockOrderCustomer,
+          totalMinor: '300',
+          customerCreditAmountMinor: '100',
+          payments: [
+            { moneyAccountId: accountA, amountMinor: '100' },
+            { moneyAccountId: accountB, amountMinor: '100' },
+          ],
+        }),
+      ),
+    ]);
+    expect(lockOrder.map((response) => response.status)).toEqual([201, 201]);
   });
 
   it('rolls back Customer Credit refund facts and operation claim after a child movement failure', async () => {

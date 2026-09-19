@@ -61,7 +61,7 @@ export interface CustomerCreditHistoryEntryResponse {
   entryType: 'credit_created' | 'credit_used' | 'refund' | 'settlement';
   receivableDeltaMinor: string;
   creditDeltaMinor: string;
-  targetType: CustomerReceivableTargetType | null;
+  targetType: CustomerReceivableTargetType | 'sale_tender' | null;
   targetId: string | null;
   moneyAccount: {
     id: string;

@@ -26,7 +26,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0014_customer_receivable_allocation_targets.sql';
+const migrationFilename = '0015_sale_customer_credit_tender.sql';
 
 interface Identity {
   storeId: string;

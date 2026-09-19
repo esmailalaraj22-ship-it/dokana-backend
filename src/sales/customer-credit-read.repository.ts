@@ -27,6 +27,7 @@ export interface CustomerCreditHistoryRow extends Record<string, unknown> {
   createdAt: string;
   moneyAccountId: string | null;
   moneyAccountName: string | null;
+  saleCreditApplicationId: string | null;
 }
 
 @Injectable()
@@ -88,7 +89,8 @@ export class CustomerCreditReadRepository {
           entry.source_sale_id as "sourceSaleId", entry.reference_type as "referenceType",
           entry.reference_id as "referenceId", entry.reason,
           entry.occurred_at as "occurredAt", entry.created_at as "createdAt",
-          movement.account_id as "moneyAccountId", account.name as "moneyAccountName"
+          movement.account_id as "moneyAccountId", account.name as "moneyAccountName",
+          sale_credit.id as "saleCreditApplicationId"
         from ledger.customer_ledger_entries entry
         left join ledger.money_movements movement
           on movement.store_id=entry.store_id and movement.movement_type='customer_refund'
@@ -96,6 +98,9 @@ export class CustomerCreditReadRepository {
           and movement.reference_id=entry.id
         left join ledger.money_accounts account
           on account.store_id=movement.store_id and account.id=movement.account_id
+        left join ledger.sale_customer_credit_applications sale_credit
+          on sale_credit.store_id=entry.store_id
+          and sale_credit.customer_ledger_entry_id=entry.id
         where entry.store_id=${context.storeId}::uuid and entry.customer_id=${customerId}::uuid
           and entry.entry_type in ('credit_created','credit_used','refund','settlement')
           ${continuation}

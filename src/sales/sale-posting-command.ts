@@ -86,6 +86,7 @@ const saleRequest = z
     totalMinor: nonnegativeMoney.optional(),
     items: z.array(saleLine).min(1).max(SALE_POSTING_MAX_ITEMS),
     payments: z.array(payment).max(SALE_POSTING_MAX_PAYMENTS).optional(),
+    customerCreditAmountMinor: positiveMoney.optional(),
   })
   .strict();
 
@@ -138,6 +139,8 @@ export interface SalePostingCommand {
   invoiceDiscountMinor: bigint;
   roundingMinor: bigint;
   totalMinor: bigint;
+  moneyPaidTotalMinor: bigint;
+  customerCreditAmountMinor: bigint;
   paidTotalMinor: bigint;
   creditTotalMinor: bigint;
   paymentStatus: 'paid' | 'partial' | 'credit';
@@ -224,11 +227,15 @@ export function parseSalePostingCommand(body: unknown): SalePostingCommand {
   if (new Set(payments.map((item) => item.moneyAccountId)).size !== payments.length) {
     throw validationError();
   }
-  const paidTotalMinor = sumMoney(payments.map((item) => item.amountMinor));
+  const moneyPaidTotalMinor = sumMoney(payments.map((item) => item.amountMinor));
+  const customerCreditAmountMinor = BigInt(parsed.data.customerCreditAmountMinor ?? '0');
+  const paidTotalMinor = sumMoney([moneyPaidTotalMinor, customerCreditAmountMinor]);
   if (paidTotalMinor > totalMinor) throw validationError();
   const creditTotalMinor = totalMinor - paidTotalMinor;
   const customerId = parsed.data.customerId ?? null;
-  if (creditTotalMinor > 0n && customerId === null) throw validationError();
+  if ((creditTotalMinor > 0n || customerCreditAmountMinor > 0n) && customerId === null) {
+    throw validationError();
+  }
   const paymentStatus =
     creditTotalMinor === 0n ? 'paid' : paidTotalMinor === 0n ? 'credit' : 'partial';
   const notes = parsed.data.notes ?? null;
@@ -243,6 +250,8 @@ export function parseSalePostingCommand(body: unknown): SalePostingCommand {
     invoiceDiscountMinor,
     roundingMinor,
     totalMinor,
+    moneyPaidTotalMinor,
+    customerCreditAmountMinor,
     paidTotalMinor,
     creditTotalMinor,
     paymentStatus,
@@ -283,6 +292,9 @@ export function parseSalePostingCommand(body: unknown): SalePostingCommand {
         senderAccountName: item.senderAccountName,
         externalReference: item.externalReference,
       })),
+      ...(customerCreditAmountMinor > 0n
+        ? { customerCreditAmountMinor: customerCreditAmountMinor.toString() }
+        : {}),
     }),
   };
 }

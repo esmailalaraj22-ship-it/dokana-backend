@@ -23,7 +23,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0012_sales_inventory_validation.sql';
+const migrationFilename = '0015_sale_customer_credit_tender.sql';
 const saleInstant = '2026-08-15T10:00:00Z';
 
 interface Identity {

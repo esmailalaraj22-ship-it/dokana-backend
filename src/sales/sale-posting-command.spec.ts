@@ -65,6 +65,122 @@ describe('Sale posting command', () => {
     });
   });
 
+  it('derives Customer Credit tender combinations without treating Credit as Money', () => {
+    const fullyCreditPaid = parseSalePostingCommand(
+      body({ customerId, payments: [], customerCreditAmountMinor: '501' }),
+    );
+    const cashAndCredit = parseSalePostingCommand(
+      body({
+        customerId,
+        payments: [{ moneyAccountId: accountA, amountMinor: '301' }],
+        customerCreditAmountMinor: '200',
+      }),
+    );
+    const creditAndReceivable = parseSalePostingCommand(
+      body({ customerId, payments: [], customerCreditAmountMinor: '200' }),
+    );
+    const cashCreditAndReceivable = parseSalePostingCommand(
+      body({
+        customerId,
+        payments: [{ moneyAccountId: accountA, amountMinor: '101' }],
+        customerCreditAmountMinor: '200',
+      }),
+    );
+
+    expect(fullyCreditPaid).toMatchObject({
+      moneyPaidTotalMinor: 0n,
+      customerCreditAmountMinor: 501n,
+      paidTotalMinor: 501n,
+      creditTotalMinor: 0n,
+      paymentStatus: 'paid',
+    });
+    expect(cashAndCredit).toMatchObject({
+      moneyPaidTotalMinor: 301n,
+      customerCreditAmountMinor: 200n,
+      paidTotalMinor: 501n,
+      creditTotalMinor: 0n,
+      paymentStatus: 'paid',
+    });
+    expect(creditAndReceivable).toMatchObject({
+      moneyPaidTotalMinor: 0n,
+      customerCreditAmountMinor: 200n,
+      paidTotalMinor: 200n,
+      creditTotalMinor: 301n,
+      paymentStatus: 'partial',
+    });
+    expect(cashCreditAndReceivable).toMatchObject({
+      moneyPaidTotalMinor: 101n,
+      customerCreditAmountMinor: 200n,
+      paidTotalMinor: 301n,
+      creditTotalMinor: 200n,
+      paymentStatus: 'partial',
+    });
+  });
+
+  it('canonicalizes split Money tenders alongside Customer Credit', () => {
+    const command = parseSalePostingCommand(
+      body({
+        customerId,
+        payments: [
+          { moneyAccountId: accountB, amountMinor: '200' },
+          { moneyAccountId: accountA, amountMinor: '100' },
+        ],
+        customerCreditAmountMinor: '201',
+      }),
+    );
+
+    expect(command.payments.map((payment) => payment.moneyAccountId)).toEqual([accountA, accountB]);
+    expect(command.moneyPaidTotalMinor).toBe(300n);
+    expect(command.customerCreditAmountMinor).toBe(201n);
+    expect(command.paidTotalMinor).toBe(501n);
+  });
+
+  it('rejects Customer Credit over the Sale total and anonymous Customer Credit', () => {
+    expect(() =>
+      parseSalePostingCommand(body({ customerId, payments: [], customerCreditAmountMinor: '502' })),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      parseSalePostingCommand(body({ payments: [], customerCreditAmountMinor: '501' })),
+    ).toThrow(BadRequestException);
+  });
+
+  it('preserves exact bigint Customer Credit and includes it in request identity', () => {
+    const large = parseSalePostingCommand(
+      body({
+        customerId,
+        items: [
+          {
+            isManualLine: true,
+            description: 'Large exact Credit tender',
+            quantityMilli: '1000',
+            unitPriceMinor: '9007199254740993',
+          },
+        ],
+        payments: [],
+        customerCreditAmountMinor: '9007199254740993',
+        totalMinor: '9007199254740993',
+      }),
+    );
+    const exactReplay = parseSalePostingCommand(
+      body({ customerId, payments: [], customerCreditAmountMinor: '501' }),
+    );
+    const changedCredit = parseSalePostingCommand(
+      body({
+        customerId,
+        payments: [{ moneyAccountId: accountA, amountMinor: '1' }],
+        customerCreditAmountMinor: '500',
+      }),
+    );
+    const exactReplayAgain = parseSalePostingCommand(
+      body({ customerId, payments: [], customerCreditAmountMinor: '501' }),
+    );
+
+    expect(large.customerCreditAmountMinor).toBe(9_007_199_254_740_993n);
+    expect(large.paidTotalMinor).toBe(9_007_199_254_740_993n);
+    expect(exactReplay.requestHash).toBe(exactReplayAgain.requestHash);
+    expect(changedCredit.requestHash).not.toBe(exactReplay.requestHash);
+  });
+
   it('canonicalizes split tenders without changing request identity', () => {
     const first = parseSalePostingCommand(
       body({

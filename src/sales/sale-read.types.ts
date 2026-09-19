@@ -48,6 +48,8 @@ export interface SaleSummaryRow {
   displayNumber: string;
   occurredAt: Date;
   totalMinor: bigint;
+  moneyPaidTotalMinor: bigint;
+  customerCreditUsedMinor: bigint;
   paidTotalMinor: bigint;
   creditTotalMinor: bigint;
   receivableOutstandingMinor: bigint;
@@ -99,6 +101,15 @@ export interface SaleTenderReadRow {
   version: bigint;
 }
 
+export interface SaleCustomerCreditTenderReadRow {
+  id: string;
+  customerId: string;
+  amountMinor: bigint;
+  customerLedgerEntryId: string;
+  appliedAt: Date;
+  createdAt: Date;
+}
+
 export interface CustomerReceivableRow {
   id: string;
   customerId: string;
@@ -131,6 +142,7 @@ export interface SaleDetailRow extends SaleSummaryRow {
   cancelledAt: Date | null;
   items: SaleItemReadRow[];
   tenders: SaleTenderReadRow[];
+  customerCreditTender: SaleCustomerCreditTenderReadRow | null;
   receivable: CustomerReceivableRow | null;
 }
 
@@ -154,6 +166,8 @@ export interface SaleSummaryResponse {
   status: Exclude<SaleStatus, 'draft'>;
   paymentStatus: SalePaymentStatus;
   totalMinor: string;
+  moneyPaidTotalMinor: string;
+  customerCreditUsedMinor: string;
   paidTotalMinor: string;
   receivableOriginatedMinor: string;
   receivableOutstandingMinor: string;
@@ -210,6 +224,15 @@ export interface SaleTenderReadResponse {
   version: string;
 }
 
+export interface SaleCustomerCreditTenderReadResponse {
+  id: string;
+  customerId: string;
+  amountMinor: string;
+  customerLedgerEntryId: string;
+  appliedAt: string;
+  createdAt: string;
+}
+
 export interface CustomerReceivableResponse {
   id: string;
   customerId: string;
@@ -241,6 +264,7 @@ export interface SaleDetailResponse {
   };
   items: SaleItemReadResponse[];
   tenders: SaleTenderReadResponse[];
+  customerCreditTender: SaleCustomerCreditTenderReadResponse | null;
   receivable: CustomerReceivableResponse | null;
 }
 
