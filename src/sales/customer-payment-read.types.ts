@@ -26,6 +26,7 @@ export interface CustomerPaymentCustomerRow {
   status: 'active' | 'archived';
   archivedAt: Date | null;
   outstandingMinor: bigint;
+  creditBalanceMinor: bigint;
 }
 
 export interface CustomerPaymentListRow {
@@ -140,6 +141,7 @@ export interface CustomerPaymentAllocationResponse {
 export interface CustomerPaymentListResponse {
   customer: CustomerPaymentCustomerResponse;
   outstandingMinor: string;
+  creditBalanceMinor: string;
   payments: CustomerPaymentSummaryResponse[];
   nextCursor: string | null;
 }
@@ -147,6 +149,7 @@ export interface CustomerPaymentListResponse {
 export interface CustomerPaymentDetailResponse {
   customer: CustomerPaymentCustomerResponse;
   outstandingMinor: string;
+  creditBalanceMinor: string;
   payment: CustomerPaymentSummaryResponse;
   allocations: CustomerPaymentAllocationResponse[];
 }

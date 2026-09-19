@@ -2,6 +2,12 @@ import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nest
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
 import { CustomerIdParamDto } from '../customers/dto/customer-id-param.dto';
+import { CustomerCreditReadService } from './customer-credit-read.service';
+import { CustomerCreditService } from './customer-credit.service';
+import type {
+  CustomerCreditHistoryResponse,
+  CustomerFinancialResponse,
+} from './customer-credit.types';
 import { CustomerPaymentPostingService } from './customer-payment-posting.service';
 import type { CustomerCollectionPostingResponse } from './customer-payment-posting.types';
 import { CustomerPaymentReadService } from './customer-payment-read.service';
@@ -10,6 +16,7 @@ import type {
   CustomerPaymentListResponse,
 } from './customer-payment-read.types';
 import { CustomerPaymentIdParamDto } from './dto/customer-payment-id-param.dto';
+import { ListCustomerCreditHistoryQueryDto } from './dto/list-customer-credit-history-query.dto';
 import { ListCustomerReceivablesQueryDto } from './dto/list-customer-receivables-query.dto';
 import { ListCustomerPaymentsQueryDto } from './dto/list-customer-payments-query.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
@@ -34,6 +41,8 @@ export class SalesController {
     private readonly corrections: SaleCorrectionService,
     private readonly customerPaymentPosting: CustomerPaymentPostingService,
     private readonly customerPaymentReads: CustomerPaymentReadService,
+    private readonly customerCredit: CustomerCreditService,
+    private readonly customerCreditReads: CustomerCreditReadService,
   ) {}
 
   @Get('sales')
@@ -122,6 +131,62 @@ export class SalesController {
       request.tenantContext,
       params.customerId,
       body,
+    );
+  }
+
+  @Post('customers/:customerId/credit/applications')
+  applyCustomerCredit(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialResponse> {
+    return this.customerCredit.apply(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/credit/refunds')
+  refundCustomerCredit(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialResponse> {
+    return this.customerCredit.refund(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/settlements')
+  settleCustomerReceivable(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialResponse> {
+    return this.customerCredit.settle(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
+  }
+
+  @Get('customers/:customerId/credit-history')
+  listCustomerCreditHistory(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerIdParamDto,
+    @Query() query: ListCustomerCreditHistoryQueryDto,
+  ): Promise<CustomerCreditHistoryResponse> {
+    return this.customerCreditReads.list(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      query,
     );
   }
 

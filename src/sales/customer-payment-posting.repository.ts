@@ -12,8 +12,6 @@ import {
   customerLedgerEntries,
   customerPaymentAllocations,
   customerPayments,
-  customers,
-  sales,
 } from '../database/schema';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
@@ -25,7 +23,8 @@ import {
 import { MoneyMovementPostingRepository } from '../money-movements/money-movement-posting.repository';
 import type { PostedMoneyMovement } from '../money-movements/money-movement.types';
 import {
-  partitionCustomerCollection,
+  partitionCustomerPayment,
+  type CustomerPaymentAllocationMatrixItem,
   type CustomerReceivableSettlementPlanItem,
 } from './customer-payment-allocation';
 import type {
@@ -33,6 +32,10 @@ import type {
   CustomerReceivableTargetType,
 } from './customer-payment-posting-command';
 import { parseStoredCustomerCollectionPostingResponse } from './customer-payment-posting-response';
+import {
+  CustomerReceivablePlanningError,
+  CustomerReceivableSettlementRepository,
+} from './customer-receivable-settlement.repository';
 import type {
   CustomerCollectionFailure,
   CustomerCollectionFailureCode,
@@ -55,39 +58,6 @@ interface ProcessedOperationRow extends Record<string, unknown> {
   responseCode: number | null;
   responseBody: unknown;
   errorCode: string | null;
-}
-
-interface FifoTargetReference extends Record<string, unknown> {
-  targetType: CustomerReceivableTargetType;
-  targetId: string;
-  originId: string;
-  occurredAt: string;
-}
-
-interface SaleOriginRow extends Record<string, unknown> {
-  id: string;
-  customerId: string;
-  accountingPeriodId: string;
-  receivableDeltaMinor: string;
-  creditDeltaMinor: string;
-  sourceSaleId: string | null;
-  referenceType: string;
-  referenceId: string;
-  occurredAt: string;
-  reversalOfId: string | null;
-  reversalCount: string;
-  outstandingMinor: string;
-}
-
-interface OpeningOriginRow extends SaleOriginRow {
-  allocatedMinor: string;
-}
-
-interface LockedReceivableTarget extends CustomerReceivableSettlementPlanItem {
-  customerId: string;
-  occurredAt: Date;
-  originalAmountMinor: bigint;
-  outstandingMinor: bigint;
 }
 
 interface FailureResult {
@@ -137,6 +107,16 @@ export const customerCollectionFailureDefinitions: Readonly<
     code: 'CUSTOMER_COLLECTION_TARGET_NOT_FOUND',
     message: 'Customer collection target not found.',
     statusCode: 404,
+  },
+  CUSTOMER_OVERPAYMENT_CHOICE_REQUIRED: {
+    code: 'CUSTOMER_OVERPAYMENT_CHOICE_REQUIRED',
+    message: 'Explicit overpayment handling is required.',
+    statusCode: 409,
+  },
+  CUSTOMER_OVERPAYMENT_NOT_PRESENT: {
+    code: 'CUSTOMER_OVERPAYMENT_NOT_PRESENT',
+    message: 'Overpayment handling was supplied but no excess exists.',
+    statusCode: 409,
   },
   CUSTOMER_NOT_FOUND: {
     code: 'CUSTOMER_NOT_FOUND',
@@ -195,6 +175,7 @@ export class CustomerPaymentPostingRepository {
     private readonly database: DatabaseService,
     private readonly postingContext: AccountingPeriodPostingContextService,
     private readonly moneyMovements: MoneyMovementPostingRepository,
+    private readonly receivables: CustomerReceivableSettlementRepository,
   ) {}
 
   post(
@@ -225,9 +206,66 @@ export class CustomerPaymentPostingRepository {
     postingDate: string,
   ): Promise<CustomerCollectionPostingResponse> {
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
-    await this.lockActiveCustomer(transaction, context.storeId, command.customerId);
-    const settlementPlan = await this.buildSettlementPlan(transaction, context.storeId, command);
-    await this.lockAndValidateMoneyAccounts(transaction, context.storeId, command);
+    let settlementPlan: CustomerReceivableSettlementPlanItem[];
+    let excessMinor: bigint;
+    try {
+      await this.receivables.lockActiveCustomer(transaction, context.storeId, command.customerId);
+      if (command.intent === 'customer_advance') {
+        settlementPlan = [];
+        excessMinor = command.amountMinor;
+      } else if (command.allocationMode === 'custom') {
+        const allocatedMinor = command.allocations.reduce(
+          (total, allocation) => total + allocation.amountMinor,
+          0n,
+        );
+        const planned = await this.receivables.buildPlan(
+          transaction,
+          context.storeId,
+          command.customerId,
+          command.allocationMode,
+          allocatedMinor,
+          command.allocations,
+          false,
+        );
+        settlementPlan = planned.plan;
+        excessMinor = command.amountMinor - allocatedMinor;
+      } else {
+        const planned = await this.receivables.buildPlan(
+          transaction,
+          context.storeId,
+          command.customerId,
+          command.allocationMode,
+          command.amountMinor,
+          command.allocations,
+          true,
+        );
+        settlementPlan = planned.plan;
+        excessMinor = planned.unappliedMinor;
+      }
+    } catch (error) {
+      if (error instanceof CustomerReceivablePlanningError) reject(error.code);
+      throw error;
+    }
+    if (command.intent === 'collect_receivable') {
+      if (settlementPlan.length === 0 && excessMinor > 0n) {
+        reject('CUSTOMER_COLLECTION_EXCEEDS_OUTSTANDING');
+      }
+      if (excessMinor > 0n && command.overpaymentHandling === null) {
+        reject('CUSTOMER_OVERPAYMENT_CHOICE_REQUIRED');
+      }
+      if (excessMinor === 0n && command.overpaymentHandling !== null) {
+        reject('CUSTOMER_OVERPAYMENT_NOT_PRESENT');
+      }
+    }
+
+    const partition = partitionCustomerPayment(command.tenders, settlementPlan);
+    const partitionByAccount = new Map(
+      partition.tenders.map((item) => [item.moneyAccountId, item]),
+    );
+    await this.lockAndValidateMoneyAccounts(transaction, context.storeId, [
+      ...command.tenders.map((tender) => tender.moneyAccountId),
+      ...(command.refundMoneyAccountId ? [command.refundMoneyAccountId] : []),
+    ]);
 
     await transaction.execute(
       sql`select set_config('app.audit_reason', 'Customer collection posted', true)`,
@@ -235,6 +273,8 @@ export class CustomerPaymentPostingRepository {
     const transactionGroupId = deriveTransactionGroupId(command.operationId);
     const paymentIds = new Map<string, string>();
     for (const tender of command.tenders) {
+      const tenderPartition = partitionByAccount.get(tender.moneyAccountId);
+      if (!tenderPartition) throw new Error('Customer Payment partition is missing.');
       const id = this.paymentId(command.operationId, tender.moneyAccountId);
       paymentIds.set(tender.moneyAccountId, id);
       await transaction.insert(customerPayments).values({
@@ -244,8 +284,8 @@ export class CustomerPaymentPostingRepository {
         accountingPeriodId: posting.accountingPeriodId,
         moneyAccountId: tender.moneyAccountId,
         amountMinor: tender.amountMinor,
-        allocatedTotalMinor: tender.amountMinor,
-        creditCreatedMinor: 0n,
+        allocatedTotalMinor: tenderPartition.allocatedMinor,
+        creditCreatedMinor: tenderPartition.creditCreatedMinor,
         paymentAt: command.occurredAt,
         senderAccountName: tender.senderAccountName,
         externalReference: tender.externalReference,
@@ -287,10 +327,69 @@ export class CustomerPaymentPostingRepository {
       command,
       posting,
       paymentIds,
-      settlementPlan,
+      partition.allocations,
     );
+    await this.insertCreditCreatedEntries(
+      transaction,
+      context,
+      command,
+      posting,
+      paymentIds,
+      partition.tenders,
+    );
+
+    let refundMovement: PostedMoneyMovement | null = null;
+    if (command.overpaymentHandling === 'refund_excess') {
+      if (!command.refundMoneyAccountId || excessMinor <= 0n) {
+        throw new Error('Customer overpayment refund state is inconsistent.');
+      }
+      const refundLedgerId = deriveMoneyFactId(
+        command.operationId,
+        'customer-excess-refund-ledger',
+      );
+      await transaction.insert(customerLedgerEntries).values({
+        id: refundLedgerId,
+        storeId: context.storeId,
+        customerId: command.customerId,
+        accountingPeriodId: posting.accountingPeriodId,
+        entryType: 'refund',
+        receivableDeltaMinor: 0n,
+        creditDeltaMinor: -excessMinor,
+        sourceSaleId: null,
+        referenceType: 'customer_credit_refund',
+        referenceId: refundLedgerId,
+        transactionGroupId,
+        occurredAt: command.occurredAt,
+        reason: 'Immediate Customer overpayment refund',
+        deviceId: context.deviceId,
+        operationId: deriveMoneyFactOperationId(
+          command.operationId,
+          'customer-excess-refund-ledger',
+        ),
+      });
+      refundMovement = await this.moneyMovements.insertMovementWithinTransaction(
+        transaction,
+        context,
+        {
+          commandOperationId: command.operationId,
+          discriminator: 'customer-excess-refund-money',
+          accountId: command.refundMoneyAccountId,
+          amountDeltaMinor: -excessMinor,
+          movementType: 'customer_refund',
+          referenceType: 'customer_credit_refund',
+          referenceId: refundLedgerId,
+          accountingPeriodId: posting.accountingPeriodId,
+          occurredAt: command.occurredAt,
+          transactionGroupId,
+          notes: 'Immediate Customer overpayment refund',
+        },
+      );
+      moneyMovements.push(refundMovement);
+    }
     const movementByAccount = new Map(
-      moneyMovements.map((movement) => [movement.accountId, movement]),
+      moneyMovements
+        .filter((movement) => movement.movementType === 'customer_payment')
+        .map((movement) => [movement.accountId, movement]),
     );
     const payments: PostedCustomerCollectionPayment[] = [];
     for (const tender of command.tenders) {
@@ -298,6 +397,8 @@ export class CustomerPaymentPostingRepository {
       const movement = movementByAccount.get(tender.moneyAccountId);
       if (!paymentId || !movement)
         throw new Error('Customer Payment finalization state is missing.');
+      const tenderPartition = partitionByAccount.get(tender.moneyAccountId);
+      if (!tenderPartition) throw new Error('Customer Payment partition is missing.');
       const rows = await transaction
         .update(customerPayments)
         .set({ status: 'posted', moneyMovementId: movement.id })
@@ -319,8 +420,8 @@ export class CustomerPaymentPostingRepository {
         ),
         moneyAccountId: tender.moneyAccountId,
         amountMinor: tender.amountMinor.toString(),
-        allocatedTotalMinor: tender.amountMinor.toString(),
-        creditCreatedMinor: '0',
+        allocatedTotalMinor: tenderPartition.allocatedMinor.toString(),
+        creditCreatedMinor: tenderPartition.creditCreatedMinor.toString(),
         paymentAt: command.occurredAt.toISOString(),
         senderAccountName: tender.senderAccountName,
         externalReference: tender.externalReference,
@@ -335,14 +436,18 @@ export class CustomerPaymentPostingRepository {
       operationId: command.operationId,
       collectionId: transactionGroupId,
       customerId: command.customerId,
+      intent: command.intent,
       allocationMode: command.allocationMode,
+      overpaymentHandling: command.overpaymentHandling,
       amountMinor: command.amountMinor.toString(),
+      excessMinor: excessMinor.toString(),
       businessDate: posting.postingDate,
       postingDate: posting.postingDate,
       accountingPeriodId: posting.accountingPeriodId,
       payments,
       allocations,
       moneyMovements,
+      refundMovement,
     };
   }
 
@@ -352,9 +457,8 @@ export class CustomerPaymentPostingRepository {
     command: CustomerCollectionPostingCommand,
     posting: AccountingPeriodPostingContext,
     paymentIds: Map<string, string>,
-    settlementPlan: CustomerReceivableSettlementPlanItem[],
+    matrix: CustomerPaymentAllocationMatrixItem[],
   ): Promise<PostedCustomerCollectionAllocation[]> {
-    const matrix = partitionCustomerCollection(command.tenders, settlementPlan);
     const allocations: PostedCustomerCollectionAllocation[] = [];
     for (const item of matrix) {
       const paymentId = paymentIds.get(item.moneyAccountId);
@@ -421,308 +525,55 @@ export class CustomerPaymentPostingRepository {
     return allocations;
   }
 
-  private async buildSettlementPlan(
+  private async insertCreditCreatedEntries(
     transaction: DatabaseTransaction,
-    storeId: string,
+    context: TenantTransactionContext,
     command: CustomerCollectionPostingCommand,
-  ): Promise<CustomerReceivableSettlementPlanItem[]> {
-    if (command.allocationMode === 'custom') {
-      return this.buildCustomPlan(transaction, storeId, command);
-    }
-    const references = await this.listFifoTargetReferences(
-      transaction,
-      storeId,
-      command.customerId,
-    );
-    const plan: CustomerReceivableSettlementPlanItem[] = [];
-    let remaining = command.amountMinor;
-    for (const reference of references) {
-      if (remaining === 0n) break;
-      const target = await this.lockAndReadTarget(
-        transaction,
-        storeId,
-        reference.targetType,
-        reference.targetId,
-      );
-      this.assertTargetCustomer(target, command.customerId);
-      if (
-        target.originId !== reference.originId ||
-        target.occurredAt.getTime() !== new Date(reference.occurredAt).getTime()
-      ) {
-        reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-      }
-      if (target.outstandingMinor <= 0n) continue;
-      const amountMinor = target.outstandingMinor < remaining ? target.outstandingMinor : remaining;
-      plan.push({
-        targetType: target.targetType,
-        targetId: target.targetId,
-        originId: target.originId,
-        amountMinor,
-      });
-      remaining -= amountMinor;
-    }
-    if (remaining !== 0n) reject('CUSTOMER_COLLECTION_EXCEEDS_OUTSTANDING');
-    return plan;
-  }
-
-  private async buildCustomPlan(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    command: CustomerCollectionPostingCommand,
-  ): Promise<CustomerReceivableSettlementPlanItem[]> {
-    const plan: CustomerReceivableSettlementPlanItem[] = [];
-    for (const allocation of command.allocations) {
-      const target = await this.lockAndReadTarget(
-        transaction,
-        storeId,
-        allocation.targetType,
-        allocation.targetId,
-      );
-      this.assertTargetCustomer(target, command.customerId);
-      if (target.outstandingMinor <= 0n) reject('CUSTOMER_COLLECTION_TARGET_NOT_ACTIVE');
-      if (allocation.amountMinor > target.outstandingMinor) {
-        reject('CUSTOMER_COLLECTION_ALLOCATION_EXCEEDS_OUTSTANDING');
-      }
-      plan.push({
-        targetType: target.targetType,
-        targetId: target.targetId,
-        originId: target.originId,
-        amountMinor: allocation.amountMinor,
-      });
-    }
-    return plan;
-  }
-
-  private async listFifoTargetReferences(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    customerId: string,
-  ): Promise<FifoTargetReference[]> {
-    const result = await transaction.execute<FifoTargetReference>(sql`
-      select candidate."targetType", candidate."targetId", candidate."originId",
-        candidate."occurredAt"
-      from (
-        select 'sale_receivable'::text as "targetType", sale.id as "targetId",
-          origin.id as "originId", origin.occurred_at as "occurredAt",
-          coalesce((select sum(effect.receivable_delta_minor)
-            from ledger.customer_ledger_entries effect
-            where effect.store_id=sale.store_id and effect.source_sale_id=sale.id),0)
-            as outstanding
-        from ledger.sales sale
-        inner join ledger.customer_ledger_entries origin
-          on origin.store_id=sale.store_id and origin.customer_id=sale.customer_id
-          and origin.source_sale_id=sale.id and origin.entry_type='sale_credit'
-          and origin.receivable_delta_minor > 0 and origin.credit_delta_minor=0
-          and origin.reference_type='sale' and origin.reference_id=sale.id
-          and origin.reversal_of_id is null
-        where sale.store_id=${storeId}::uuid and sale.customer_id=${customerId}::uuid
-          and sale.status='posted'
-          and not exists (select 1 from ledger.customer_ledger_entries reversal
-            where reversal.store_id=origin.store_id and reversal.reversal_of_id=origin.id)
-        union all
-        select 'opening_receivable'::text, origin.id, origin.id, origin.occurred_at,
-          origin.receivable_delta_minor - coalesce((
-            select sum(allocation.amount_minor)
-            from ledger.customer_payment_allocations allocation
-            inner join ledger.customer_payments payment
-              on payment.store_id=allocation.store_id
-              and payment.id=allocation.customer_payment_id
-            where allocation.store_id=origin.store_id
-              and allocation.opening_receivable_ledger_entry_id=origin.id
-              and payment.status='posted'
-          ),0)
-        from ledger.customer_ledger_entries origin
-        where origin.store_id=${storeId}::uuid and origin.customer_id=${customerId}::uuid
-          and origin.entry_type='opening_balance' and origin.receivable_delta_minor > 0
-          and origin.credit_delta_minor=0 and origin.source_sale_id is null
-          and origin.reference_type='customer_opening_receivable'
-          and origin.reference_id=origin.id and origin.reversal_of_id is null
-          and not exists (select 1 from ledger.customer_ledger_entries reversal
-            where reversal.store_id=origin.store_id and reversal.reversal_of_id=origin.id)
-      ) candidate
-      where candidate.outstanding > 0
-      order by candidate."occurredAt" asc, candidate."originId" asc
-    `);
-    return result.rows;
-  }
-
-  private lockAndReadTarget(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    targetType: CustomerReceivableTargetType,
-    targetId: string,
-  ): Promise<LockedReceivableTarget> {
-    return targetType === 'sale_receivable'
-      ? this.lockAndReadSaleTarget(transaction, storeId, targetId)
-      : this.lockAndReadOpeningTarget(transaction, storeId, targetId);
-  }
-
-  private async lockAndReadSaleTarget(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    saleId: string,
-  ): Promise<LockedReceivableTarget> {
-    const saleRows = await transaction
-      .select({ id: sales.id, customerId: sales.customerId, status: sales.status })
-      .from(sales)
-      .where(and(eq(sales.storeId, storeId), eq(sales.id, saleId)))
-      .limit(1)
-      .for('update');
-    const sale = saleRows[0];
-    if (!sale) reject('CUSTOMER_COLLECTION_TARGET_NOT_FOUND');
-    if (sale.customerId === null) reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    if (sale.status !== 'posted') reject('CUSTOMER_COLLECTION_TARGET_NOT_ACTIVE');
-
-    const result = await transaction.execute<SaleOriginRow>(sql`
-      select origin.id, origin.customer_id as "customerId",
-        origin.accounting_period_id as "accountingPeriodId",
-        origin.receivable_delta_minor::text as "receivableDeltaMinor",
-        origin.credit_delta_minor::text as "creditDeltaMinor",
-        origin.source_sale_id as "sourceSaleId", origin.reference_type as "referenceType",
-        origin.reference_id as "referenceId", origin.occurred_at as "occurredAt",
-        origin.reversal_of_id as "reversalOfId",
-        (select count(*)::text from ledger.customer_ledger_entries reversal
-          where reversal.store_id=origin.store_id and reversal.reversal_of_id=origin.id)
-          as "reversalCount",
-        coalesce((select sum(effect.receivable_delta_minor)
-          from ledger.customer_ledger_entries effect
-          where effect.store_id=origin.store_id and effect.source_sale_id=${saleId}::uuid),0)::text
-          as "outstandingMinor"
-      from ledger.customer_ledger_entries origin
-      where origin.store_id=${storeId}::uuid and origin.source_sale_id=${saleId}::uuid
-        and origin.entry_type='sale_credit'
-      order by origin.id
-      for update of origin
-    `);
-    if (result.rows.length !== 1) reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    const origin = result.rows[0];
-    if (!origin) reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    if (
-      origin.customerId !== sale.customerId ||
-      BigInt(origin.receivableDeltaMinor) <= 0n ||
-      origin.creditDeltaMinor !== '0' ||
-      origin.sourceSaleId !== saleId ||
-      origin.referenceType !== 'sale' ||
-      origin.referenceId !== saleId ||
-      origin.reversalOfId !== null
-    ) {
-      reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    }
-    if (origin.reversalCount !== '0') reject('CUSTOMER_COLLECTION_TARGET_NOT_ACTIVE');
-    const originalAmountMinor = BigInt(origin.receivableDeltaMinor);
-    const outstandingMinor = BigInt(origin.outstandingMinor);
-    if (outstandingMinor < 0n || outstandingMinor > originalAmountMinor) {
-      reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    }
-    return {
-      targetType: 'sale_receivable',
-      targetId: saleId,
-      originId: origin.id,
-      customerId: origin.customerId,
-      occurredAt: new Date(origin.occurredAt),
-      originalAmountMinor,
-      outstandingMinor,
-      amountMinor: 0n,
-    };
-  }
-
-  private async lockAndReadOpeningTarget(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    originId: string,
-  ): Promise<LockedReceivableTarget> {
-    const result = await transaction.execute<OpeningOriginRow>(sql`
-      select origin.id, origin.customer_id as "customerId",
-        origin.accounting_period_id as "accountingPeriodId",
-        origin.receivable_delta_minor::text as "receivableDeltaMinor",
-        origin.credit_delta_minor::text as "creditDeltaMinor",
-        origin.source_sale_id as "sourceSaleId", origin.reference_type as "referenceType",
-        origin.reference_id as "referenceId", origin.occurred_at as "occurredAt",
-        origin.reversal_of_id as "reversalOfId",
-        (select count(*)::text from ledger.customer_ledger_entries reversal
-          where reversal.store_id=origin.store_id and reversal.reversal_of_id=origin.id)
-          as "reversalCount",
-        coalesce((select sum(allocation.amount_minor)
-          from ledger.customer_payment_allocations allocation
-          inner join ledger.customer_payments payment
-            on payment.store_id=allocation.store_id and payment.id=allocation.customer_payment_id
-          where allocation.store_id=origin.store_id
-            and allocation.opening_receivable_ledger_entry_id=origin.id
-            and payment.status='posted'),0)::text as "allocatedMinor",
-        (origin.receivable_delta_minor - coalesce((select sum(allocation.amount_minor)
-          from ledger.customer_payment_allocations allocation
-          inner join ledger.customer_payments payment
-            on payment.store_id=allocation.store_id and payment.id=allocation.customer_payment_id
-          where allocation.store_id=origin.store_id
-            and allocation.opening_receivable_ledger_entry_id=origin.id
-            and payment.status='posted'),0))::text as "outstandingMinor"
-      from ledger.customer_ledger_entries origin
-      where origin.store_id=${storeId}::uuid and origin.id=${originId}::uuid
-      for update of origin
-    `);
-    const origin = result.rows[0];
-    if (!origin) reject('CUSTOMER_COLLECTION_TARGET_NOT_FOUND');
-    if (
-      BigInt(origin.receivableDeltaMinor) <= 0n ||
-      origin.creditDeltaMinor !== '0' ||
-      origin.sourceSaleId !== null ||
-      origin.referenceType !== 'customer_opening_receivable' ||
-      origin.referenceId !== origin.id ||
-      origin.reversalOfId !== null
-    ) {
-      reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    }
-    if (origin.reversalCount !== '0') reject('CUSTOMER_COLLECTION_TARGET_NOT_ACTIVE');
-    const originalAmountMinor = BigInt(origin.receivableDeltaMinor);
-    const outstandingMinor = BigInt(origin.outstandingMinor);
-    if (outstandingMinor < 0n || outstandingMinor > originalAmountMinor) {
-      reject('CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT');
-    }
-    return {
-      targetType: 'opening_receivable',
-      targetId: origin.id,
-      originId: origin.id,
-      customerId: origin.customerId,
-      occurredAt: new Date(origin.occurredAt),
-      originalAmountMinor,
-      outstandingMinor,
-      amountMinor: 0n,
-    };
-  }
-
-  private assertTargetCustomer(target: LockedReceivableTarget, customerId: string): void {
-    if (target.customerId !== customerId) {
-      reject('CUSTOMER_COLLECTION_TARGET_CUSTOMER_MISMATCH');
-    }
-  }
-
-  private async lockActiveCustomer(
-    transaction: DatabaseTransaction,
-    storeId: string,
-    customerId: string,
+    posting: AccountingPeriodPostingContext,
+    paymentIds: Map<string, string>,
+    partitions: {
+      moneyAccountId: string;
+      allocatedMinor: bigint;
+      creditCreatedMinor: bigint;
+    }[],
   ): Promise<void> {
-    const rows = await transaction
-      .select({ status: customers.status })
-      .from(customers)
-      .where(and(eq(customers.storeId, storeId), eq(customers.id, customerId)))
-      .limit(1)
-      .for('update');
-    const customer = rows[0];
-    if (!customer) reject('CUSTOMER_NOT_FOUND');
-    if (customer.status !== 'active') reject('CUSTOMER_UNAVAILABLE');
+    for (const partition of partitions) {
+      if (partition.creditCreatedMinor === 0n) continue;
+      const paymentId = paymentIds.get(partition.moneyAccountId);
+      if (!paymentId) throw new Error('Customer Credit payment parent is missing.');
+      const discriminator = `customer-credit-created:${partition.moneyAccountId}`;
+      await transaction.insert(customerLedgerEntries).values({
+        id: deriveMoneyFactId(command.operationId, discriminator),
+        storeId: context.storeId,
+        customerId: command.customerId,
+        accountingPeriodId: posting.accountingPeriodId,
+        entryType: 'credit_created',
+        receivableDeltaMinor: 0n,
+        creditDeltaMinor: partition.creditCreatedMinor,
+        sourceSaleId: null,
+        referenceType: 'customer_payment',
+        referenceId: paymentId,
+        transactionGroupId: deriveTransactionGroupId(command.operationId),
+        occurredAt: command.occurredAt,
+        reason:
+          command.intent === 'customer_advance'
+            ? 'Customer advance'
+            : 'Customer overpayment retained as credit',
+        deviceId: context.deviceId,
+        operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
+      });
+    }
   }
 
   private async lockAndValidateMoneyAccounts(
     transaction: DatabaseTransaction,
     storeId: string,
-    command: CustomerCollectionPostingCommand,
+    accountIds: string[],
   ): Promise<void> {
     try {
-      await this.moneyMovements.lockAndValidateAccounts(
-        transaction,
-        storeId,
-        command.tenders.map((tender) => tender.moneyAccountId),
-      );
+      await this.moneyMovements.lockAndValidateAccounts(transaction, storeId, [
+        ...new Set(accountIds),
+      ]);
     } catch (error) {
       if (error instanceof HttpException) {
         const response = error.getResponse();

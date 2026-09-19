@@ -24,6 +24,7 @@ interface CustomerPhysicalRow extends Record<string, unknown> {
   status: 'active' | 'archived';
   archivedAt: string | null;
   outstandingMinor: string;
+  creditBalanceMinor: string;
 }
 
 interface CustomerPaymentPhysicalRow extends Record<string, unknown> {
@@ -179,7 +180,8 @@ export class CustomerPaymentReadRepository {
     const result = await transaction.execute<CustomerPhysicalRow>(sql`
       select customer.id, customer.name, customer.phone, customer.status,
         customer.archived_at as "archivedAt",
-        greatest(coalesce(balance.net_due_minor,0),0)::text as "outstandingMinor"
+        greatest(coalesce(balance.receivable_minor,0),0)::text as "outstandingMinor",
+        greatest(coalesce(balance.credit_minor,0),0)::text as "creditBalanceMinor"
       from ledger.customers customer
       left join ledger.v_customer_balances balance
         on balance.store_id=customer.store_id and balance.customer_id=customer.id
@@ -196,6 +198,7 @@ export class CustomerPaymentReadRepository {
       status: row.status,
       archivedAt: row.archivedAt === null ? null : new Date(row.archivedAt),
       outstandingMinor,
+      creditBalanceMinor: BigInt(row.creditBalanceMinor),
     };
   }
 

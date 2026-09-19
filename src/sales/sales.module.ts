@@ -5,10 +5,15 @@ import { AuthenticationModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
 import { MoneyMovementsModule } from '../money-movements/money-movements.module';
 import { SettingsModule } from '../settings/settings.module';
+import { CustomerCreditReadRepository } from './customer-credit-read.repository';
+import { CustomerCreditReadService } from './customer-credit-read.service';
+import { CustomerCreditRepository } from './customer-credit.repository';
+import { CustomerCreditService } from './customer-credit.service';
 import { CustomerPaymentPostingRepository } from './customer-payment-posting.repository';
 import { CustomerPaymentPostingService } from './customer-payment-posting.service';
 import { CustomerPaymentReadRepository } from './customer-payment-read.repository';
 import { CustomerPaymentReadService } from './customer-payment-read.service';
+import { CustomerReceivableSettlementRepository } from './customer-receivable-settlement.repository';
 import { SalePostingRepository } from './sale-posting.repository';
 import { SalePostingService } from './sale-posting.service';
 import { SaleCorrectionRepository } from './sale-correction.repository';
@@ -37,6 +42,11 @@ import { SalesController } from './sales.controller';
     CustomerPaymentPostingService,
     CustomerPaymentReadRepository,
     CustomerPaymentReadService,
+    CustomerReceivableSettlementRepository,
+    CustomerCreditRepository,
+    CustomerCreditService,
+    CustomerCreditReadRepository,
+    CustomerCreditReadService,
   ],
 })
 export class SalesModule {}

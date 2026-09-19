@@ -17,6 +17,10 @@ import {
   deriveMoneyFactId,
   deriveMoneyFactOperationId,
 } from '../src/money-movements/money-movement-identity';
+import type {
+  CustomerCreditHistoryResponse,
+  CustomerFinancialResponse,
+} from '../src/sales/customer-credit.types';
 import type { CustomerCollectionPostingResponse } from '../src/sales/customer-payment-posting.types';
 import type {
   CustomerPaymentDetailResponse,
@@ -93,7 +97,7 @@ const foreignOwner = identities[1];
 const manager = identities[2];
 const readOnlyOwner = identities[3];
 
-describe('S15.3 Customer collections on isolated PostgreSQL', () => {
+describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', () => {
   jest.setTimeout(300_000);
 
   let database: InventoryTestDatabase | undefined;
@@ -122,6 +126,31 @@ describe('S15.3 Customer collections on isolated PostgreSQL', () => {
     return request(server)
       .get(`/v1/customers/${customerId}/payments`)
       .set('authorization', `Bearer ${identity.token}`);
+  }
+
+  function postCustomerFinancial(
+    customerId: string,
+    path: 'credit/applications' | 'credit/refunds' | 'settlements',
+    body: Record<string, unknown>,
+    identity: Identity = owner,
+  ): request.Test {
+    return request(server)
+      .post(`/v1/customers/${customerId}/${path}`)
+      .set('authorization', `Bearer ${identity.token}`)
+      .send(body);
+  }
+
+  function customerFinancialRequest(
+    amountMinor: string,
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T12:00:00Z',
+      amountMinor,
+      allocationMode: 'fifo',
+      ...overrides,
+    };
   }
 
   function expectResponseCode(expectedCode: string): (response: { body: unknown }) => void {
@@ -554,7 +583,7 @@ describe('S15.3 Customer collections on isolated PostgreSQL', () => {
 
     await postCollection(customerId, fifoRequest([{ moneyAccountId: account, amountMinor: '101' }]))
       .expect(409)
-      .expect(expectResponseCode('CUSTOMER_COLLECTION_EXCEEDS_OUTSTANDING'));
+      .expect(expectResponseCode('CUSTOMER_OVERPAYMENT_CHOICE_REQUIRED'));
     await postCollection(
       otherCustomer,
       fifoRequest([{ moneyAccountId: account, amountMinor: '1' }]),
@@ -656,7 +685,7 @@ describe('S15.3 Customer collections on isolated PostgreSQL', () => {
     ).expect(403);
 
     const closedCustomer = await createCustomer();
-    const opening = await postOpening(closedCustomer, '10', '2026-05-01T10:00:00Z');
+    const opening = await postOpening(closedCustomer, '10', '2026-10-01T10:00:00Z');
     await db().admin.query(
       `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
        where store_id=$1 and id=$2`,
@@ -665,7 +694,7 @@ describe('S15.3 Customer collections on isolated PostgreSQL', () => {
     await postCollection(
       closedCustomer,
       fifoRequest([{ moneyAccountId: account, amountMinor: '10' }], {
-        occurredAt: '2026-05-02T10:00:00Z',
+        occurredAt: '2026-10-02T10:00:00Z',
       }),
     )
       .expect(409)
@@ -932,5 +961,471 @@ describe('S15.3 Customer collections on isolated PostgreSQL', () => {
       .expect(200);
     const saleReadBody = saleRead.body as SaleDetailResponse;
     expect(saleReadBody.sale.receivableOutstandingMinor).toBe('30');
+  });
+
+  it('posts deterministic overpayment Credit, explicit Advance, and immediate excess refund', async () => {
+    const cash = await createAccount();
+    const bank = await createAccount();
+    const refundAccount = await createAccount();
+
+    const retainedCustomer = await createCustomer();
+    await postCreditSale(retainedCustomer, '300', '2026-09-01T10:00:00Z');
+    const retained = await postCollection(
+      retainedCustomer,
+      fifoRequest(
+        [
+          { moneyAccountId: bank, amountMinor: '200' },
+          { moneyAccountId: cash, amountMinor: '200' },
+        ],
+        { overpaymentHandling: 'keep_as_customer_credit' },
+      ),
+    ).expect(201);
+    const retainedBody = retained.body as CustomerCollectionPostingResponse;
+    expect(retainedBody).toMatchObject({
+      intent: 'collect_receivable',
+      overpaymentHandling: 'keep_as_customer_credit',
+      amountMinor: '400',
+      excessMinor: '100',
+      refundMovement: null,
+    });
+    expect(
+      retainedBody.payments.map((payment) => ({
+        account: payment.moneyAccountId,
+        allocated: payment.allocatedTotalMinor,
+        credit: payment.creditCreatedMinor,
+      })),
+    ).toEqual([
+      { account: [cash, bank].sort()[0], allocated: '200', credit: '0' },
+      { account: [cash, bank].sort()[1], allocated: '100', credit: '100' },
+    ]);
+
+    const advanceCustomer = await createCustomer();
+    const advance = await postCollection(advanceCustomer, {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T12:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: cash, amountMinor: '200' }],
+    }).expect(201);
+    expect(advance.body).toMatchObject({
+      intent: 'customer_advance',
+      amountMinor: '200',
+      excessMinor: '200',
+      allocations: [],
+      payments: [expect.objectContaining({ allocatedTotalMinor: '0', creditCreatedMinor: '200' })],
+    });
+
+    const refundedCustomer = await createCustomer();
+    await postCreditSale(refundedCustomer, '300', '2026-09-02T10:00:00Z');
+    const refunded = await postCollection(
+      refundedCustomer,
+      fifoRequest([{ moneyAccountId: cash, amountMinor: '400' }], {
+        overpaymentHandling: 'refund_excess',
+        refundMoneyAccountId: refundAccount,
+      }),
+    ).expect(201);
+    const refundedBody = refunded.body as CustomerCollectionPostingResponse;
+    expect(refundedBody.refundMovement).toMatchObject({
+      accountId: refundAccount,
+      movementType: 'customer_refund',
+      amountDeltaMinor: '-100',
+    });
+
+    const balances = await db().admin.query<{
+      customerId: string;
+      receivable: string;
+      credit: string;
+    }>(
+      `select customer_id as "customerId",receivable_minor::text as receivable,
+         credit_minor::text as credit
+       from ledger.v_customer_balances where store_id=$1 and customer_id=any($2::uuid[])
+       order by customer_id`,
+      [owner.storeId, [retainedCustomer, advanceCustomer, refundedCustomer]],
+    );
+    const byCustomer = new Map(
+      balances.rows.map((row) => [
+        row.customerId,
+        { receivable: row.receivable, credit: row.credit },
+      ]),
+    );
+    expect(byCustomer.get(retainedCustomer)).toEqual({ receivable: '0', credit: '100' });
+    expect(byCustomer.get(advanceCustomer)).toEqual({ receivable: '0', credit: '200' });
+    expect(byCustomer.get(refundedCustomer)).toEqual({ receivable: '0', credit: '0' });
+    const refundMoney = await db().admin.query<{ total: string }>(
+      `select coalesce(sum(amount_delta_minor),0)::text as total
+       from ledger.money_movements where store_id=$1 and transaction_group_id=$2`,
+      [owner.storeId, refundedBody.collectionId],
+    );
+    expect(refundMoney.rows[0]).toEqual({ total: '300' });
+  });
+
+  it('applies Credit and non-cash Settlement to Sale and Opening targets and exposes history', async () => {
+    const customerId = await createCustomer();
+    const account = await createAccount();
+    const opening = await postOpening(customerId, '100', '2026-01-01T10:00:00Z');
+    const sale = await postCreditSale(customerId, '200', '2026-01-02T10:00:00Z');
+    await postCollection(customerId, {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T09:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: account, amountMinor: '200' }],
+    }).expect(201);
+
+    const applicationOperation = randomUUID();
+    const application = await postCustomerFinancial(
+      customerId,
+      'credit/applications',
+      customerFinancialRequest('150', {
+        operationId: applicationOperation,
+        allocationMode: 'custom',
+        allocations: [
+          {
+            targetType: 'opening_receivable',
+            targetId: opening.receivable.id,
+            amountMinor: '50',
+          },
+          { targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '100' },
+        ],
+      }),
+    ).expect(201);
+    const applicationBody = application.body as CustomerFinancialResponse;
+    expect(applicationBody.moneyMovement).toBeNull();
+    expect(applicationBody.ledgerEffects).toHaveLength(2);
+    expect(
+      applicationBody.ledgerEffects.every(
+        (effect) =>
+          effect.entryType === 'credit_used' &&
+          effect.receivableDeltaMinor === effect.creditDeltaMinor,
+      ),
+    ).toBe(true);
+
+    const settlementOperation = randomUUID();
+    const settlement = await postCustomerFinancial(
+      customerId,
+      'settlements',
+      customerFinancialRequest('50', {
+        operationId: settlementOperation,
+        reason: 'commercial settlement',
+      }),
+    ).expect(201);
+    expect(settlement.body).toMatchObject({
+      action: 'settle_receivable',
+      moneyMovement: null,
+      ledgerEffects: [
+        expect.objectContaining({
+          entryType: 'settlement',
+          targetType: 'opening_receivable',
+          targetId: opening.receivable.id,
+          receivableDeltaMinor: '-50',
+          creditDeltaMinor: '0',
+          reason: 'commercial settlement',
+        }),
+      ],
+    });
+
+    const refundOperation = randomUUID();
+    const refund = await postCustomerFinancial(customerId, 'credit/refunds', {
+      operationId: refundOperation,
+      occurredAt: '2026-09-15T12:10:00Z',
+      amountMinor: '50',
+      moneyAccountId: account,
+      notes: 'Customer requested balance refund',
+    }).expect(201);
+    const refundBody = refund.body as CustomerFinancialResponse;
+    expect(refundBody.action).toBe('refund_customer_credit');
+    expect(refundBody.moneyMovement).toMatchObject({
+      accountId: account,
+      movementType: 'customer_refund',
+      amountDeltaMinor: '-50',
+    });
+
+    const noMoney = await db().admin.query<{ count: number }>(
+      `select count(*)::int as count from ledger.money_movements
+       where store_id=$1 and transaction_group_id=any($2::uuid[])`,
+      [owner.storeId, [applicationOperation, settlementOperation]],
+    );
+    expect(noMoney.rows[0]).toEqual({ count: 0 });
+
+    const history = await request(server)
+      .get(`/v1/customers/${customerId}/credit-history?limit=2`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(200);
+    const historyBody = history.body as CustomerCreditHistoryResponse;
+    expect(historyBody).toMatchObject({
+      customerId,
+      receivableOutstandingMinor: '100',
+      creditBalanceMinor: '0',
+    });
+    expect(historyBody.entries).toHaveLength(2);
+    expect(historyBody.nextCursor).toEqual(expect.any(String));
+    const next = await request(server)
+      .get(
+        `/v1/customers/${customerId}/credit-history?limit=2&cursor=${encodeURIComponent(
+          historyBody.nextCursor ?? '',
+        )}`,
+      )
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(200);
+    expect((next.body as CustomerCreditHistoryResponse).entries.length).toBeGreaterThan(0);
+
+    const receivables = await request(server)
+      .get(`/v1/customers/${customerId}/receivables`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(200);
+    const byId = new Map(
+      (receivables.body as CustomerReceivableListResponse).receivables.map((item) => [
+        item.id,
+        item.outstandingMinor,
+      ]),
+    );
+    expect(byId.get(opening.receivable.id)).toBe('0');
+    expect(byId.get(sale.receivable?.id ?? '')).toBe('100');
+  });
+
+  it('rejects invalid Credit/Settlement operations and preserves owner, tenant, period, and Sale guards', async () => {
+    const account = await createAccount();
+    const customerId = await createCustomer();
+    const archivedCustomer = await createCustomer(owner, 'archived');
+    const sale = await postCreditSale(customerId, '100', '2026-03-01T10:00:00Z');
+
+    await postCustomerFinancial(customerId, 'credit/applications', customerFinancialRequest('1'))
+      .expect(409)
+      .expect(expectResponseCode('CUSTOMER_CREDIT_INSUFFICIENT'));
+    await postCustomerFinancial(customerId, 'settlements', customerFinancialRequest('10')).expect(
+      400,
+    );
+    await postCustomerFinancial(archivedCustomer, 'credit/refunds', {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T12:00:00Z',
+      amountMinor: '1',
+      moneyAccountId: account,
+    })
+      .expect(409)
+      .expect(expectResponseCode('CUSTOMER_UNAVAILABLE'));
+    await postCustomerFinancial(
+      customerId,
+      'settlements',
+      customerFinancialRequest('1', { reason: 'manager attempt' }),
+      manager,
+    ).expect(403);
+
+    const foreignCustomer = await createCustomer(foreignOwner);
+    const foreignSale = await postCreditSale(
+      foreignCustomer,
+      '10',
+      '2026-03-02T10:00:00Z',
+      foreignOwner,
+    );
+    await request(server)
+      .get(`/v1/customers/${foreignCustomer}/credit-history`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(404);
+
+    await postCollection(customerId, {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T09:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: account, amountMinor: '100' }],
+    }).expect(201);
+    await postCustomerFinancial(
+      customerId,
+      'credit/applications',
+      customerFinancialRequest('1', {
+        allocationMode: 'custom',
+        allocations: [
+          {
+            targetType: 'sale_receivable',
+            targetId: foreignSale.sale.id,
+            amountMinor: '1',
+          },
+        ],
+      }),
+    ).expect(404);
+    await postCustomerFinancial(
+      customerId,
+      'credit/applications',
+      customerFinancialRequest('50', {
+        allocationMode: 'custom',
+        allocations: [{ targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '50' }],
+      }),
+    ).expect(201);
+    await request(server)
+      .post(`/v1/sales/${sale.operationId}/cancel`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .send({ operationId: randomUUID(), occurredAt: '2026-09-15T12:20:00Z' })
+      .expect(409);
+
+    const readOnlyCustomer = await createCustomer(readOnlyOwner);
+    await postCustomerFinancial(
+      readOnlyCustomer,
+      'settlements',
+      customerFinancialRequest('1', { reason: 'read-only attempt' }),
+      readOnlyOwner,
+    ).expect(403);
+
+    const closedCustomer = await createCustomer();
+    const opening = await postOpening(closedCustomer, '10', '2026-05-01T10:00:00Z');
+    await db().admin.query(
+      `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
+       where store_id=$1 and id=$2`,
+      [owner.storeId, opening.accountingPeriodId],
+    );
+    await postCustomerFinancial(
+      closedCustomer,
+      'settlements',
+      customerFinancialRequest('1', {
+        occurredAt: '2026-05-02T10:00:00Z',
+        reason: 'closed period attempt',
+      }),
+    )
+      .expect(409)
+      .expect(expectResponseCode('ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE'));
+  });
+
+  it('serializes competing Credit consumption and Receivable reductions with exact replay', async () => {
+    const account = await createAccount();
+    const customerId = await createCustomer();
+    const sale = await postCreditSale(customerId, '100', '2026-08-01T10:00:00Z');
+    await postCollection(customerId, {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T09:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: account, amountMinor: '100' }],
+    }).expect(201);
+
+    const applyBody = customerFinancialRequest('100');
+    const competingCredit = await Promise.all([
+      postCustomerFinancial(customerId, 'credit/applications', applyBody),
+      postCustomerFinancial(customerId, 'credit/refunds', {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T12:00:00Z',
+        amountMinor: '100',
+        moneyAccountId: account,
+      }),
+    ]);
+    expect(competingCredit.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    const replayCustomer = await createCustomer();
+    const replaySale = await postCreditSale(replayCustomer, '100', '2026-08-02T10:00:00Z');
+    const settlementBody = customerFinancialRequest('100', {
+      allocationMode: 'custom',
+      allocations: [
+        { targetType: 'sale_receivable', targetId: replaySale.sale.id, amountMinor: '100' },
+      ],
+      reason: 'agreed waiver',
+    });
+    const [first, replay] = await Promise.all([
+      postCustomerFinancial(replayCustomer, 'settlements', settlementBody),
+      postCustomerFinancial(replayCustomer, 'settlements', settlementBody),
+    ]);
+    expect([first.status, replay.status].every((status) => [201, 409].includes(status))).toBe(true);
+    expect(
+      [first.status, replay.status].filter((status) => status === 201).length,
+    ).toBeGreaterThanOrEqual(1);
+    const operationId = settlementBody.operationId as string;
+    const effects = await db().admin.query<{ count: number }>(
+      `select count(*)::int as count from ledger.customer_ledger_entries
+       where store_id=$1 and transaction_group_id=$2 and entry_type='settlement'`,
+      [owner.storeId, operationId],
+    );
+    expect(effects.rows[0]).toEqual({ count: 1 });
+    await postCustomerFinancial(replayCustomer, 'settlements', {
+      ...settlementBody,
+      amountMinor: '99',
+      allocations: [
+        { targetType: 'sale_receivable', targetId: replaySale.sale.id, amountMinor: '99' },
+      ],
+    })
+      .expect(409)
+      .expect(expectResponseCode('OPERATION_ID_CONFLICT'));
+
+    const collectionCustomer = await createCustomer();
+    await postOpening(collectionCustomer, '100', '2026-08-03T10:00:00Z');
+    const competingDebt = await Promise.all([
+      postCollection(
+        collectionCustomer,
+        fifoRequest([{ moneyAccountId: account, amountMinor: '100' }]),
+      ),
+      postCustomerFinancial(
+        collectionCustomer,
+        'settlements',
+        customerFinancialRequest('100', { reason: 'concurrent waiver' }),
+      ),
+    ]);
+    expect(competingDebt.map((response) => response.status).sort()).toEqual([201, 409]);
+    const remaining = await db().admin.query<{ receivable: string }>(
+      `select coalesce(receivable_minor,0)::text as receivable
+       from ledger.v_customer_balances where store_id=$1 and customer_id=$2`,
+      [owner.storeId, collectionCustomer],
+    );
+    expect(remaining.rows[0]).toEqual({ receivable: '0' });
+    expect(sale.receivable).not.toBeNull();
+
+    const overpaymentCustomer = await createCustomer();
+    await postOpening(overpaymentCustomer, '100', '2026-08-04T10:00:00Z');
+    const overpayments = await Promise.all([
+      postCollection(
+        overpaymentCustomer,
+        fifoRequest([{ moneyAccountId: account, amountMinor: '150' }], {
+          overpaymentHandling: 'keep_as_customer_credit',
+        }),
+      ),
+      postCollection(
+        overpaymentCustomer,
+        fifoRequest([{ moneyAccountId: account, amountMinor: '150' }], {
+          overpaymentHandling: 'keep_as_customer_credit',
+        }),
+      ),
+    ]);
+    expect(overpayments.map((response) => response.status).sort()).toEqual([201, 409]);
+    const overpaymentBalance = await db().admin.query<{ credit: string }>(
+      `select credit_minor::text as credit from ledger.v_customer_balances
+       where store_id=$1 and customer_id=$2`,
+      [owner.storeId, overpaymentCustomer],
+    );
+    expect(overpaymentBalance.rows[0]).toEqual({ credit: '50' });
+  });
+
+  it('rolls back Customer Credit refund facts and operation claim after a child movement failure', async () => {
+    const customerId = await createCustomer();
+    const account = await createAccount();
+    const advance = await postCollection(customerId, {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-15T09:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: account, amountMinor: '100' }],
+    }).expect(201);
+    const operationId = randomUUID();
+    const discriminator = 'customer-credit-refund-money';
+    await db().admin.query(
+      `insert into ledger.money_movements(
+        id,store_id,account_id,accounting_period_id,movement_type,amount_delta_minor,
+        reference_type,reference_id,transaction_group_id,occurred_at,operation_id
+      ) values($1,$2,$3,$4,'other',1,'fixture',$5,$5,'2026-09-15T10:00:00Z',$6)`,
+      [
+        deriveMoneyFactId(operationId, discriminator),
+        owner.storeId,
+        account,
+        (advance.body as CustomerCollectionPostingResponse).accountingPeriodId,
+        randomUUID(),
+        deriveMoneyFactOperationId(operationId, discriminator),
+      ],
+    );
+    await postCustomerFinancial(customerId, 'credit/refunds', {
+      operationId,
+      occurredAt: '2026-09-15T12:00:00Z',
+      amountMinor: '50',
+      moneyAccountId: account,
+    }).expect(500);
+    const residue = await db().admin.query<{ ledger: number; operation: number; credit: string }>(
+      `select
+        (select count(*)::int from ledger.customer_ledger_entries
+          where store_id=$1 and transaction_group_id=$2) as ledger,
+        (select count(*)::int from sync.processed_operations
+          where store_id=$1 and operation_id=$2) as operation,
+        (select credit_minor::text from ledger.v_customer_balances
+          where store_id=$1 and customer_id=$3) as credit`,
+      [owner.storeId, operationId, customerId],
+    );
+    expect(residue.rows[0]).toEqual({ ledger: 0, operation: 0, credit: '100' });
   });
 });

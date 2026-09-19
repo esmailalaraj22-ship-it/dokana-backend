@@ -15,11 +15,34 @@ export interface CustomerPaymentAllocationMatrixItem extends CustomerReceivableS
   paymentAmountMinor: bigint;
 }
 
+export interface CustomerPaymentTenderPartition {
+  moneyAccountId: string;
+  allocatedMinor: bigint;
+  creditCreatedMinor: bigint;
+}
+
+export interface CustomerPaymentPartition {
+  allocations: CustomerPaymentAllocationMatrixItem[];
+  tenders: CustomerPaymentTenderPartition[];
+}
+
 export function partitionCustomerCollection(
   tenders: CustomerCollectionTenderCommand[],
   settlementPlan: CustomerReceivableSettlementPlanItem[],
 ): CustomerPaymentAllocationMatrixItem[] {
+  const partition = partitionCustomerPayment(tenders, settlementPlan);
+  if (partition.tenders.some((tender) => tender.creditCreatedMinor !== 0n)) {
+    throw new RangeError('Customer collection totals do not match.');
+  }
+  return partition.allocations;
+}
+
+export function partitionCustomerPayment(
+  tenders: CustomerCollectionTenderCommand[],
+  settlementPlan: CustomerReceivableSettlementPlanItem[],
+): CustomerPaymentPartition {
   const result: CustomerPaymentAllocationMatrixItem[] = [];
+  const tenderPartitions: CustomerPaymentTenderPartition[] = [];
   let tenderIndex = 0;
   let planIndex = 0;
   let tenderRemaining = tenders[0]?.amountMinor ?? 0n;
@@ -50,8 +73,25 @@ export function partitionCustomerCollection(
     }
   }
 
-  if (tenderIndex !== tenders.length || planIndex !== settlementPlan.length) {
+  if (planIndex !== settlementPlan.length) {
     throw new RangeError('Customer collection totals do not match.');
   }
-  return result;
+
+  for (const tender of tenders) {
+    if (tender.amountMinor <= 0n) {
+      throw new RangeError('Customer collection allocation input is inconsistent.');
+    }
+    const allocatedMinor = result
+      .filter((item) => item.moneyAccountId === tender.moneyAccountId)
+      .reduce((total, item) => total + item.amountMinor, 0n);
+    if (allocatedMinor > tender.amountMinor) {
+      throw new RangeError('Customer collection allocation input is inconsistent.');
+    }
+    tenderPartitions.push({
+      moneyAccountId: tender.moneyAccountId,
+      allocatedMinor,
+      creditCreatedMinor: tender.amountMinor - allocatedMinor,
+    });
+  }
+  return { allocations: result, tenders: tenderPartitions };
 }

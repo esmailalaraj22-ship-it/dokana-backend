@@ -1,4 +1,7 @@
-import { partitionCustomerCollection } from './customer-payment-allocation';
+import {
+  partitionCustomerCollection,
+  partitionCustomerPayment,
+} from './customer-payment-allocation';
 import type { CustomerCollectionTenderCommand } from './customer-payment-posting-command';
 
 const tender = (moneyAccountId: string, amountMinor: bigint): CustomerCollectionTenderCommand => ({
@@ -70,5 +73,38 @@ describe('S15.3 mixed-tender allocation matrix', () => {
         [{ targetType: 'sale_receivable', targetId: 'sale', originId: 'origin', amountMinor: 1n }],
       ),
     ).toThrow(RangeError);
+  });
+
+  it('partitions deterministic mixed-tender excess into Customer Credit', () => {
+    const partition = partitionCustomerPayment(
+      [tender('a', 200n), tender('b', 200n)],
+      [
+        {
+          targetType: 'sale_receivable',
+          targetId: 'sale',
+          originId: 'origin',
+          amountMinor: 300n,
+        },
+      ],
+    );
+    expect(
+      partition.allocations.map(({ moneyAccountId, amountMinor }) => ({
+        moneyAccountId,
+        amountMinor,
+      })),
+    ).toEqual([
+      { moneyAccountId: 'a', amountMinor: 200n },
+      { moneyAccountId: 'b', amountMinor: 100n },
+    ]);
+    expect(partition.tenders).toEqual([
+      { moneyAccountId: 'a', allocatedMinor: 200n, creditCreatedMinor: 0n },
+      { moneyAccountId: 'b', allocatedMinor: 100n, creditCreatedMinor: 100n },
+    ]);
+  });
+
+  it('partitions a zero-debt advance entirely into Customer Credit', () => {
+    expect(partitionCustomerPayment([tender('a', 200n)], []).tenders).toEqual([
+      { moneyAccountId: 'a', allocatedMinor: 0n, creditCreatedMinor: 200n },
+    ]);
   });
 });

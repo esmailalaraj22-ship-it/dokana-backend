@@ -1,5 +1,7 @@
 import type {
   CustomerCollectionAllocationMode,
+  CustomerOverpaymentHandling,
+  CustomerPaymentIntent,
   CustomerReceivableTargetType,
 } from './customer-payment-posting-command';
 import type { PostedMoneyMovement } from '../money-movements/money-movement.types';
@@ -10,7 +12,7 @@ export interface PostedCustomerCollectionPayment {
   moneyAccountId: string;
   amountMinor: string;
   allocatedTotalMinor: string;
-  creditCreatedMinor: '0';
+  creditCreatedMinor: string;
   paymentAt: string;
   senderAccountName: string | null;
   externalReference: string | null;
@@ -35,14 +37,18 @@ export interface CustomerCollectionPostingResponse {
   operationId: string;
   collectionId: string;
   customerId: string;
+  intent?: CustomerPaymentIntent;
   allocationMode: CustomerCollectionAllocationMode;
+  overpaymentHandling?: CustomerOverpaymentHandling | null;
   amountMinor: string;
+  excessMinor?: string;
   businessDate: string;
   postingDate: string;
   accountingPeriodId: string;
   payments: PostedCustomerCollectionPayment[];
   allocations: PostedCustomerCollectionAllocation[];
   moneyMovements: PostedMoneyMovement[];
+  refundMovement?: PostedMoneyMovement | null;
 }
 
 export type CustomerCollectionFailureCode =
@@ -54,6 +60,8 @@ export type CustomerCollectionFailureCode =
   | 'CUSTOMER_COLLECTION_TARGET_INTEGRITY_CONFLICT'
   | 'CUSTOMER_COLLECTION_TARGET_NOT_ACTIVE'
   | 'CUSTOMER_COLLECTION_TARGET_NOT_FOUND'
+  | 'CUSTOMER_OVERPAYMENT_CHOICE_REQUIRED'
+  | 'CUSTOMER_OVERPAYMENT_NOT_PRESENT'
   | 'CUSTOMER_NOT_FOUND'
   | 'CUSTOMER_UNAVAILABLE'
   | 'MONEY_ACCOUNT_NOT_FOUND'

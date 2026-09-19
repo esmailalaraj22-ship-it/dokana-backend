@@ -119,7 +119,7 @@ interface CustomerFinancialPhysicalRow extends Record<string, unknown> {
   phone: string;
   status: 'active' | 'archived';
   archivedAt: string | null;
-  netDueMinor: string;
+  receivableMinor: string;
 }
 
 interface SalePositionPhysicalRow extends Record<string, unknown> {
@@ -326,7 +326,7 @@ export class SaleReadRepository {
           customer.phone,
           customer.status,
           customer.archived_at as "archivedAt",
-          coalesce(balance.net_due_minor, 0)::text as "netDueMinor"
+          coalesce(balance.receivable_minor, 0)::text as "receivableMinor"
         from ledger.customers customer
         left join ledger.v_customer_balances balance
           on balance.store_id=customer.store_id and balance.customer_id=customer.id
@@ -367,6 +367,14 @@ export class SaleReadRepository {
               from ledger.customer_ledger_entries adjustment
               where adjustment.store_id=origin.store_id
                 and adjustment.reversal_of_id=origin.id
+            ), 0) + coalesce((
+              select sum(adjustment.receivable_delta_minor)
+              from ledger.customer_ledger_entries adjustment
+              where adjustment.store_id=origin.store_id
+                and adjustment.customer_id=origin.customer_id
+                and adjustment.entry_type in ('credit_used','settlement')
+                and adjustment.reference_type='customer_opening_receivable'
+                and adjustment.reference_id=origin.id
             ), 0) - coalesce((
               select sum(allocation.amount_minor)
               from ledger.customer_payment_allocations allocation
@@ -398,7 +406,7 @@ export class SaleReadRepository {
         order by origin.occurred_at desc, origin.id desc
         limit ${criteria.limit + 1}
       `);
-      const netDueMinor = BigInt(customer.netDueMinor);
+      const receivableMinor = BigInt(customer.receivableMinor);
       return {
         customer: {
           id: customer.id,
@@ -406,7 +414,7 @@ export class SaleReadRepository {
           phone: customer.phone,
           status: customer.status,
           archivedAt: customer.archivedAt === null ? null : new Date(customer.archivedAt),
-          outstandingMinor: netDueMinor > 0n ? netDueMinor : 0n,
+          outstandingMinor: receivableMinor > 0n ? receivableMinor : 0n,
         },
         receivables: result.rows.map((row) => this.mapReceivable(row)),
       };

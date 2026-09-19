@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 
 import { parseCustomerCollectionPostingCommand } from './customer-payment-posting-command';
 
@@ -57,6 +58,35 @@ describe('S15.3 Customer collection command', () => {
       occurredAt: new Date('2026-09-14T10:00:00.000Z'),
       allocations: [],
     });
+  });
+
+  it('preserves the S15.3 canonical hash for an unchanged legacy request', () => {
+    const body = fifo();
+    const command = parseCustomerCollectionPostingCommand(ids.customer, body);
+    const expected = createHash('sha256')
+      .update(
+        JSON.stringify({
+          v: 1,
+          action: 'customer_collections.post',
+          customerId: ids.customer,
+          occurredAt: '2026-09-14T10:00:00.000Z',
+          allocationMode: 'fifo',
+          amountMinor: '300',
+          tenders: [
+            {
+              moneyAccountId: ids.cash,
+              amountMinor: '300',
+              senderAccountName: null,
+              externalReference: 'COLLECTION-1',
+              notes: 'Installment',
+            },
+          ],
+          allocations: [],
+        }),
+        'utf8',
+      )
+      .digest('hex');
+    expect(command.requestHash).toBe(expected);
   });
 
   it('canonicalizes tender and CUSTOM target order before hashing', () => {
@@ -165,5 +195,77 @@ describe('S15.3 Customer collection command', () => {
         original.requestHash,
       );
     }
+  });
+
+  it('parses explicit retained and refunded overpayment choices', () => {
+    const retained = parseCustomerCollectionPostingCommand(
+      ids.customer,
+      fifo({ overpaymentHandling: 'keep_as_customer_credit' }),
+    );
+    const refunded = parseCustomerCollectionPostingCommand(
+      ids.customer,
+      fifo({
+        overpaymentHandling: 'refund_excess',
+        refundMoneyAccountId: ids.bank,
+      }),
+    );
+    expect(retained).toMatchObject({
+      intent: 'collect_receivable',
+      overpaymentHandling: 'keep_as_customer_credit',
+      refundMoneyAccountId: null,
+    });
+    expect(refunded).toMatchObject({
+      intent: 'collect_receivable',
+      overpaymentHandling: 'refund_excess',
+      refundMoneyAccountId: ids.bank,
+    });
+    expect(refunded.requestHash).not.toBe(retained.requestHash);
+  });
+
+  it('parses a distinct zero-debt Customer Advance intent', () => {
+    const command = parseCustomerCollectionPostingCommand(ids.customer, {
+      operationId: ids.operation,
+      occurredAt: '2026-09-14T10:00:00Z',
+      intent: 'customer_advance',
+      tenders: [{ moneyAccountId: ids.cash, amountMinor: '200' }],
+    });
+    expect(command).toMatchObject({
+      intent: 'customer_advance',
+      allocationMode: 'fifo',
+      amountMinor: 200n,
+      allocations: [],
+      overpaymentHandling: null,
+    });
+  });
+
+  it('allows CUSTOM debt allocation below tender total only with explicit handling', () => {
+    const command = parseCustomerCollectionPostingCommand(
+      ids.customer,
+      custom({
+        overpaymentHandling: 'keep_as_customer_credit',
+        allocations: [{ targetType: 'sale_receivable', targetId: ids.sale, amountMinor: '250' }],
+      }),
+    );
+    expect(command.amountMinor).toBe(300n);
+    expect(command.allocations[0]?.amountMinor).toBe(250n);
+  });
+
+  it.each([
+    ['refund choice without account', fifo({ overpaymentHandling: 'refund_excess' })],
+    ['refund account without refund choice', fifo({ refundMoneyAccountId: ids.bank })],
+    [
+      'advance with collection fields',
+      {
+        operationId: ids.operation,
+        occurredAt: '2026-09-14T10:00:00Z',
+        intent: 'customer_advance',
+        allocationMode: 'fifo',
+        tenders: [{ moneyAccountId: ids.cash, amountMinor: '200' }],
+      },
+    ],
+  ])('rejects %s', (_name, body) => {
+    expect(() => parseCustomerCollectionPostingCommand(ids.customer, body)).toThrow(
+      BadRequestException,
+    );
   });
 });

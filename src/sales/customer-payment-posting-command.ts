@@ -58,24 +58,42 @@ const commonRequest = {
   tenders: z.array(tender).min(1).max(CUSTOMER_COLLECTION_MAX_TENDERS),
 };
 
-const request = z.discriminatedUnion('allocationMode', [
+const collectionCommon = {
+  ...commonRequest,
+  intent: z.literal('collect_receivable').optional(),
+  overpaymentHandling: z.enum(['keep_as_customer_credit', 'refund_excess']).optional(),
+  refundMoneyAccountId: identifier.optional(),
+};
+
+const collectionRequest = z.discriminatedUnion('allocationMode', [
   z
     .object({
-      ...commonRequest,
+      ...collectionCommon,
       allocationMode: z.literal('fifo'),
     })
     .strict(),
   z
     .object({
-      ...commonRequest,
+      ...collectionCommon,
       allocationMode: z.literal('custom'),
       allocations: z.array(allocation).min(1).max(CUSTOMER_COLLECTION_MAX_CUSTOM_ALLOCATIONS),
     })
     .strict(),
 ]);
 
+const advanceRequest = z
+  .object({
+    ...commonRequest,
+    intent: z.literal('customer_advance'),
+  })
+  .strict();
+
+const request = z.union([collectionRequest, advanceRequest]);
+
 export type CustomerCollectionAllocationMode = 'fifo' | 'custom';
 export type CustomerReceivableTargetType = 'sale_receivable' | 'opening_receivable';
+export type CustomerPaymentIntent = 'collect_receivable' | 'customer_advance';
+export type CustomerOverpaymentHandling = 'keep_as_customer_credit' | 'refund_excess';
 
 export interface CustomerCollectionTenderCommand {
   moneyAccountId: string;
@@ -95,7 +113,10 @@ export interface CustomerCollectionPostingCommand {
   operationId: string;
   customerId: string;
   occurredAt: Date;
+  intent: CustomerPaymentIntent;
   allocationMode: CustomerCollectionAllocationMode;
+  overpaymentHandling: CustomerOverpaymentHandling | null;
+  refundMoneyAccountId: string | null;
   amountMinor: bigint;
   tenders: CustomerCollectionTenderCommand[];
   allocations: CustomerCollectionAllocationCommand[];
@@ -125,7 +146,7 @@ export function parseCustomerCollectionPostingCommand(
   const amountMinor = sumMoney(tenders.map((item) => item.amountMinor));
 
   const allocations =
-    parsed.data.allocationMode === 'custom'
+    'allocationMode' in parsed.data && parsed.data.allocationMode === 'custom'
       ? parsed.data.allocations
           .map((item) => ({
             targetType: item.targetType,
@@ -141,18 +162,38 @@ export function parseCustomerCollectionPostingCommand(
     throw validationError();
   }
   if (
+    'allocationMode' in parsed.data &&
     parsed.data.allocationMode === 'custom' &&
-    sumMoney(allocations.map((item) => item.amountMinor)) !== amountMinor
+    (sumMoney(allocations.map((item) => item.amountMinor)) > amountMinor ||
+      (!parsed.data.overpaymentHandling &&
+        sumMoney(allocations.map((item) => item.amountMinor)) !== amountMinor))
   ) {
     throw validationError();
   }
 
-  const semantic = {
+  if (
+    'allocationMode' in parsed.data &&
+    (parsed.data.overpaymentHandling === 'refund_excess') !==
+      (parsed.data.refundMoneyAccountId !== undefined)
+  ) {
+    throw validationError();
+  }
+
+  const intent: CustomerPaymentIntent =
+    'allocationMode' in parsed.data ? 'collect_receivable' : 'customer_advance';
+  const allocationMode: CustomerCollectionAllocationMode =
+    'allocationMode' in parsed.data ? parsed.data.allocationMode : 'fifo';
+  const overpaymentHandling =
+    'allocationMode' in parsed.data ? (parsed.data.overpaymentHandling ?? null) : null;
+  const refundMoneyAccountId =
+    'allocationMode' in parsed.data ? (parsed.data.refundMoneyAccountId ?? null) : null;
+
+  const semanticBase = {
     v: CUSTOMER_COLLECTION_REQUEST_VERSION,
     action: 'customer_collections.post',
     customerId: customerId.data,
     occurredAt: parsed.data.occurredAt,
-    allocationMode: parsed.data.allocationMode,
+    allocationMode,
     amountMinor: amountMinor.toString(),
     tenders: tenders.map((item) => ({
       moneyAccountId: item.moneyAccountId,
@@ -167,12 +208,23 @@ export function parseCustomerCollectionPostingCommand(
       amountMinor: item.amountMinor.toString(),
     })),
   };
+  const legacyRequest =
+    'allocationMode' in parsed.data &&
+    parsed.data.intent === undefined &&
+    parsed.data.overpaymentHandling === undefined &&
+    parsed.data.refundMoneyAccountId === undefined;
+  const semantic = legacyRequest
+    ? semanticBase
+    : { ...semanticBase, intent, overpaymentHandling, refundMoneyAccountId };
 
   return {
     operationId: parsed.data.operationId,
     customerId: customerId.data,
     occurredAt: new Date(parsed.data.occurredAt),
-    allocationMode: parsed.data.allocationMode,
+    intent,
+    allocationMode,
+    overpaymentHandling,
+    refundMoneyAccountId,
     amountMinor,
     tenders,
     allocations,

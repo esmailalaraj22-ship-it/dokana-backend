@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S15.3 starting checkpoint | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
-| Closed execution history  | Stations S0-S14; S15.1-S15.3               |
-| Next candidate            | S15.4 - NEXT / NOT STARTED                 |
+| S15.4 starting checkpoint | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
+| Closed execution history  | Stations S0-S14; S15.1-S15.4               |
+| Next candidate            | S15.5 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S15.3 starting HEAD             | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
-| Starting `origin/main`          | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
+| S15.4 starting HEAD             | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
+| Starting `origin/main`          | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 14 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S14                                        |
-| Next task                       | S15.4 next; S15 open                       |
+| Next task                       | S15.5 next; S15 open                       |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -474,7 +474,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** OPEN; S15.1-S15.3 CLOSED; S15.4 NEXT - NOT STARTED.
+- **Status:** OPEN; S15.1-S15.4 CLOSED; S15.5 NEXT - NOT STARTED.
 - **Purpose:** Settle existing Customer receivables independently from sale posting.
 - **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
   accounting transaction boundary.
@@ -505,9 +505,20 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   balance protection; exact Money Movement integration; replay/idempotency; concurrency
   protection; atomic rollback; core Customer Payment list/detail and outstanding reads;
   and no Revenue, Inventory, or COGS effects.
-- **Still not implemented:** Overpayment Customer Credit, zero-debt advance, Customer
-  Credit consumption, excess/credit refund, debt waiver/Settlement, and Customer Payment
-  corrections.
+- **S15.4 delivered:** Explicit overpayment handling; retained Customer Credit; explicit
+  zero-debt Customer Advance; immediate excess refund; existing Credit refund from an
+  explicitly selected Money Account; FIFO/CUSTOM Credit application against Sale and
+  Opening Receivables without Money Movement; independent reasoned non-cash Receivable
+  Settlement; balance/history reads; idempotency; rollback; and Customer-level
+  concurrency protection. Database delta remains zero.
+- **Sale Credit integration:** PHYSICAL GAP - BACKEND-OWNER DATABASE DECISION REQUIRED
+  BEFORE S15 FINAL CLOSURE. The current Sale payment model requires a Money Account and
+  Money Movement and cannot safely represent Customer Credit as a non-money tender.
+  S15.4 does not fake this capability. The minimum future physical work is a typed,
+  lineage-preserving non-money Sale tender/effect integrated into the existing S14 Sale
+  posting authority.
+- **Still not implemented:** Customer Payment/Credit/Settlement immutable corrections and
+  the approved Customer Credit tender for a new Sale.
 - **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
 - **Closure intent:** Replay-safe receivable settlement with auditable balances.
 
@@ -773,8 +784,10 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.3 are
-closed, and S15 remains open with S15.4 next and not started.
+No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.4 are
+closed, and S15 remains open with S15.5 next and not started. A bounded Station-local
+database decision remains required for Customer Credit as a non-money Sale tender before
+S15 final closure.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -803,11 +816,11 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S14 - Sales Posting and Receivables        |
-| S15.3 starting checkpoint           | `4676938a3c0d7daf06a9a26a10eecc0c781c9c3d` |
-| Safe completed capabilities         | S0-S14; S15.1-S15.3                        |
+| S15.4 starting checkpoint           | `a367ea6cc4610ad1169c4463f1a78b85fd13bc27` |
+| Safe completed capabilities         | S0-S14; S15.1-S15.4                        |
 | First incomplete release dependency | S15 - Customer Collections and Settlement  |
-| Next candidate                      | S15.4 - NEXT / NOT STARTED                 |
+| Next candidate                      | S15.5 - NEXT / NOT STARTED                 |
 | S14 current status                  | CLOSED                                     |
 
-Do not start S15.4 from this document. It requires an explicit backend-owner execution
+Do not start S15.5 from this document. It requires an explicit backend-owner execution
 prompt.

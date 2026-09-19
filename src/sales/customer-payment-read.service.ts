@@ -64,6 +64,7 @@ export class CustomerPaymentReadService {
       return {
         customer: this.mapCustomer(result.customer),
         outstandingMinor: result.customer.outstandingMinor.toString(),
+        creditBalanceMinor: result.customer.creditBalanceMinor.toString(),
         payments: page.map((payment) => this.mapPayment(payment)),
         nextCursor:
           hasNextPage && last
@@ -100,6 +101,7 @@ export class CustomerPaymentReadService {
     return {
       customer: this.mapCustomer(result.customer),
       outstandingMinor: result.customer.outstandingMinor.toString(),
+      creditBalanceMinor: result.customer.creditBalanceMinor.toString(),
       payment: this.mapPayment(result),
       allocations: result.allocations.map((allocation) => this.mapAllocation(allocation)),
     };
