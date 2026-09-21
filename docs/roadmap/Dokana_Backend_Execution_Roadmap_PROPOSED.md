@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S15.5 starting checkpoint | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
-| Closed execution history  | Stations S0-S15                            |
-| Next candidate            | S16 - NEXT / NOT STARTED                   |
+| S16.1 starting checkpoint | `a20326133170bafc7e0583e7b446aa87aa95209c` |
+| Closed execution history  | Stations S0-S15; S16.1 planning complete   |
+| Next candidate            | S16.2 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S15.5 starting HEAD             | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
-| Starting `origin/main`          | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
+| S16.1 starting HEAD             | `a20326133170bafc7e0583e7b446aa87aa95209c` |
+| Starting `origin/main`          | `a20326133170bafc7e0583e7b446aa87aa95209c` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S15                                        |
-| Next task                       | S16 next; not started                      |
+| Next task                       | S16.2 next; not started                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -474,81 +474,101 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** CLOSED; S15.1 CLOSED; S15.2 CLOSED; S15.3 CLOSED; S15.4 CLOSED;
-  S15.4A CLOSED; S15.5 CLOSED.
-- **Purpose:** Settle existing Customer receivables independently from sale posting.
-- **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
-  accounting transaction boundary.
-- **Hard dependencies:** S10 money authority and S14 receivables.
-- **Soft dependencies:** S7 credit/default policies.
-- **Primary deliverables:** Customer payments; default/custom allocation; remaining
-  balance protection; overpayment credit/refund flow; independent settlement/discount
-  records; money effects; reversal and concurrency tests.
-- **Explicit non-scope:** Sale creation and destructive receivable edits.
-- **Coverage:** PRD customer collection, allocation, credit, and settlement rules.
-- **Known risks/migrations:** S15.1 verified the S14-to-S15 boundary, froze the approved
-  settlement policies, and proved that the Sale-only allocation shape could not represent
-  an Opening Receivable. Migration `0014` adds a nullable typed Opening Receivable origin
-  to `customer_payment_allocations`, makes the Sale and Opening targets mutually exclusive,
-  and enforces Store/Customer target identity while preserving payment-effect ledger
-  lineage and S14 Sale-correction dependencies. Customer Payment and allocation Drizzle
-  mappings now match PostgreSQL. The PostgreSQL reference remains unchanged; SQLite parity
-  is deferred to S19. Allocations cannot exceed payment or remaining receivable; Customer
-  debt is not expense and credit receipt is not sale revenue.
-- **Approved S15 policies:** Overpayment requires an explicit Customer Credit or Refund
-  choice. A zero-debt advance requires explicit advance/Customer Credit intent. Customer
-  Credit is a distinct Store liability to the Customer. Debt waiver is an independent
-  non-cash Receivable Settlement. Ordinary new S15 activity requires an archived Customer
-  to be restored first. Historical S15 correction behavior remains owned by S15.5.
-- **S15.3 delivered:** Later Customer money collection through one or mixed current
-  receiving Money Accounts; Sale and Opening Receivable allocation; deterministic FIFO
-  and explicit CUSTOM allocation; partial and full debt settlement; locked remaining-
-  balance protection; exact Money Movement integration; replay/idempotency; concurrency
-  protection; atomic rollback; core Customer Payment list/detail and outstanding reads;
-  and no Revenue, Inventory, or COGS effects.
-- **S15.4 delivered:** Explicit overpayment handling; retained Customer Credit; explicit
-  zero-debt Customer Advance; immediate excess refund; existing Credit refund from an
-  explicitly selected Money Account; FIFO/CUSTOM Credit application against Sale and
-  Opening Receivables without Money Movement; independent reasoned non-cash Receivable
-  Settlement; balance/history reads; idempotency; rollback; and Customer-level
-  concurrency protection. Database delta remains zero.
-- **S15.4A delivered:** Customer Credit may fund a new Sale through the typed, non-money
-  `sale_customer_credit_applications` tender relation and exact immutable Customer-ledger
-  Credit-use lineage. The existing S14 Sale authority supports Money + Credit + Receivable
-  combinations, locked Credit availability, reads, idempotency, rollback, concurrency,
-  and whole-Sale correction that restores Credit exactly once. The Credit portion creates
-  no Money Movement; `sale_payments` remains Money-only. Migration `0015` is the sole
-  physical delta, PostgreSQL is at 15 applied / 0 pending, the historical PostgreSQL
-  reference is unchanged, and SQLite parity remains deferred to S19.
-- **S15.5 delivered:** Immutable whole-operation cancellation/replacement for Customer
-  collections, retained-overpayment and immediate-refund collections, advances, Credit
-  applications, Credit refunds, and independent Receivable Settlements. Corrections preserve
-  original facts and periods, post in the current open period, enforce one active linear leaf,
-  protect consumed Customer Credit, support historical cancellation with archived Customers or
-  Money Accounts, revalidate replacement eligibility, preserve exact replay, and expose
-  operational lineage. Concurrency, rollback, RLS, read-only, and cross-Store behavior are
-  verified. Database delta is zero; PostgreSQL reference and SQLite remain unchanged, with
-  SQLite parity deferred to S19.
-- **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
-- **Closure intent:** Replay-safe receivable settlement with auditable balances.
+- **Status:** CLOSED; S15.1-S15.5 and S15.4A are closed.
+- **Delivered:** Customer collections, Credit, settlement, Sale Credit tender, and
+  immutable active-leaf corrections.
+- **DB:** 15 applied / 0 pending; no DB change in S15.5.
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** NEXT - NOT STARTED.
+- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1 COMPLETE; S16.2 NEXT.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
 - **Hard dependencies:** S9 periods and S10 money/owner authority.
 - **Soft dependencies:** S7 defaults and S21 attachments.
-- **Primary deliverables:** Categories; paid/due expense recognition; liabilities;
-  cash/transfer/owner-funded payment; manual recurrence metadata; reversal and audit.
+- **Physical readiness:** Existing PostgreSQL tables represent categories, Expense
+  recognition, one-Expense-to-many-Payments, Money Account/owner funding, and derived
+  outstanding. One Payment belongs to one Expense. No S16 database blocker was found.
+- **Authority boundary:** `expenses.amount_minor` is the recognition amount; posted
+  `expense_payments` are settlement facts; outstanding is derived from posted Payments.
+  `expenses.paid_total_minor` is not authoritative for later settlement and its SQLite
+  projection behavior requires S19 compatibility review.
 - **Explicit non-scope:** Owner-ledger foundation, supplier invoice posting, automatic
-  recurrence scheduling, and attachment storage implementation.
+  recurrence scheduling, attachment storage, and mobile/SQLite implementation.
 - **Coverage:** PRD expense recognition and payment requirements.
-- **Known risks/migrations:** Paying an already recognized due expense must not recognize
-  expense twice; owner-paid expense creates the correct owner claim.
+- **Known risks:** Paying a due Expense must not recognize Expense twice; owner-funded
+  payment creates an Owner claim and no fake Money Movement; recurrence policy beyond
+  manual entry is not inferred from the current schema.
 - **Start condition:** S9-S10 closed and expense lifecycle approved.
 - **Closure intent:** Single-recognition expense accounting with correct settlement.
+
+### S16.1 - Expense Orientation and Execution Decomposition
+
+- **Status:** COMPLETE.
+- **Purpose:** Verify physical readiness and freeze dependency-correct execution stages.
+- **Deliverables:** PostgreSQL/SQLite/Drizzle/application assessment; accounting boundary;
+  database-blocker decision; S16.2-S16.5 plan.
+- **Non-scope:** Business logic, API, tests, migrations, and database writes.
+- **DB:** Zero delta; 15 applied / 0 pending.
+- **Verification:** Repository/roadmap authority, migration checksums, live catalog, RLS,
+  S9 posting context, and S10 Money/Owner interfaces inspected.
+- **Exit:** Roadmap-only plan committed and S16.2 identified.
+
+### S16.2 - Expense Categories and Recognition Foundation
+
+- **Status:** NEXT - NOT STARTED.
+- **Purpose:** Add the mapped catalog and single-recognition paid/due Expense authority.
+- **Deliverables:** Drizzle mappings; Category lifecycle/reads; paid-now and due-later
+  Expense posting; bigint/server-derived accounting; S9 context; immediate Money or
+  owner-funded effects; core Expense reads and derived outstanding contract.
+- **Non-scope:** Later due-Expense Payments, corrections, attachment storage, automatic
+  recurrence, reporting, and SQLite implementation.
+- **DB:** Expected zero delta; stop for approval if contract verification disproves it.
+- **Verification:** Focused mapping/category/recognition tests plus real PostgreSQL RLS,
+  period, replay, rollback, and paid-now atomicity scenarios.
+- **Exit:** Categories and Expense recognition are review-approved without duplicate
+  Expense effects.
+
+### S16.3 - Due Expense Payments and Outstanding
+
+- **Status:** NOT STARTED.
+- **Purpose:** Settle recognized due Expenses without recognizing Expense again.
+- **Deliverables:** One-source-per-Payment Money Account or owner funding; partial/full
+  settlement; one Expense to many Payments; locked derived outstanding; idempotency,
+  concurrency, Payment reads, and exact Owner claim semantics.
+- **Non-scope:** Bulk one-Payment-to-many-Expenses allocation, corrections, Supplier
+  Payables, reporting, and recurrence scheduling.
+- **DB:** Expected zero delta; one Payment remains physically bound to one Expense.
+- **Verification:** Focused real PostgreSQL partial/full, overpayment rejection, Money,
+  Owner, replay, rollback, locking, RLS, read-only, and cross-tenant tests.
+- **Exit:** Later settlement changes only liability/outstanding and Money/Owner authority.
+
+### S16.4 - Immutable Expense and Payment Corrections
+
+- **Status:** NOT STARTED.
+- **Purpose:** Correct posted Expense and Payment operations without destructive editing.
+- **Deliverables:** Whole-operation cancel/replacement; current-period reversals; active-
+  leaf lineage; exact Money/Owner reversal; dependency guards; historical Category and
+  Money Account safety; correction reads.
+- **Non-scope:** Cross-domain returns, S17 orchestration, destructive edits, and closed-
+  period rewrites.
+- **DB:** Expected zero delta; stop if active-leaf safety requires a physical change.
+- **Verification:** Focused PostgreSQL reversal, replacement, dependency, duplicate,
+  rollback, archive-history, period, concurrency, RLS, and lineage tests.
+- **Exit:** Original facts remain auditable and every active effect reverses exactly once.
+
+### S16.5 - Final Expense Verification and Closure
+
+- **Status:** NOT STARTED.
+- **Purpose:** Prove S16 completeness and close the Station without adding capability.
+- **Deliverables:** Cross-stage accounting/security audit, focused regression, final
+  repository gates, Roadmap closure, and S17 handoff.
+- **Non-scope:** New Expense behavior, S17 implementation, reporting, sync, or files.
+- **DB:** No unreviewed delta; verify final applied/pending state and checksums.
+- **Verification:** Focused S16 regression first; full unit/broad integration only at the
+  approved final closure gate; reference/secret/tree checks.
+- **Exit:** Independent review and backend-owner approval close S16; S17 becomes next.
 
 ### S17 - Returns and Cross-Domain Corrections
 
@@ -794,8 +814,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S15 are closed. S16 is next and not
-started.
+No roadmap-level owner decision is open. Stations S0-S15 are closed, S16.1 planning is
+complete, and S16.2 is next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -823,11 +843,11 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S15 - Customer Collections and Settlement  |
-| S15.5 starting checkpoint           | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
-| Safe completed capabilities         | S0-S15                                     |
-| First incomplete release dependency | S16 - Expenses and Expense Payments        |
-| Next candidate                      | S16 - NEXT / NOT STARTED                   |
-| S15 current status                  | CLOSED                                     |
+| S16.1 starting checkpoint           | `a20326133170bafc7e0583e7b446aa87aa95209c` |
+| Safe completed capabilities         | S0-S15; S16.1 planning                     |
+| First incomplete release dependency | S16.2 - Expense Categories and Recognition |
+| Next candidate                      | S16.2 - NEXT / NOT STARTED                 |
+| S16 current status                  | OPEN; S16.1 COMPLETE                       |
 
-Do not start S16 from this document. It requires an explicit backend-owner execution
+Do not start S16.2 from this document. It requires an explicit backend-owner execution
 prompt.
