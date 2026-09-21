@@ -97,6 +97,7 @@ export class CustomerCreditReadService {
     return {
       id: row.id,
       operationId: row.operationId,
+      rootOperationId: row.rootOperationId,
       entryType: row.entryType,
       receivableDeltaMinor: row.receivableDeltaMinor,
       creditDeltaMinor: row.creditDeltaMinor,
@@ -107,8 +108,11 @@ export class CustomerCreditReadService {
           ? { id: row.moneyAccountId, name: row.moneyAccountName }
           : null,
       reason: row.reason,
+      reversalOfId: row.reversalOfId,
       occurredAt: new Date(row.occurredAt).toISOString(),
       createdAt: new Date(row.createdAt).toISOString(),
+      lineage: row.lineage,
+      correction: row.correction,
     };
   }
 

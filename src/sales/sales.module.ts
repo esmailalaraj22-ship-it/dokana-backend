@@ -9,6 +9,9 @@ import { CustomerCreditReadRepository } from './customer-credit-read.repository'
 import { CustomerCreditReadService } from './customer-credit-read.service';
 import { CustomerCreditRepository } from './customer-credit.repository';
 import { CustomerCreditService } from './customer-credit.service';
+import { CustomerFinancialCorrectionRepository } from './customer-financial-correction.repository';
+import { CustomerFinancialCorrectionReadRepository } from './customer-financial-correction-read.repository';
+import { CustomerFinancialCorrectionService } from './customer-financial-correction.service';
 import { CustomerPaymentPostingRepository } from './customer-payment-posting.repository';
 import { CustomerPaymentPostingService } from './customer-payment-posting.service';
 import { CustomerPaymentReadRepository } from './customer-payment-read.repository';
@@ -47,6 +50,9 @@ import { SalesController } from './sales.controller';
     CustomerCreditService,
     CustomerCreditReadRepository,
     CustomerCreditReadService,
+    CustomerFinancialCorrectionRepository,
+    CustomerFinancialCorrectionReadRepository,
+    CustomerFinancialCorrectionService,
   ],
 })
 export class SalesModule {}

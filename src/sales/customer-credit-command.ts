@@ -17,8 +17,7 @@ const identifier = z
   .transform((value) => value.toLowerCase());
 const positiveMoney = z
   .string()
-  .regex(/^[1-9][0-9]{0,18}$/)
-  .refine((value) => BigInt(value) <= MAX_MONEY_MINOR);
+  .refine((value) => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= MAX_MONEY_MINOR);
 const instant = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/)

@@ -22,6 +22,7 @@ import type {
   CustomerCreditHistoryResponse,
   CustomerFinancialResponse,
 } from '../src/sales/customer-credit.types';
+import type { CustomerFinancialCorrectionResponse } from '../src/sales/customer-financial-correction.types';
 import type { CustomerCollectionPostingResponse } from '../src/sales/customer-payment-posting.types';
 import type {
   CustomerPaymentDetailResponse,
@@ -139,6 +140,55 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
       .post(`/v1/customers/${customerId}/${path}`)
       .set('authorization', `Bearer ${identity.token}`)
       .send(body);
+  }
+
+  function postCustomerFinancialCorrection(
+    customerId: string,
+    path: 'payments' | 'credit/applications' | 'credit/refunds' | 'settlements',
+    targetOperationId: string,
+    intent: 'cancel' | 'edit',
+    body: Record<string, unknown>,
+    identity: Identity = owner,
+  ): request.Test {
+    return request(server)
+      .post(`/v1/customers/${customerId}/${path}/${targetOperationId}/${intent}`)
+      .set('authorization', `Bearer ${identity.token}`)
+      .send(body);
+  }
+
+  function correctionRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      operationId: randomUUID(),
+      occurredAt: '2026-09-20T12:00:00Z',
+      reason: 'Correct posted Customer settlement',
+      ...overrides,
+    };
+  }
+
+  async function customerBalances(
+    customerId: string,
+    identity: Identity = owner,
+  ): Promise<{ receivable: string; credit: string }> {
+    const row = (
+      await db().admin.query<{ receivable: string; credit: string }>(
+        `select receivable_minor::text as receivable,credit_minor::text as credit
+         from ledger.v_customer_balances where store_id=$1 and customer_id=$2`,
+        [identity.storeId, customerId],
+      )
+    ).rows[0];
+    return row ?? { receivable: '0', credit: '0' };
+  }
+
+  async function moneyBalance(accountId: string, identity: Identity = owner): Promise<string> {
+    return (
+      (
+        await db().admin.query<{ balance: string }>(
+          `select coalesce(balance_minor,0)::text as balance
+         from ledger.v_money_account_balances where store_id=$1 and account_id=$2`,
+          [identity.storeId, accountId],
+        )
+      ).rows[0]?.balance ?? '0'
+    );
   }
 
   function customerFinancialRequest(
@@ -1921,5 +1971,917 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
       [owner.storeId, operationId, customerId],
     );
     expect(residue.rows[0]).toEqual({ ledger: 0, operation: 0, credit: '100' });
+  });
+
+  describe('S15.5 immutable Customer financial corrections', () => {
+    it('cancels a mixed collection as one root and preserves replay and operational history', async () => {
+      const customerId = await createCustomer();
+      const cash = await createAccount();
+      const bank = await createAccount();
+      const opening = await postOpening(customerId, '100', '2026-09-10T09:00:00Z');
+      const sale = await postCreditSale(customerId, '200', '2026-09-10T10:00:00Z');
+      const originalRequest = customRequest(
+        [
+          { moneyAccountId: cash, amountMinor: '100' },
+          { moneyAccountId: bank, amountMinor: '200' },
+        ],
+        [
+          { targetType: 'opening_receivable', targetId: opening.receivable.id, amountMinor: '100' },
+          { targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '200' },
+        ],
+      );
+      const original = (await postCollection(customerId, originalRequest).expect(201))
+        .body as CustomerCollectionPostingResponse;
+      const correctionBody = correctionRequest();
+      const corrected = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'payments',
+          original.operationId,
+          'cancel',
+          correctionBody,
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+
+      expect(corrected).toMatchObject({
+        targetOperationId: original.operationId,
+        family: 'customer_collection',
+        intent: 'cancel',
+        activeOperationId: null,
+      });
+      expect(corrected.reversal.ledgerEffects).toHaveLength(original.allocations.length);
+      expect(corrected.reversal.moneyMovements).toHaveLength(2);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '300', credit: '0' });
+      expect(await moneyBalance(cash)).toBe('0');
+      expect(await moneyBalance(bank)).toBe('0');
+
+      const replay = await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        original.operationId,
+        'cancel',
+        correctionBody,
+      ).expect(201);
+      expect(replay.body).toEqual(corrected);
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        original.operationId,
+        'cancel',
+        { ...correctionBody, reason: 'Changed reuse' },
+      )
+        .expect(409)
+        .expect(expectResponseCode('OPERATION_ID_CONFLICT'));
+      expect((await postCollection(customerId, originalRequest).expect(201)).body).toEqual(
+        original,
+      );
+
+      const payments = (await getCustomerPayments(customerId).expect(200))
+        .body as CustomerPaymentListResponse;
+      expect(payments.payments).toHaveLength(2);
+      expect(
+        payments.payments.every(
+          (payment) =>
+            payment.status === 'cancelled' &&
+            payment.lineage.state === 'cancelled' &&
+            payment.lineage.correctedByOperationId === corrected.operationId &&
+            payment.lineage.currentActiveOperationId === null,
+        ),
+      ).toBe(true);
+      const details = await Promise.all(
+        original.payments.map(
+          async (payment) =>
+            (
+              await request(server)
+                .get(`/v1/customers/${customerId}/payments/${payment.id}`)
+                .set('authorization', `Bearer ${owner.token}`)
+                .expect(200)
+            ).body as CustomerPaymentDetailResponse,
+        ),
+      );
+      const targetTypes = new Set(
+        details.flatMap((detail) => detail.allocations.map((allocation) => allocation.target.type)),
+      );
+      expect(targetTypes.has('SALE_RECEIVABLE')).toBe(true);
+      expect(targetTypes.has('OPENING_RECEIVABLE')).toBe(true);
+      expect(details.every((detail) => detail.corrections.length === 1)).toBe(true);
+      expect(details[0]?.corrections).toEqual([corrected]);
+    });
+
+    it('replaces collections atomically and enforces a linear active-leaf chain', async () => {
+      const customerId = await createCustomer();
+      const cash = await createAccount();
+      const bank = await createAccount();
+      await postOpening(customerId, '300', '2026-09-11T09:00:00Z');
+      const original = (
+        await postCollection(
+          customerId,
+          fifoRequest([{ moneyAccountId: cash, amountMinor: '300' }]),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+
+      const replacementB = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'payments',
+          original.operationId,
+          'edit',
+          correctionRequest({
+            replacement: {
+              allocationMode: 'fifo',
+              tenders: [{ moneyAccountId: bank, amountMinor: '250' }],
+            },
+          }),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      expect(await customerBalances(customerId)).toEqual({ receivable: '50', credit: '0' });
+      expect(await moneyBalance(cash)).toBe('0');
+      expect(await moneyBalance(bank)).toBe('250');
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        original.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_TARGET_NOT_ACTIVE'));
+
+      const replacementC = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'payments',
+          replacementB.operationId,
+          'edit',
+          correctionRequest({
+            replacement: {
+              allocationMode: 'fifo',
+              tenders: [{ moneyAccountId: cash, amountMinor: '200' }],
+            },
+          }),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        replacementB.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_TARGET_NOT_ACTIVE'));
+      const terminal = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'payments',
+          replacementC.operationId,
+          'cancel',
+          correctionRequest(),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      expect(terminal.activeOperationId).toBeNull();
+      expect(await customerBalances(customerId)).toEqual({ receivable: '300', credit: '0' });
+      expect(await moneyBalance(cash)).toBe('0');
+      expect(await moneyBalance(bank)).toBe('0');
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        replacementC.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_TARGET_NOT_ACTIVE'));
+
+      const chain = (await getCustomerPayments(customerId).expect(200))
+        .body as CustomerPaymentListResponse;
+      const originalPayment = chain.payments.find(
+        (payment) => payment.lineage.rootOperationId === original.operationId,
+      );
+      expect(originalPayment?.lineage).toMatchObject({
+        state: 'corrected',
+        correctedByOperationId: replacementB.operationId,
+        currentActiveOperationId: null,
+      });
+    });
+
+    it('reverses internal overpayment/refund facts and blocks consumed Customer Credit', async () => {
+      const account = await createAccount();
+
+      const unusedCustomer = await createCustomer();
+      await postOpening(unusedCustomer, '300', '2026-09-12T08:00:00Z');
+      const unused = (
+        await postCollection(
+          unusedCustomer,
+          fifoRequest([{ moneyAccountId: account, amountMinor: '400' }], {
+            overpaymentHandling: 'keep_as_customer_credit',
+          }),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+      expect(await customerBalances(unusedCustomer)).toEqual({ receivable: '0', credit: '100' });
+      await postCustomerFinancialCorrection(
+        unusedCustomer,
+        'payments',
+        unused.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await customerBalances(unusedCustomer)).toEqual({ receivable: '300', credit: '0' });
+
+      const consumedCustomer = await createCustomer();
+      await postOpening(consumedCustomer, '300', '2026-09-12T08:10:00Z');
+      const retained = (
+        await postCollection(
+          consumedCustomer,
+          fifoRequest([{ moneyAccountId: account, amountMinor: '400' }], {
+            overpaymentHandling: 'keep_as_customer_credit',
+          }),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+      await postCreditSale(consumedCustomer, '60', '2026-09-12T09:00:00Z');
+      await postCustomerFinancial(
+        consumedCustomer,
+        'credit/applications',
+        customerFinancialRequest('60'),
+      ).expect(201);
+      await postCustomerFinancialCorrection(
+        consumedCustomer,
+        'payments',
+        retained.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_CREDIT_DEPENDENCY'));
+      expect(await customerBalances(consumedCustomer)).toEqual({ receivable: '0', credit: '40' });
+
+      const refundCustomer = await createCustomer();
+      await postOpening(refundCustomer, '300', '2026-09-12T10:00:00Z');
+      const immediateRefund = (
+        await postCollection(
+          refundCustomer,
+          fifoRequest([{ moneyAccountId: account, amountMinor: '400' }], {
+            overpaymentHandling: 'refund_excess',
+            refundMoneyAccountId: account,
+          }),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+      const beforeCancel = await moneyBalance(account);
+      const cancelled = (
+        await postCustomerFinancialCorrection(
+          refundCustomer,
+          'payments',
+          immediateRefund.operationId,
+          'cancel',
+          correctionRequest(),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      expect(cancelled.reversal.moneyMovements).toHaveLength(2);
+      expect(await moneyBalance(account)).toBe((BigInt(beforeCancel) - 300n).toString());
+      expect(await customerBalances(refundCustomer)).toEqual({ receivable: '300', credit: '0' });
+
+      const advanceCustomer = await createCustomer();
+      const advanceAccount = await createAccount();
+      const advance = await createCustomerCredit(advanceCustomer, advanceAccount, '200');
+      await db().admin.query(
+        `update ledger.customers set status='archived',archived_at=clock_timestamp()
+         where store_id=$1 and id=$2`,
+        [owner.storeId, advanceCustomer],
+      );
+      await db().admin.query(
+        `update ledger.money_accounts set status='archived',archived_at=clock_timestamp()
+         where store_id=$1 and id=$2`,
+        [owner.storeId, advanceAccount],
+      );
+      await postCustomerFinancialCorrection(
+        advanceCustomer,
+        'payments',
+        advance.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await customerBalances(advanceCustomer)).toEqual({ receivable: '0', credit: '0' });
+      expect(await moneyBalance(advanceAccount)).toBe('0');
+
+      const consumedAdvanceCustomer = await createCustomer();
+      const consumedAdvanceAccount = await createAccount();
+      const consumedAdvance = await createCustomerCredit(
+        consumedAdvanceCustomer,
+        consumedAdvanceAccount,
+        '200',
+      );
+      await postCustomerFinancial(consumedAdvanceCustomer, 'credit/refunds', {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-12T11:00:00Z',
+        amountMinor: '160',
+        moneyAccountId: consumedAdvanceAccount,
+      }).expect(201);
+      await postCustomerFinancialCorrection(
+        consumedAdvanceCustomer,
+        'payments',
+        consumedAdvance.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_CREDIT_DEPENDENCY'));
+
+      const replacementCustomer = await createCustomer();
+      const replacementOldAccount = await createAccount();
+      const replacementNewAccount = await createAccount();
+      const replacementAdvance = await createCustomerCredit(
+        replacementCustomer,
+        replacementOldAccount,
+        '200',
+      );
+      await postCustomerFinancialCorrection(
+        replacementCustomer,
+        'payments',
+        replacementAdvance.operationId,
+        'edit',
+        correctionRequest({
+          replacement: {
+            intent: 'customer_advance',
+            tenders: [{ moneyAccountId: replacementNewAccount, amountMinor: '120' }],
+          },
+        }),
+      ).expect(201);
+      expect(await customerBalances(replacementCustomer)).toEqual({
+        receivable: '0',
+        credit: '120',
+      });
+      expect(await moneyBalance(replacementOldAccount)).toBe('0');
+      expect(await moneyBalance(replacementNewAccount)).toBe('120');
+
+      const immediateEditCustomer = await createCustomer();
+      const immediateEditAccount = await createAccount();
+      await postOpening(immediateEditCustomer, '300', '2026-09-12T12:00:00Z');
+      const immediateEditOriginal = (
+        await postCollection(
+          immediateEditCustomer,
+          fifoRequest([{ moneyAccountId: immediateEditAccount, amountMinor: '400' }], {
+            overpaymentHandling: 'refund_excess',
+            refundMoneyAccountId: immediateEditAccount,
+          }),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+      await postCustomerFinancialCorrection(
+        immediateEditCustomer,
+        'payments',
+        immediateEditOriginal.operationId,
+        'edit',
+        correctionRequest({
+          replacement: {
+            allocationMode: 'fifo',
+            tenders: [{ moneyAccountId: immediateEditAccount, amountMinor: '350' }],
+            overpaymentHandling: 'refund_excess',
+            refundMoneyAccountId: immediateEditAccount,
+          },
+        }),
+      ).expect(201);
+      expect(await customerBalances(immediateEditCustomer)).toEqual({
+        receivable: '0',
+        credit: '0',
+      });
+      expect(await moneyBalance(immediateEditAccount)).toBe('300');
+    });
+
+    it('corrects Credit applications, refunds, and settlements without inventing Money', async () => {
+      const account = await createAccount();
+      const refundAccount = await createAccount();
+      const customerId = await createCustomer();
+      await createCustomerCredit(customerId, account, '500');
+      const opening = await postOpening(customerId, '100', '2026-09-13T08:00:00Z');
+      const sale = await postCreditSale(customerId, '100', '2026-09-13T09:00:00Z');
+
+      const application = (
+        await postCustomerFinancial(
+          customerId,
+          'credit/applications',
+          customerFinancialRequest('100', {
+            allocationMode: 'custom',
+            allocations: [
+              { targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '100' },
+            ],
+          }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      await postCustomerFinancialCorrection(
+        customerId,
+        'credit/applications',
+        application.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '200', credit: '500' });
+
+      const applicationForEdit = (
+        await postCustomerFinancial(
+          customerId,
+          'credit/applications',
+          customerFinancialRequest('100', {
+            allocationMode: 'custom',
+            allocations: [
+              { targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '100' },
+            ],
+          }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      await postCustomerFinancialCorrection(
+        customerId,
+        'credit/applications',
+        applicationForEdit.operationId,
+        'edit',
+        correctionRequest({
+          replacement: {
+            amountMinor: '50',
+            allocationMode: 'custom',
+            allocations: [
+              {
+                targetType: 'opening_receivable',
+                targetId: opening.receivable.id,
+                amountMinor: '50',
+              },
+            ],
+          },
+        }),
+      ).expect(201);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '150', credit: '450' });
+
+      const refund = (
+        await postCustomerFinancial(customerId, 'credit/refunds', {
+          operationId: randomUUID(),
+          occurredAt: '2026-09-13T10:00:00Z',
+          amountMinor: '70',
+          moneyAccountId: refundAccount,
+        }).expect(201)
+      ).body as CustomerFinancialResponse;
+      await db().admin.query(
+        `update ledger.money_accounts set status='archived',archived_at=clock_timestamp()
+         where store_id=$1 and id=$2`,
+        [owner.storeId, refundAccount],
+      );
+      await postCustomerFinancialCorrection(
+        customerId,
+        'credit/refunds',
+        refund.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await moneyBalance(refundAccount)).toBe('0');
+
+      const replacementRefundAccount = await createAccount();
+      const replacementDestination = await createAccount();
+      const refundForEdit = (
+        await postCustomerFinancial(customerId, 'credit/refunds', {
+          operationId: randomUUID(),
+          occurredAt: '2026-09-13T10:10:00Z',
+          amountMinor: '70',
+          moneyAccountId: replacementRefundAccount,
+        }).expect(201)
+      ).body as CustomerFinancialResponse;
+      await postCustomerFinancialCorrection(
+        customerId,
+        'credit/refunds',
+        refundForEdit.operationId,
+        'edit',
+        correctionRequest({
+          replacement: { amountMinor: '50', moneyAccountId: replacementDestination },
+        }),
+      ).expect(201);
+      expect(await moneyBalance(replacementRefundAccount)).toBe('0');
+      expect(await moneyBalance(replacementDestination)).toBe('-50');
+
+      const settlement = (
+        await postCustomerFinancial(
+          customerId,
+          'settlements',
+          customerFinancialRequest('50', { reason: 'Original waiver' }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      const moneyCountBefore = (
+        await db().admin.query<{ count: number }>(
+          `select count(*)::int as count from ledger.money_movements where store_id=$1`,
+          [owner.storeId],
+        )
+      ).rows[0]?.count;
+      const settlementEdit = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'settlements',
+          settlement.operationId,
+          'edit',
+          correctionRequest({
+            replacement: {
+              amountMinor: '30',
+              allocationMode: 'fifo',
+              reason: 'Corrected waiver',
+            },
+          }),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      expect(settlementEdit.reversal.moneyMovements).toHaveLength(0);
+      expect(settlementEdit.replacement).toMatchObject({ action: 'settle_receivable' });
+      expect(
+        (
+          await db().admin.query<{ count: number }>(
+            `select count(*)::int as count from ledger.money_movements where store_id=$1`,
+            [owner.storeId],
+          )
+        ).rows[0]?.count,
+      ).toBe(moneyCountBefore);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '120', credit: '400' });
+
+      const cancelSettlementCustomer = await createCustomer();
+      await postOpening(cancelSettlementCustomer, '50', '2026-09-13T11:00:00Z');
+      const cancellableSettlement = (
+        await postCustomerFinancial(
+          cancelSettlementCustomer,
+          'settlements',
+          customerFinancialRequest('50', { reason: 'Temporary waiver' }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      await postCustomerFinancialCorrection(
+        cancelSettlementCustomer,
+        'settlements',
+        cancellableSettlement.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await customerBalances(cancelSettlementCustomer)).toEqual({
+        receivable: '50',
+        credit: '0',
+      });
+
+      const history = (
+        await request(server)
+          .get(`/v1/customers/${customerId}/credit-history?limit=100`)
+          .set('authorization', `Bearer ${owner.token}`)
+          .expect(200)
+      ).body as CustomerCreditHistoryResponse;
+      expect(history.entries.some((entry) => entry.entryType === 'correction')).toBe(true);
+      expect(
+        history.entries.some(
+          (entry) =>
+            entry.reversalOfId !== null &&
+            entry.correction !== null &&
+            entry.lineage.rootOperationId === entry.correction.operationId,
+        ),
+      ).toBe(true);
+    });
+
+    it('enforces tenant, read_only, current-period, rollback, and same-Customer boundaries', async () => {
+      const customerId = await createCustomer();
+      const otherCustomer = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '100', '2026-08-15T09:00:00Z');
+      const originalRequest = fifoRequest([{ moneyAccountId: account, amountMinor: '100' }], {
+        occurredAt: '2026-08-15T10:00:00Z',
+      });
+      const original = (await postCollection(customerId, originalRequest).expect(201))
+        .body as CustomerCollectionPostingResponse;
+      await db().admin.query(
+        `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
+         where store_id=$1 and id=$2`,
+        [owner.storeId, original.accountingPeriodId],
+      );
+      const corrected = (
+        await postCustomerFinancialCorrection(
+          customerId,
+          'payments',
+          original.operationId,
+          'cancel',
+          correctionRequest(),
+        ).expect(201)
+      ).body as CustomerFinancialCorrectionResponse;
+      expect(corrected.accountingPeriodId).not.toBe(original.accountingPeriodId);
+      expect(
+        (
+          await db().admin.query<{ accountingPeriodId: string }>(
+            `select accounting_period_id as "accountingPeriodId"
+             from ledger.customer_payments where store_id=$1 and id=$2`,
+            [owner.storeId, original.payments[0]?.id],
+          )
+        ).rows[0]?.accountingPeriodId,
+      ).toBe(original.accountingPeriodId);
+
+      await postCustomerFinancialCorrection(
+        otherCustomer,
+        'payments',
+        original.operationId,
+        'cancel',
+        correctionRequest(),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_CUSTOMER_MISMATCH'));
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        randomUUID(),
+        'cancel',
+        correctionRequest(),
+        foreignOwner,
+      )
+        .expect(404)
+        .expect(expectResponseCode('CUSTOMER_FINANCIAL_CORRECTION_TARGET_NOT_FOUND'));
+
+      const readOnlyCustomer = await createCustomer();
+      const readOnlyAccount = await createAccount();
+      const readOnlyAdvance = await createCustomerCredit(readOnlyCustomer, readOnlyAccount, '10');
+      await db().admin.query(`update ledger.stores set status='read_only' where id=$1`, [
+        owner.storeId,
+      ]);
+      try {
+        await postCustomerFinancialCorrection(
+          readOnlyCustomer,
+          'payments',
+          readOnlyAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        ).expect(403);
+      } finally {
+        await db().admin.query(`update ledger.stores set status='active' where id=$1`, [
+          owner.storeId,
+        ]);
+      }
+
+      const rollbackCustomer = await createCustomer();
+      const rollbackAccount = await createAccount();
+      const rollbackAdvance = await createCustomerCredit(rollbackCustomer, rollbackAccount, '100');
+      const failedOperationId = randomUUID();
+      await postCustomerFinancialCorrection(
+        rollbackCustomer,
+        'payments',
+        rollbackAdvance.operationId,
+        'edit',
+        correctionRequest({
+          operationId: failedOperationId,
+          replacement: {
+            intent: 'customer_advance',
+            tenders: [{ moneyAccountId: randomUUID(), amountMinor: '50' }],
+          },
+        }),
+      )
+        .expect(404)
+        .expect(expectResponseCode('MONEY_ACCOUNT_NOT_FOUND'));
+      expect(await customerBalances(rollbackCustomer)).toEqual({ receivable: '0', credit: '100' });
+      expect(await moneyBalance(rollbackAccount)).toBe('100');
+      expect(
+        (
+          await db().admin.query<{ count: number }>(
+            `select count(*)::int as count from ledger.customer_ledger_entries
+             where store_id=$1 and transaction_group_id=$2 and reversal_of_id is not null`,
+            [owner.storeId, deriveTransactionGroupId(failedOperationId)],
+          )
+        ).rows[0],
+      ).toEqual({ count: 0 });
+
+      const closedCustomer = await createCustomer();
+      const closedAccount = await createAccount();
+      const closedAdvance = await createCustomerCredit(closedCustomer, closedAccount, '10');
+      const september = (
+        await db().admin.query<{ id: string }>(
+          `select id from ledger.accounting_periods
+           where store_id=$1 and period_year=2026 and period_month=9`,
+          [owner.storeId],
+        )
+      ).rows[0];
+      if (!september) throw new Error('September accounting period is missing.');
+      await db().admin.query(
+        `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
+         where id=$1`,
+        [september.id],
+      );
+      try {
+        await postCustomerFinancialCorrection(
+          closedCustomer,
+          'payments',
+          closedAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        )
+          .expect(409)
+          .expect(expectResponseCode('ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE'));
+      } finally {
+        await db().admin.query(
+          `update ledger.accounting_periods set status='open',closed_at=null where id=$1`,
+          [september.id],
+        );
+      }
+    });
+
+    it('serializes correction races without double reversal or negative balances', async () => {
+      const account = await createAccount();
+
+      const advanceCustomer = await createCustomer();
+      const advance = await createCustomerCredit(advanceCustomer, account, '100');
+      const advanceRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          advanceCustomer,
+          'payments',
+          advance.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postCustomerFinancial(advanceCustomer, 'credit/refunds', {
+          operationId: randomUUID(),
+          occurredAt: '2026-09-20T12:00:00Z',
+          amountMinor: '100',
+          moneyAccountId: account,
+        }),
+      ]);
+      expect(advanceRace.map((response) => response.status).sort()).toEqual([201, 409]);
+      expect(BigInt((await customerBalances(advanceCustomer)).credit)).toBeGreaterThanOrEqual(0n);
+
+      const saleRaceCustomer = await createCustomer();
+      const saleRaceAdvance = await createCustomerCredit(saleRaceCustomer, account, '100');
+      const saleRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          saleRaceCustomer,
+          'payments',
+          saleRaceAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postSale(
+          customerCreditSaleRequest({
+            customerId: saleRaceCustomer,
+            totalMinor: '100',
+            customerCreditAmountMinor: '100',
+          }),
+        ),
+      ]);
+      expect(saleRace.map((response) => response.status).sort()).toEqual([201, 409]);
+      expect(BigInt((await customerBalances(saleRaceCustomer)).credit)).toBeGreaterThanOrEqual(0n);
+
+      const leafCustomer = await createCustomer();
+      const leafAdvance = await createCustomerCredit(leafCustomer, account, '100');
+      const twoCorrections = await Promise.all([
+        postCustomerFinancialCorrection(
+          leafCustomer,
+          'payments',
+          leafAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postCustomerFinancialCorrection(
+          leafCustomer,
+          'payments',
+          leafAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+      ]);
+      expect(twoCorrections.map((response) => response.status).sort()).toEqual([201, 409]);
+      expect(await customerBalances(leafCustomer)).toEqual({ receivable: '0', credit: '0' });
+
+      const duplicateCustomer = await createCustomer();
+      const duplicateAdvance = await createCustomerCredit(duplicateCustomer, account, '100');
+      const duplicateBody = correctionRequest();
+      const duplicate = await Promise.all([
+        postCustomerFinancialCorrection(
+          duplicateCustomer,
+          'payments',
+          duplicateAdvance.operationId,
+          'cancel',
+          duplicateBody,
+        ),
+        postCustomerFinancialCorrection(
+          duplicateCustomer,
+          'payments',
+          duplicateAdvance.operationId,
+          'cancel',
+          duplicateBody,
+        ),
+      ]);
+      expect(duplicate.every((response) => [201, 409].includes(response.status))).toBe(true);
+      expect(duplicate.filter((response) => response.status === 201).length).toBeGreaterThanOrEqual(
+        1,
+      );
+      expect(await customerBalances(duplicateCustomer)).toEqual({ receivable: '0', credit: '0' });
+      expect(
+        (
+          await db().admin.query<{ count: number }>(
+            `select count(*)::int as count from ledger.customer_ledger_entries
+             where store_id=$1 and transaction_group_id=$2 and reversal_of_id is not null`,
+            [owner.storeId, deriveTransactionGroupId(duplicateBody.operationId as string)],
+          )
+        ).rows[0]?.count,
+      ).toBe(1);
+
+      const collectionRaceCustomer = await createCustomer();
+      const collectionRaceAccount = await createAccount();
+      await postOpening(collectionRaceCustomer, '200', '2026-09-20T08:00:00Z');
+      const collectionRaceOriginal = (
+        await postCollection(
+          collectionRaceCustomer,
+          fifoRequest([{ moneyAccountId: collectionRaceAccount, amountMinor: '100' }]),
+        ).expect(201)
+      ).body as CustomerCollectionPostingResponse;
+      const collectionRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          collectionRaceCustomer,
+          'payments',
+          collectionRaceOriginal.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postCollection(
+          collectionRaceCustomer,
+          fifoRequest([{ moneyAccountId: collectionRaceAccount, amountMinor: '100' }]),
+        ),
+      ]);
+      expect(collectionRace.map((response) => response.status)).toEqual([201, 201]);
+      expect(await customerBalances(collectionRaceCustomer)).toEqual({
+        receivable: '100',
+        credit: '0',
+      });
+
+      const applicationRaceCustomer = await createCustomer();
+      const applicationRaceAccount = await createAccount();
+      await createCustomerCredit(applicationRaceCustomer, applicationRaceAccount, '100');
+      await postOpening(applicationRaceCustomer, '200', '2026-09-20T08:10:00Z');
+      const applicationRaceOriginal = (
+        await postCustomerFinancial(
+          applicationRaceCustomer,
+          'credit/applications',
+          customerFinancialRequest('100'),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      const applicationRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          applicationRaceCustomer,
+          'credit/applications',
+          applicationRaceOriginal.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postCollection(
+          applicationRaceCustomer,
+          fifoRequest([{ moneyAccountId: applicationRaceAccount, amountMinor: '100' }]),
+        ),
+      ]);
+      expect(applicationRace.map((response) => response.status)).toEqual([201, 201]);
+      expect(await customerBalances(applicationRaceCustomer)).toEqual({
+        receivable: '100',
+        credit: '100',
+      });
+
+      const settlementRaceCustomer = await createCustomer();
+      const settlementRaceAccount = await createAccount();
+      await postOpening(settlementRaceCustomer, '200', '2026-09-20T08:20:00Z');
+      const settlementRaceOriginal = (
+        await postCustomerFinancial(
+          settlementRaceCustomer,
+          'settlements',
+          customerFinancialRequest('100', { reason: 'Race waiver' }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      const settlementRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          settlementRaceCustomer,
+          'settlements',
+          settlementRaceOriginal.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+        postCollection(
+          settlementRaceCustomer,
+          fifoRequest([{ moneyAccountId: settlementRaceAccount, amountMinor: '100' }]),
+        ),
+      ]);
+      expect(settlementRace.map((response) => response.status)).toEqual([201, 201]);
+      expect(await customerBalances(settlementRaceCustomer)).toEqual({
+        receivable: '100',
+        credit: '0',
+      });
+
+      const branchCustomer = await createCustomer();
+      const branchAccount = await createAccount();
+      const branchAdvance = await createCustomerCredit(branchCustomer, branchAccount, '100');
+      const branchRace = await Promise.all([
+        postCustomerFinancialCorrection(
+          branchCustomer,
+          'payments',
+          branchAdvance.operationId,
+          'edit',
+          correctionRequest({
+            replacement: {
+              intent: 'customer_advance',
+              tenders: [{ moneyAccountId: branchAccount, amountMinor: '50' }],
+            },
+          }),
+        ),
+        postCustomerFinancialCorrection(
+          branchCustomer,
+          'payments',
+          branchAdvance.operationId,
+          'cancel',
+          correctionRequest(),
+        ),
+      ]);
+      expect(branchRace.map((response) => response.status).sort()).toEqual([201, 409]);
+      expect(['0', '50']).toContain((await customerBalances(branchCustomer)).credit);
+    });
   });
 });

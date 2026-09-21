@@ -51,7 +51,9 @@ interface FailureResult {
   error: CustomerFinancialFailure;
 }
 
-const definitions: Readonly<Record<CustomerFinancialFailureCode, CustomerFinancialFailure>> = {
+export const customerFinancialFailureDefinitions: Readonly<
+  Record<CustomerFinancialFailureCode, CustomerFinancialFailure>
+> = {
   ACCOUNTING_PERIOD_INTEGRITY_CONFLICT: {
     code: 'ACCOUNTING_PERIOD_INTEGRITY_CONFLICT',
     message: 'Accounting Period identity or boundaries are inconsistent.',
@@ -129,7 +131,7 @@ const definitions: Readonly<Record<CustomerFinancialFailureCode, CustomerFinanci
   },
 };
 
-class CustomerFinancialRejectedError extends Error {
+export class CustomerFinancialRejectedError extends Error {
   constructor(readonly result: FailureResult) {
     super(result.error.message);
     this.name = 'CustomerFinancialRejectedError';
@@ -137,7 +139,7 @@ class CustomerFinancialRejectedError extends Error {
 }
 
 function failure(code: CustomerFinancialFailureCode): FailureResult {
-  return { ok: false, error: definitions[code] };
+  return { ok: false, error: customerFinancialFailureDefinitions[code] };
 }
 
 function reject(code: CustomerFinancialFailureCode): never {
@@ -167,7 +169,7 @@ export class CustomerCreditRepository {
       if (begun) return begun;
       try {
         const response = await transaction.transaction((savepoint) =>
-          this.insertWithinTransaction(savepoint, context, command, postingDate),
+          this.insertFinancialWithinTransaction(savepoint, context, command, postingDate),
         );
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
         return { ok: true, response };
@@ -177,7 +179,7 @@ export class CustomerCreditRepository {
     });
   }
 
-  private async insertWithinTransaction(
+  async insertFinancialWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: CustomerFinancialCommand,
@@ -528,14 +530,14 @@ export class CustomerCreditRepository {
     const body = existing.responseBody;
     if (
       !code ||
-      !(code in definitions) ||
+      !(code in customerFinancialFailureDefinitions) ||
       !isRecord(body) ||
       body.code !== code ||
       typeof body.message !== 'string'
     ) {
       throw new Error('Stored Customer financial rejection is invalid.');
     }
-    const definition = definitions[code as CustomerFinancialFailureCode];
+    const definition = customerFinancialFailureDefinitions[code as CustomerFinancialFailureCode];
     if (existing.responseCode !== definition.statusCode) {
       throw new Error('Stored Customer financial rejection status is invalid.');
     }

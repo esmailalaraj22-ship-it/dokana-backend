@@ -37,6 +37,8 @@ describe('controlled migration runner', () => {
       '0011_supplier_opening_payable_allocations.sql',
       '0012_sales_inventory_validation.sql',
       '0013_historical_inventory_reversal_lifecycle.sql',
+      '0014_customer_receivable_allocation_targets.sql',
+      '0015_sale_customer_credit_tender.sql',
     ]);
   });
 

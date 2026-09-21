@@ -214,7 +214,7 @@ export class CustomerReceivableSettlementRepository {
           + coalesce((select sum(effect.receivable_delta_minor)
             from ledger.customer_ledger_entries effect
             where effect.store_id=origin.store_id and effect.customer_id=origin.customer_id
-              and effect.entry_type in ('credit_used','settlement')
+              and effect.entry_type in ('credit_used','settlement','correction')
               and effect.reference_type='customer_opening_receivable'
               and effect.reference_id=origin.id),0)
         from ledger.customer_ledger_entries origin
@@ -323,7 +323,7 @@ export class CustomerReceivableSettlementRepository {
           + coalesce((select sum(effect.receivable_delta_minor)
             from ledger.customer_ledger_entries effect
             where effect.store_id=origin.store_id and effect.customer_id=origin.customer_id
-              and effect.entry_type in ('credit_used','settlement')
+              and effect.entry_type in ('credit_used','settlement','correction')
               and effect.reference_type='customer_opening_receivable'
               and effect.reference_id=origin.id),0))::text as "outstandingMinor"
       from ledger.customer_ledger_entries origin

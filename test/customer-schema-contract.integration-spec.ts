@@ -404,6 +404,10 @@ describe('Customer database contract', () => {
         name: 'customer_payments_store_id_customer_id_fkey',
       },
       {
+        sourceTable: 'ledger.sale_customer_credit_applications',
+        name: 'sale_customer_credit_applications_store_customer_fkey',
+      },
+      {
         sourceTable: 'ledger.sale_returns',
         name: 'sale_returns_store_id_customer_id_fkey',
       },

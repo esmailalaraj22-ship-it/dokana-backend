@@ -2,14 +2,14 @@
 
 ## 1. Document Status and Governance
 
-| Field                      | Value                                      |
-| -------------------------- | ------------------------------------------ |
-| Status                     | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
-| Repository                 | `C:\Users\esmail\Desktop\Dokana`           |
-| Review branch              | `main`                                     |
-| S15.4A starting checkpoint | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
-| Closed execution history   | Stations S0-S14; S15.1-S15.4A              |
-| Next candidate             | S15.5 - NEXT / NOT STARTED                 |
+| Field                     | Value                                      |
+| ------------------------- | ------------------------------------------ |
+| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
+| Repository                | `C:\Users\esmail\Desktop\Dokana`           |
+| Review branch             | `main`                                     |
+| S15.5 starting checkpoint | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
+| Closed execution history  | Stations S0-S15                            |
+| Next candidate            | S16 - NEXT / NOT STARTED                   |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,22 +61,22 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S15.4A starting HEAD            | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
-| Starting `origin/main`          | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
+| S15.5 starting HEAD             | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
+| Starting `origin/main`          | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S14                                        |
-| Next task                       | S15.5 next; S15 open                       |
+| Last fully closed Station       | S15                                        |
+| Next task                       | S16 next; not started                      |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S14
+## 5. Completed Stations S0-S15
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -98,9 +98,10 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S12 - Supplier Invoices and Payables                    | CLOSED | Supplier financial reads, opening payables, payable-only invoice posting, immutable edit/cancel correction chains, and zero automatic inventory or money effects                     | Historical supplier-invoice and payable recognition                | Current Supplier financial implementation, tests, and migrations `0009`-`0010`                                                                                                                                                                                        |
 | S13 - Supplier Payments and Allocations                 | CLOSED | Explicit Invoice/Opening Payable allocations, Money Account or owner funding, settlement reads, and immutable payment cancellation/replacement chains                                | Historical supplier settlement                                     | Current Supplier Payment implementation, tests, and migration `0011`                                                                                                                                                                                                  |
 | S14 - Sales Posting and Customer Receivables            | CLOSED | Paid, partial, credit, split-tender, tracked/untracked and manual-line Sale posting; Customer Opening Receivables; tenant-safe reads; immutable Sale cancellation/replacement chains | Historical sales posting and receivable origination                | Current Sales implementation, tests, and migrations `0012`-`0013`                                                                                                                                                                                                     |
+| S15 - Customer Collections, Credits, and Settlement     | CLOSED | Customer collections, Sale/Opening allocation, overpayment/advance Credit, refunds, non-cash settlement, Sale Credit tender, and immutable active-leaf correction chains             | Historical customer collection, credit, and settlement authority   | Current Customer financial implementation, tests, and migrations `0014`-`0015`                                                                                                                                                                                        |
 
-The safe completed boundary does not include Customer collections/settlement,
-subscription lifecycle, expenses, generic synchronization, reporting, or recovery.
+The safe completed boundary does not include subscription lifecycle, expenses, generic
+synchronization, reporting, or recovery.
 
 ## 6. Historical Roadmap Reconciliation
 
@@ -109,15 +110,15 @@ subscription lifecycle, expenses, generic synchronization, reporting, or recover
 | Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
 | PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
 | NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S14                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S15                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
 | Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
 | Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
 | Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
-| Sales/receivables                       | SPLIT, PARTIAL          | Sale posting and receivable origination S14                             | Customer collections and settlement                    | S15                   |
+| Sales/receivables                       | SPLIT, COMPLETE         | Sale/receivable origination S14; collections and settlement S15         | None                                                   | None                  |
 | Supplier invoices/payables              | SPLIT, COMPLETE         | Supplier invoice/payable recognition S12; settlement S13                | None                                                   | None                  |
 | Manual inventory/costing                | DONE                    | S11                                                                     | None                                                   | None                  |
 | Expenses/owner ledger                   | SPLIT, PARTIAL          | Money and owner-ledger foundation S10                                   | Expenses                                               | S16                   |
-| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S14                  | Cross-domain corrections                               | S17                   |
+| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S15                  | Cross-domain corrections                               | S17                   |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
 | Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
@@ -167,9 +168,8 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 
 ### Still required
 
-Customer collections/settlement, expenses, cross-domain returns/corrections, platform
-lifecycle, generic synchronization, reports, notifications, attachments, backup/restore,
-and final release validation.
+Expenses, cross-domain returns/corrections, platform lifecycle, generic synchronization,
+reports, notifications, attachments, backup/restore, and final release validation.
 
 ## 8. Remaining PRD Coverage and Completeness Map
 
@@ -188,7 +188,7 @@ and final release validation.
 | Supplier invoices/payables                         | Implemented                          | S12 (closed)                 |
 | Supplier payments/allocations/credits              | Implemented                          | S13 (closed)                 |
 | Sales and customer receivable origination          | Implemented                          | S14 (closed)                 |
-| Customer collections/credit/settlement             | Still required                       | S15                          |
+| Customer collections/credit/settlement             | Implemented                          | S15 (closed)                 |
 | Expenses and expense payments                      | Still required                       | S16                          |
 | Returns/reversals/corrections                      | Still required                       | S17 and each source Station  |
 | Subscription/offline licensing/SaaS administration | Partially implemented                | S18                          |
@@ -474,8 +474,8 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S15 - Customer Collections, Credits, and Settlement
 
-- **Status:** OPEN; S15.1 CLOSED; S15.2 CLOSED; S15.3 CLOSED; S15.4 CORE COMPLETE;
-  S15.4A CLOSED; S15.5 NEXT - NOT STARTED.
+- **Status:** CLOSED; S15.1 CLOSED; S15.2 CLOSED; S15.3 CLOSED; S15.4 CLOSED;
+  S15.4A CLOSED; S15.5 CLOSED.
 - **Purpose:** Settle existing Customer receivables independently from sale posting.
 - **Distinct boundary:** Allocation, overpayment, credit, and replay form a separate
   accounting transaction boundary.
@@ -520,14 +520,21 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   no Money Movement; `sale_payments` remains Money-only. Migration `0015` is the sole
   physical delta, PostgreSQL is at 15 applied / 0 pending, the historical PostgreSQL
   reference is unchanged, and SQLite parity remains deferred to S19.
-- **Still not implemented:** General Customer Payment/Credit/Settlement immutable
-  corrections owned by S15.5.
+- **S15.5 delivered:** Immutable whole-operation cancellation/replacement for Customer
+  collections, retained-overpayment and immediate-refund collections, advances, Credit
+  applications, Credit refunds, and independent Receivable Settlements. Corrections preserve
+  original facts and periods, post in the current open period, enforce one active linear leaf,
+  protect consumed Customer Credit, support historical cancellation with archived Customers or
+  Money Accounts, revalidate replacement eligibility, preserve exact replay, and expose
+  operational lineage. Concurrency, rollback, RLS, read-only, and cross-Store behavior are
+  verified. Database delta is zero; PostgreSQL reference and SQLite remain unchanged, with
+  SQLite parity deferred to S19.
 - **Start condition:** S10 and S14 closed with allocation/overpayment policy approved.
 - **Closure intent:** Replay-safe receivable settlement with auditable balances.
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT - NOT STARTED.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
@@ -787,8 +794,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S14 are closed, S15.1-S15.4 CORE
-are complete, S15.4A is closed, and S15 remains open with S15.5 next and not started.
+No roadmap-level owner decision is open. Stations S0-S15 are closed. S16 is next and not
+started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -796,11 +803,10 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S14 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S15 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- S15 remains active only within separately approved task boundaries. Future Stations
-  S16-S23 remain proposed until the backend owner approves each Station's orientation and
-  contract boundary.
+- Future Stations S16-S23 remain proposed until the backend owner approves each Station's
+  orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
   dependency review, independent review, and backend-owner approval.
@@ -816,12 +822,12 @@ decision does not authorize an implementer to invent policy.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S14 - Sales Posting and Receivables        |
-| S15.4A starting checkpoint          | `bd9a4ecde20ee87a91db3b8c0230aed354fd9d50` |
-| Safe completed capabilities         | S0-S14; S15.1-S15.4A                       |
-| First incomplete release dependency | S15 - Customer Collections and Settlement  |
-| Next candidate                      | S15.5 - NEXT / NOT STARTED                 |
-| S14 current status                  | CLOSED                                     |
+| Last fully closed Station           | S15 - Customer Collections and Settlement  |
+| S15.5 starting checkpoint           | `5f81f5cfea03167bf4ac089ea08610d42f3d5094` |
+| Safe completed capabilities         | S0-S15                                     |
+| First incomplete release dependency | S16 - Expenses and Expense Payments        |
+| Next candidate                      | S16 - NEXT / NOT STARTED                   |
+| S15 current status                  | CLOSED                                     |
 
-Do not start S15.5 from this document. It requires an explicit backend-owner execution
+Do not start S16 from this document. It requires an explicit backend-owner execution
 prompt.

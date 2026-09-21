@@ -3,6 +3,8 @@ import type {
   MoneyAccountPhysicalType,
   MoneyAccountStatus,
 } from '../money-accounts/money-account.types';
+import type { CustomerFinancialCorrectionLineageResponse } from './customer-financial-correction-read.types';
+import type { CustomerFinancialCorrectionResponse } from './customer-financial-correction.types';
 
 export interface CustomerPaymentCursorAnchor {
   id: string;
@@ -55,6 +57,7 @@ export interface CustomerPaymentListRow {
   createdAt: Date;
   updatedAt: Date;
   version: bigint;
+  lineage: CustomerFinancialCorrectionLineageResponse;
 }
 
 export interface CustomerPaymentAllocationRow {
@@ -74,6 +77,7 @@ export interface CustomerPaymentAllocationRow {
 export interface CustomerPaymentDetailRow extends CustomerPaymentListRow {
   customer: CustomerPaymentCustomerRow;
   allocations: CustomerPaymentAllocationRow[];
+  corrections: CustomerFinancialCorrectionResponse[];
 }
 
 export interface CustomerPaymentCustomerResponse {
@@ -112,6 +116,7 @@ export interface CustomerPaymentSummaryResponse {
   createdAt: string;
   updatedAt: string;
   version: string;
+  lineage: CustomerFinancialCorrectionLineageResponse;
 }
 
 export interface CustomerPaymentAllocationResponse {
@@ -152,4 +157,5 @@ export interface CustomerPaymentDetailResponse {
   creditBalanceMinor: string;
   payment: CustomerPaymentSummaryResponse;
   allocations: CustomerPaymentAllocationResponse[];
+  corrections: CustomerFinancialCorrectionResponse[];
 }

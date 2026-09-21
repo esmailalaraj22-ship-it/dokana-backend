@@ -104,6 +104,7 @@ export class CustomerPaymentReadService {
       creditBalanceMinor: result.customer.creditBalanceMinor.toString(),
       payment: this.mapPayment(result),
       allocations: result.allocations.map((allocation) => this.mapAllocation(allocation)),
+      corrections: result.corrections,
     };
   }
 
@@ -159,6 +160,7 @@ export class CustomerPaymentReadService {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       version: row.version.toString(),
+      lineage: row.lineage,
     };
   }
 

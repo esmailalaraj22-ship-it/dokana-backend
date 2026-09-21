@@ -53,6 +53,8 @@ export async function verifyApplicationInventory(
   // after their exact migration is registered, without accepting arbitrary objects.
   let inventoryFoundationApplied = false;
   let supplierPaymentAllocationFoundationApplied = false;
+  let customerReceivableAllocationTargetsApplied = false;
+  let saleCustomerCreditTenderApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -76,6 +78,30 @@ export async function verifyApplicationInventory(
         throw new Error('Supplier Payment allocation migration checksum mismatch.');
       }
       supplierPaymentAllocationFoundationApplied = true;
+    }
+
+    const customerReceivableAllocationTargets = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0014_customer_receivable_allocation_targets.sql'`,
+    );
+    if (customerReceivableAllocationTargets.rows[0]) {
+      const file = await readMigrationFile('0014_customer_receivable_allocation_targets.sql');
+      if (customerReceivableAllocationTargets.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Customer Receivable allocation migration checksum mismatch.');
+      }
+      customerReceivableAllocationTargetsApplied = true;
+    }
+
+    const saleCustomerCreditTender = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0015_sale_customer_credit_tender.sql'`,
+    );
+    if (saleCustomerCreditTender.rows[0]) {
+      const file = await readMigrationFile('0015_sale_customer_credit_tender.sql');
+      if (saleCustomerCreditTender.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Sale Customer Credit tender migration checksum mismatch.');
+      }
+      saleCustomerCreditTenderApplied = true;
     }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
@@ -120,6 +146,7 @@ export async function verifyApplicationInventory(
     ...applicationViews,
     ...(includeFoundation ? ownershipFoundationAdditions : []),
     ...(inventoryFoundationApplied ? ['ledger.manual_inventory_entries'] : []),
+    ...(saleCustomerCreditTenderApplied ? ['ledger.sale_customer_credit_applications'] : []),
   ];
   assertExactSet(
     'Application relation',
@@ -166,6 +193,12 @@ export async function verifyApplicationInventory(
         : []),
       ...(supplierPaymentAllocationFoundationApplied
         ? ['ledger.validate_supplier_payment_allocation_target()']
+        : []),
+      ...(customerReceivableAllocationTargetsApplied
+        ? ['ledger.validate_customer_payment_allocation_target()']
+        : []),
+      ...(saleCustomerCreditTenderApplied
+        ? ['ledger.validate_sale_customer_credit_application()']
         : []),
     ],
   );

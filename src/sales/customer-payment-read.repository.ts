@@ -7,6 +7,8 @@ import type {
   MoneyAccountPhysicalType,
   MoneyAccountStatus,
 } from '../money-accounts/money-account.types';
+import { CustomerFinancialCorrectionReadRepository } from './customer-financial-correction-read.repository';
+import type { ResolvedCustomerFinancialLineage } from './customer-financial-correction-read.types';
 import type {
   CustomerPaymentAllocationRow,
   CustomerPaymentCustomerRow,
@@ -80,7 +82,10 @@ interface CustomerPaymentAllocationPhysicalRow extends Record<string, unknown> {
 
 @Injectable()
 export class CustomerPaymentReadRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly correctionReads: CustomerFinancialCorrectionReadRepository,
+  ) {}
 
   readPage(
     context: TenantTransactionContext,
@@ -137,6 +142,12 @@ export class CustomerPaymentReadRepository {
       `);
       const payment = paymentResult.rows[0];
       if (!payment) return undefined;
+      const lineage = await this.resolveLineage(
+        transaction,
+        context.storeId,
+        customerId,
+        payment.collectionId,
+      );
       const allocationResult = await transaction.execute<CustomerPaymentAllocationPhysicalRow>(sql`
         select allocation.id, allocation.sale_id as "saleId",
           allocation.opening_receivable_ledger_entry_id as "openingReceivableId",
@@ -165,9 +176,10 @@ export class CustomerPaymentReadRepository {
         order by allocation.created_at asc, allocation.id asc
       `);
       return {
-        ...this.mapPayment(payment),
+        ...this.mapPayment(payment, lineage),
         customer,
         allocations: allocationResult.rows.map((row) => this.mapAllocation(row, paymentId)),
+        corrections: lineage.corrections,
       };
     });
   }
@@ -220,7 +232,25 @@ export class CustomerPaymentReadRepository {
       order by payment.payment_at desc, payment.id desc
       limit ${limit}
     `);
-    return result.rows.map((row) => this.mapPayment(row));
+    const lineages = await this.correctionReads.resolve(
+      transaction,
+      storeId,
+      customerId,
+      result.rows.map((row) => {
+        if (row.collectionId === null) {
+          throw new Error('Customer Payment transaction group is missing.');
+        }
+        return row.collectionId;
+      }),
+    );
+    return result.rows.map((row) => {
+      if (row.collectionId === null) {
+        throw new Error('Customer Payment transaction group is missing.');
+      }
+      const lineage = lineages.get(row.collectionId);
+      if (!lineage) throw new Error('Customer Payment correction lineage is missing.');
+      return this.mapPayment(row, lineage);
+    });
   }
 
   private paymentSelect(): ReturnType<typeof sql> {
@@ -253,7 +283,10 @@ export class CustomerPaymentReadRepository {
     `;
   }
 
-  private mapPayment(row: CustomerPaymentPhysicalRow): CustomerPaymentListRow {
+  private mapPayment(
+    row: CustomerPaymentPhysicalRow,
+    lineage: ResolvedCustomerFinancialLineage,
+  ): CustomerPaymentListRow {
     if (
       row.accountingPeriodId === null ||
       row.collectionId === null ||
@@ -291,7 +324,22 @@ export class CustomerPaymentReadRepository {
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt),
       version: BigInt(row.version),
+      lineage: lineage.lineage,
     };
+  }
+
+  private async resolveLineage(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    customerId: string,
+    collectionId: string | null,
+  ): Promise<ResolvedCustomerFinancialLineage> {
+    if (collectionId === null) throw new Error('Customer Payment transaction group is missing.');
+    const lineage = (
+      await this.correctionReads.resolve(transaction, storeId, customerId, [collectionId])
+    ).get(collectionId);
+    if (!lineage) throw new Error('Customer Payment correction lineage is missing.');
+    return lineage;
   }
 
   private mapAllocation(

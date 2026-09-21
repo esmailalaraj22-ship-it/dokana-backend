@@ -4,6 +4,8 @@ import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authenti
 import { CustomerIdParamDto } from '../customers/dto/customer-id-param.dto';
 import { CustomerCreditReadService } from './customer-credit-read.service';
 import { CustomerCreditService } from './customer-credit.service';
+import { CustomerFinancialCorrectionService } from './customer-financial-correction.service';
+import type { CustomerFinancialCorrectionResponse } from './customer-financial-correction.types';
 import type {
   CustomerCreditHistoryResponse,
   CustomerFinancialResponse,
@@ -15,6 +17,7 @@ import type {
   CustomerPaymentDetailResponse,
   CustomerPaymentListResponse,
 } from './customer-payment-read.types';
+import { CustomerFinancialCorrectionParamDto } from './dto/customer-financial-correction-param.dto';
 import { CustomerPaymentIdParamDto } from './dto/customer-payment-id-param.dto';
 import { ListCustomerCreditHistoryQueryDto } from './dto/list-customer-credit-history-query.dto';
 import { ListCustomerReceivablesQueryDto } from './dto/list-customer-receivables-query.dto';
@@ -43,6 +46,7 @@ export class SalesController {
     private readonly customerPaymentReads: CustomerPaymentReadService,
     private readonly customerCredit: CustomerCreditService,
     private readonly customerCreditReads: CustomerCreditReadService,
+    private readonly customerFinancialCorrections: CustomerFinancialCorrectionService,
   ) {}
 
   @Get('sales')
@@ -134,6 +138,38 @@ export class SalesController {
     );
   }
 
+  @Post('customers/:customerId/payments/:targetOperationId/cancel')
+  cancelCustomerPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.cancel(
+      'customer_collection',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/payments/:targetOperationId/edit')
+  editCustomerPayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.edit(
+      'customer_collection',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
   @Post('customers/:customerId/credit/applications')
   applyCustomerCredit(
     @Req() request: AuthenticatedRequest,
@@ -144,6 +180,38 @@ export class SalesController {
       request.principal,
       request.tenantContext,
       params.customerId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/credit/applications/:targetOperationId/cancel')
+  cancelCustomerCreditApplication(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.cancel(
+      'customer_credit_application',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/credit/applications/:targetOperationId/edit')
+  editCustomerCreditApplication(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.edit(
+      'customer_credit_application',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
       body,
     );
   }
@@ -162,6 +230,38 @@ export class SalesController {
     );
   }
 
+  @Post('customers/:customerId/credit/refunds/:targetOperationId/cancel')
+  cancelCustomerCreditRefund(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.cancel(
+      'customer_credit_refund',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/credit/refunds/:targetOperationId/edit')
+  editCustomerCreditRefund(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.edit(
+      'customer_credit_refund',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
   @Post('customers/:customerId/settlements')
   settleCustomerReceivable(
     @Req() request: AuthenticatedRequest,
@@ -172,6 +272,38 @@ export class SalesController {
       request.principal,
       request.tenantContext,
       params.customerId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/settlements/:targetOperationId/cancel')
+  cancelCustomerReceivableSettlement(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.cancel(
+      'customer_receivable_settlement',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
+      body,
+    );
+  }
+
+  @Post('customers/:customerId/settlements/:targetOperationId/edit')
+  editCustomerReceivableSettlement(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: CustomerFinancialCorrectionParamDto,
+    @Body() body: unknown,
+  ): Promise<CustomerFinancialCorrectionResponse> {
+    return this.customerFinancialCorrections.edit(
+      'customer_receivable_settlement',
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      params.targetOperationId,
       body,
     );
   }

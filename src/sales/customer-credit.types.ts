@@ -1,5 +1,7 @@
 import type { PostedMoneyMovement } from '../money-movements/money-movement.types';
 import type { CustomerFinancialAction } from './customer-credit-command';
+import type { CustomerFinancialCorrectionLineageResponse } from './customer-financial-correction-read.types';
+import type { CustomerFinancialCorrectionResponse } from './customer-financial-correction.types';
 import type { CustomerReceivableTargetType } from './customer-payment-posting-command';
 
 export interface CustomerFinancialLedgerEffect {
@@ -58,7 +60,8 @@ export type CustomerFinancialResult =
 export interface CustomerCreditHistoryEntryResponse {
   id: string;
   operationId: string;
-  entryType: 'credit_created' | 'credit_used' | 'refund' | 'settlement';
+  rootOperationId: string;
+  entryType: 'credit_created' | 'credit_used' | 'refund' | 'settlement' | 'correction';
   receivableDeltaMinor: string;
   creditDeltaMinor: string;
   targetType: CustomerReceivableTargetType | 'sale_tender' | null;
@@ -68,8 +71,11 @@ export interface CustomerCreditHistoryEntryResponse {
     name: string;
   } | null;
   reason: string | null;
+  reversalOfId: string | null;
   occurredAt: string;
   createdAt: string;
+  lineage: CustomerFinancialCorrectionLineageResponse;
+  correction: CustomerFinancialCorrectionResponse | null;
 }
 
 export interface CustomerCreditHistoryResponse {
