@@ -7,6 +7,7 @@ import { CommonModule } from './common/common.module';
 import { LoggingModule } from './common/logging/logging.module';
 import { ApplicationConfigModule } from './config/config.module';
 import { CustomersModule } from './customers/customers.module';
+import { ExpensesModule } from './expenses/expenses.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { MoneyAccountsModule } from './money-accounts/money-accounts.module';
@@ -33,6 +34,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     MoneyTransfersModule,
     OwnerLedgerModule,
     CustomersModule,
+    ExpensesModule,
     ProductsModule,
     SalesModule,
     SuppliersModule,

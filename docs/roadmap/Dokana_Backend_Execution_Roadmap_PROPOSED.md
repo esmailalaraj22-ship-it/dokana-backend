@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S16.1 starting checkpoint | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Closed execution history  | Stations S0-S15; S16.1 planning complete   |
-| Next candidate            | S16.2 - NEXT / NOT STARTED                 |
+| Closed execution history  | Stations S0-S15; S16.1-S16.2 complete      |
+| Next candidate            | S16.3 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S15                                        |
-| Next task                       | S16.2 next; not started                    |
+| Next task                       | S16.3 next; not started                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -481,7 +481,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1 COMPLETE; S16.2 NEXT.
+- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.2 COMPLETE; S16.3 NEXT.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
@@ -517,22 +517,26 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16.2 - Expense Categories and Recognition Foundation
 
-- **Status:** NEXT - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Add the mapped catalog and single-recognition paid/due Expense authority.
 - **Deliverables:** Drizzle mappings; Category lifecycle/reads; paid-now and due-later
   Expense posting; bigint/server-derived accounting; S9 context; immediate Money or
   owner-funded effects; core Expense reads and derived outstanding contract.
 - **Non-scope:** Later due-Expense Payments, corrections, attachment storage, automatic
   recurrence, reporting, and SQLite implementation.
-- **DB:** Expected zero delta; stop for approval if contract verification disproves it.
+- **DB:** 15 applied / 0 pending; S16.2 DB delta 0.
 - **Verification:** Focused mapping/category/recognition tests plus real PostgreSQL RLS,
   period, replay, rollback, and paid-now atomicity scenarios.
-- **Exit:** Categories and Expense recognition are review-approved without duplicate
-  Expense effects.
+- **Delivered:** Expense Category lifecycle and reads; DUE, immediate single-Money-Account,
+  and Owner-funded recognition; exact bigint, idempotency, atomicity, S9/S10 effects,
+  Drizzle/application foundation, and core operational reads.
+- **Deferred:** Partial/later Expense settlement to S16.3; immutable Expense/Payment
+  corrections to S16.4; SQLite parity to S19.
+- **Exit:** Categories and Expense recognition completed without duplicate Expense effects.
 
 ### S16.3 - Due Expense Payments and Outstanding
 
-- **Status:** NOT STARTED.
+- **Status:** NEXT - NOT STARTED.
 - **Purpose:** Settle recognized due Expenses without recognizing Expense again.
 - **Deliverables:** One-source-per-Payment Money Account or owner funding; partial/full
   settlement; one Expense to many Payments; locked derived outstanding; idempotency,
@@ -814,8 +818,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S15 are closed, S16.1 planning is
-complete, and S16.2 is next and not started.
+No roadmap-level owner decision is open. Stations S0-S15 are closed, S16.1-S16.2 are
+complete, and S16.3 is next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -844,10 +848,10 @@ decision does not authorize an implementer to invent policy.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S15 - Customer Collections and Settlement  |
 | S16.1 starting checkpoint           | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Safe completed capabilities         | S0-S15; S16.1 planning                     |
-| First incomplete release dependency | S16.2 - Expense Categories and Recognition |
-| Next candidate                      | S16.2 - NEXT / NOT STARTED                 |
-| S16 current status                  | OPEN; S16.1 COMPLETE                       |
+| Safe completed capabilities         | S0-S15; S16.1-S16.2                        |
+| First incomplete release dependency | S16.3 - Due Expense Payments               |
+| Next candidate                      | S16.3 - NEXT / NOT STARTED                 |
+| S16 current status                  | OPEN; S16.1-S16.2 COMPLETE                 |
 
-Do not start S16.2 from this document. It requires an explicit backend-owner execution
+Do not start S16.3 from this document. It requires an explicit backend-owner execution
 prompt.
