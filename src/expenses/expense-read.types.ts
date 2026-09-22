@@ -33,12 +33,18 @@ export interface ExpenseReadRow extends Record<string, unknown> {
 
 export interface ExpensePaymentReadRow extends Record<string, unknown> {
   id: string;
+  accountingPeriodId: string;
   amountMinor: string;
   paymentSource: 'money_account' | 'owner_pocket';
   moneyAccountId: string | null;
+  moneyAccountName: string | null;
+  moneyAccountStatus: 'active' | 'archived' | null;
   moneyMovementId: string | null;
   ownerLedgerEntryId: string | null;
+  transactionGroupId: string | null;
   paymentAt: Date | string;
+  notes: string | null;
+  status: 'posted';
   operationId: string;
   createdAt: Date | string;
   version: string;
@@ -74,12 +80,21 @@ export interface ExpenseReadItem {
 
 export interface ExpensePaymentReadItem {
   id: string;
+  accountingPeriodId: string;
   amountMinor: string;
   paymentSource: 'money_account' | 'owner_pocket';
   moneyAccountId: string | null;
+  moneyAccount: {
+    id: string;
+    name: string;
+    status: 'active' | 'archived';
+  } | null;
   moneyMovementId: string | null;
   ownerLedgerEntryId: string | null;
+  transactionGroupId: string;
   paymentAt: string;
+  notes: string | null;
+  status: 'posted';
   operationId: string;
   createdAt: string;
   version: string;
@@ -88,6 +103,14 @@ export interface ExpensePaymentReadItem {
 export interface ExpenseDetailResponse extends ExpenseReadItem {
   notes: string | null;
   payments: ExpensePaymentReadItem[];
+}
+
+export interface ExpensePaymentHistoryResponse {
+  expenseId: string;
+  recognizedAmountMinor: string;
+  settledMinor: string;
+  outstandingMinor: string;
+  items: ExpensePaymentReadItem[];
 }
 
 export interface ExpenseListResponse {

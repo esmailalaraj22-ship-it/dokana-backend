@@ -17,6 +17,7 @@ import { ExpenseReadRepository } from './expense-read.repository';
 import type {
   ExpenseDetailResponse,
   ExpenseListResponse,
+  ExpensePaymentHistoryResponse,
   ExpensePaymentReadRow,
   ExpenseReadItem,
   ExpenseReadRow,
@@ -89,6 +90,21 @@ export class ExpenseReadService {
     };
   }
 
+  async getPaymentHistory(
+    principal: Principal,
+    context: TenantTransactionContext,
+    expenseIdInput: string,
+  ): Promise<ExpensePaymentHistoryResponse> {
+    const detail = await this.getById(principal, context, expenseIdInput);
+    return {
+      expenseId: detail.id,
+      recognizedAmountMinor: detail.amountMinor,
+      settledMinor: detail.paidMinor,
+      outstandingMinor: detail.outstandingMinor,
+      items: detail.payments,
+    };
+  }
+
   private mapExpense(row: ExpenseReadRow): ExpenseReadItem {
     const recognitionMode =
       row.paymentTiming === 'due_later'
@@ -130,14 +146,31 @@ export class ExpenseReadService {
   }
 
   private mapPayment(row: ExpensePaymentReadRow) {
+    if (row.transactionGroupId === null) {
+      throw new Error('Expense Payment transaction lineage is unavailable.');
+    }
     return {
       id: row.id,
+      accountingPeriodId: row.accountingPeriodId,
       amountMinor: row.amountMinor,
       paymentSource: row.paymentSource,
       moneyAccountId: row.moneyAccountId,
+      moneyAccount:
+        row.moneyAccountId === null ||
+        row.moneyAccountName === null ||
+        row.moneyAccountStatus === null
+          ? null
+          : {
+              id: row.moneyAccountId,
+              name: row.moneyAccountName,
+              status: row.moneyAccountStatus,
+            },
       moneyMovementId: row.moneyMovementId,
       ownerLedgerEntryId: row.ownerLedgerEntryId,
+      transactionGroupId: row.transactionGroupId,
       paymentAt: this.iso(row.paymentAt),
+      notes: row.notes,
+      status: row.status,
       operationId: row.operationId,
       createdAt: this.iso(row.createdAt),
       version: row.version,

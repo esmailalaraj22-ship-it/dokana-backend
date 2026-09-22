@@ -25,8 +25,14 @@ import type {
   ExpenseCategoryMutationResponse,
   ExpenseCategoryResponse,
 } from './expense-category.types';
+import { ExpensePaymentService } from './expense-payment.service';
+import type { ExpensePaymentPostingResponse } from './expense-payment.types';
 import { ExpenseReadService } from './expense-read.service';
-import type { ExpenseDetailResponse, ExpenseListResponse } from './expense-read.types';
+import type {
+  ExpenseDetailResponse,
+  ExpenseListResponse,
+  ExpensePaymentHistoryResponse,
+} from './expense-read.types';
 import { ExpenseRecognitionService } from './expense-recognition.service';
 import type { ExpenseRecognitionResponse } from './expense-recognition.types';
 
@@ -36,6 +42,7 @@ export class ExpensesController {
   constructor(
     private readonly categories: ExpenseCategoryService,
     private readonly recognition: ExpenseRecognitionService,
+    private readonly payments: ExpensePaymentService,
     private readonly reads: ExpenseReadService,
   ) {}
 
@@ -125,6 +132,23 @@ export class ExpensesController {
     @Body() body: unknown,
   ): Promise<ExpenseRecognitionResponse> {
     return this.recognition.recognize(request.principal, request.tenantContext, body);
+  }
+
+  @Post('expenses/:expenseId/payments')
+  postExpensePayment(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ExpenseIdParamDto,
+    @Body() body: unknown,
+  ): Promise<ExpensePaymentPostingResponse> {
+    return this.payments.post(request.principal, request.tenantContext, params.expenseId, body);
+  }
+
+  @Get('expenses/:expenseId/payments')
+  getExpensePayments(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: ExpenseIdParamDto,
+  ): Promise<ExpensePaymentHistoryResponse> {
+    return this.reads.getPaymentHistory(request.principal, request.tenantContext, params.expenseId);
   }
 
   @Get('expenses/:expenseId')

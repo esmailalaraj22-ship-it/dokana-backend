@@ -8,6 +8,8 @@ import { OwnerLedgerModule } from '../owner-ledger/owner-ledger.module';
 import { SettingsModule } from '../settings/settings.module';
 import { ExpenseCategoryRepository } from './expense-category.repository';
 import { ExpenseCategoryService } from './expense-category.service';
+import { ExpensePaymentRepository } from './expense-payment.repository';
+import { ExpensePaymentService } from './expense-payment.service';
 import { ExpenseReadRepository } from './expense-read.repository';
 import { ExpenseReadService } from './expense-read.service';
 import { ExpenseRecognitionRepository } from './expense-recognition.repository';
@@ -27,6 +29,8 @@ import { ExpensesController } from './expenses.controller';
   providers: [
     ExpenseCategoryRepository,
     ExpenseCategoryService,
+    ExpensePaymentRepository,
+    ExpensePaymentService,
     ExpenseReadRepository,
     ExpenseReadService,
     ExpenseRecognitionRepository,

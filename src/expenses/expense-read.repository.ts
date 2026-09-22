@@ -114,14 +114,25 @@ export class ExpenseReadRepository {
       if (!expense) return null;
 
       const payments = await transaction.execute<ExpensePaymentReadRow>(sql`
-        select id, amount_minor::text as "amountMinor", payment_source as "paymentSource",
-          money_account_id as "moneyAccountId", money_movement_id as "moneyMovementId",
-          owner_ledger_entry_id as "ownerLedgerEntryId", payment_at as "paymentAt",
-          operation_id as "operationId", created_at as "createdAt", version::text as version
-        from ledger.expense_payments
-        where store_id=${context.storeId}::uuid and expense_id=${expenseId}::uuid
-          and status='posted'
-        order by payment_at, id
+        select ep.id, ep.accounting_period_id as "accountingPeriodId",
+          ep.amount_minor::text as "amountMinor", ep.payment_source as "paymentSource",
+          ep.money_account_id as "moneyAccountId", ma.name as "moneyAccountName",
+          ma.status as "moneyAccountStatus", ep.money_movement_id as "moneyMovementId",
+          ep.owner_ledger_entry_id as "ownerLedgerEntryId",
+          coalesce(mm.transaction_group_id, ole.transaction_group_id) as "transactionGroupId",
+          ep.payment_at as "paymentAt", ep.notes, ep.status,
+          ep.operation_id as "operationId", ep.created_at as "createdAt",
+          ep.version::text as version
+        from ledger.expense_payments ep
+        left join ledger.money_accounts ma
+          on ma.store_id=ep.store_id and ma.id=ep.money_account_id
+        left join ledger.money_movements mm
+          on mm.store_id=ep.store_id and mm.id=ep.money_movement_id
+        left join ledger.owner_ledger_entries ole
+          on ole.store_id=ep.store_id and ole.id=ep.owner_ledger_entry_id
+        where ep.store_id=${context.storeId}::uuid and ep.expense_id=${expenseId}::uuid
+          and ep.status='posted'
+        order by ep.payment_at, ep.id
       `);
       return { expense, payments: payments.rows };
     });
