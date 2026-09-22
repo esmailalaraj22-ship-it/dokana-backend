@@ -21,6 +21,8 @@ import {
 } from './dto/expense-category.dto';
 import { ExpenseIdParamDto, ListExpensesQueryDto } from './dto/expense-read.dto';
 import { ExpenseCategoryService } from './expense-category.service';
+import { ExpenseCorrectionService } from './expense-correction.service';
+import type { ExpenseCorrectionResponse } from './expense-correction.types';
 import type {
   ExpenseCategoryMutationResponse,
   ExpenseCategoryResponse,
@@ -41,6 +43,7 @@ import type { ExpenseRecognitionResponse } from './expense-recognition.types';
 export class ExpensesController {
   constructor(
     private readonly categories: ExpenseCategoryService,
+    private readonly corrections: ExpenseCorrectionService,
     private readonly recognition: ExpenseRecognitionService,
     private readonly payments: ExpensePaymentService,
     private readonly reads: ExpenseReadService,
@@ -141,6 +144,62 @@ export class ExpensesController {
     @Body() body: unknown,
   ): Promise<ExpensePaymentPostingResponse> {
     return this.payments.post(request.principal, request.tenantContext, params.expenseId, body);
+  }
+
+  @Post('expenses/:targetOperationId/cancel')
+  cancelExpense(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<ExpenseCorrectionResponse> {
+    return this.corrections.cancelExpense(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('expenses/:targetOperationId/edit')
+  editExpense(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<ExpenseCorrectionResponse> {
+    return this.corrections.editExpense(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('expense-payments/:targetOperationId/cancel')
+  cancelExpensePayment(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<ExpenseCorrectionResponse> {
+    return this.corrections.cancelPayment(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('expense-payments/:targetOperationId/edit')
+  editExpensePayment(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<ExpenseCorrectionResponse> {
+    return this.corrections.editPayment(
+      request.principal,
+      request.tenantContext,
+      targetOperationId,
+      body,
+    );
   }
 
   @Get('expenses/:expenseId/payments')

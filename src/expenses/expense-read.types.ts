@@ -24,7 +24,13 @@ export interface ExpenseReadRow extends Record<string, unknown> {
   recognitionMoneyAccountId: string | null;
   recognitionMoneyMovementId: string | null;
   recognitionOwnerLedgerEntryId: string | null;
-  status: 'posted';
+  status: 'posted' | 'cancelled';
+  correctionOperationId: string | null;
+  correctionType: 'cancel' | 'replace' | null;
+  correctionReason: string | null;
+  correctedAt: Date | string | null;
+  replacementId: string | null;
+  currentActiveId: string | null;
   notes: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -44,7 +50,14 @@ export interface ExpensePaymentReadRow extends Record<string, unknown> {
   transactionGroupId: string | null;
   paymentAt: Date | string;
   notes: string | null;
-  status: 'posted';
+  status: 'posted' | 'cancelled';
+  correctionScope: 'expense_recognition' | 'later_payment';
+  correctionOperationId: string | null;
+  correctionType: 'cancel' | 'replace' | null;
+  correctionReason: string | null;
+  correctedAt: Date | string | null;
+  replacementId: string | null;
+  currentActiveId: string | null;
   operationId: string;
   createdAt: Date | string;
   version: string;
@@ -72,7 +85,15 @@ export interface ExpenseReadItem {
     moneyMovementId: string | null;
     ownerLedgerEntryId: string | null;
   } | null;
-  status: 'posted';
+  status: 'posted' | 'cancelled';
+  correction: {
+    operationId: string;
+    type: 'cancel' | 'replace';
+    reason: string;
+    occurredAt: string;
+    replacementId: string | null;
+  } | null;
+  currentActiveId: string | null;
   createdAt: string;
   updatedAt: string;
   version: string;
@@ -94,7 +115,16 @@ export interface ExpensePaymentReadItem {
   transactionGroupId: string;
   paymentAt: string;
   notes: string | null;
-  status: 'posted';
+  status: 'posted' | 'cancelled';
+  correctionScope: 'expense_recognition' | 'later_payment';
+  correction: {
+    operationId: string;
+    type: 'cancel' | 'replace';
+    reason: string;
+    occurredAt: string;
+    replacementId: string | null;
+  } | null;
+  currentActiveId: string | null;
   operationId: string;
   createdAt: string;
   version: string;

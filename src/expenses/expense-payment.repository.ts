@@ -123,7 +123,7 @@ const failures: Readonly<Record<ExpensePaymentFailureCode, ExpensePaymentFailure
   },
 };
 
-class ExpensePaymentRejectedError extends Error {
+export class ExpensePaymentRejectedError extends Error {
   constructor(readonly result: FailureResult) {
     super(result.error.message);
     this.name = 'ExpensePaymentRejectedError';
@@ -163,7 +163,7 @@ export class ExpensePaymentRepository {
 
       try {
         const response = await transaction.transaction((savepoint) =>
-          this.insertWithinTransaction(savepoint, context, command, postingDate, paymentId),
+          this.insertPaymentWithinTransaction(savepoint, context, command, postingDate),
         );
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
         return { ok: true, response };
@@ -173,13 +173,13 @@ export class ExpensePaymentRepository {
     });
   }
 
-  private async insertWithinTransaction(
+  async insertPaymentWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: ExpensePaymentCommand,
     postingDate: string,
-    paymentId: string,
   ): Promise<ExpensePaymentPostingResponse> {
+    const paymentId = deriveMoneyFactId(command.operationId, 'expense-payment');
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
     const expense = await this.lockExpense(transaction, context.storeId, command.expenseId);
     const before = await this.readSettlement(transaction, context.storeId, command.expenseId);

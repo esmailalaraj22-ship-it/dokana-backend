@@ -95,7 +95,7 @@ const failures: Readonly<Record<ExpenseRecognitionFailureCode, ExpenseRecognitio
   },
 };
 
-class ExpenseRecognitionRejectedError extends Error {
+export class ExpenseRecognitionRejectedError extends Error {
   constructor(readonly result: FailureResult) {
     super(result.error.message);
     this.name = 'ExpenseRecognitionRejectedError';
@@ -134,7 +134,7 @@ export class ExpenseRecognitionRepository {
 
       try {
         const response = await transaction.transaction((savepoint) =>
-          this.insertWithinTransaction(savepoint, context, command, postingDate),
+          this.insertRecognitionWithinTransaction(savepoint, context, command, postingDate),
         );
         await this.applyOperation(transaction, context.storeId, command.operationId, response);
         return { ok: true, response };
@@ -144,7 +144,7 @@ export class ExpenseRecognitionRepository {
     });
   }
 
-  private async insertWithinTransaction(
+  async insertRecognitionWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: ExpenseRecognitionCommand,

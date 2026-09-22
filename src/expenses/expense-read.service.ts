@@ -139,6 +139,20 @@ export class ExpenseReadService {
               ownerLedgerEntryId: row.recognitionOwnerLedgerEntryId,
             },
       status: row.status,
+      correction:
+        row.correctionOperationId === null ||
+        row.correctionType === null ||
+        row.correctionReason === null ||
+        row.correctedAt === null
+          ? null
+          : {
+              operationId: row.correctionOperationId,
+              type: row.correctionType,
+              reason: row.correctionReason,
+              occurredAt: this.iso(row.correctedAt),
+              replacementId: row.replacementId,
+            },
+      currentActiveId: row.currentActiveId,
       createdAt: this.iso(row.createdAt),
       updatedAt: this.iso(row.updatedAt),
       version: row.version,
@@ -171,6 +185,21 @@ export class ExpenseReadService {
       paymentAt: this.iso(row.paymentAt),
       notes: row.notes,
       status: row.status,
+      correctionScope: row.correctionScope,
+      correction:
+        row.correctionOperationId === null ||
+        row.correctionType === null ||
+        row.correctionReason === null ||
+        row.correctedAt === null
+          ? null
+          : {
+              operationId: row.correctionOperationId,
+              type: row.correctionType,
+              reason: row.correctionReason,
+              occurredAt: this.iso(row.correctedAt),
+              replacementId: row.replacementId,
+            },
+      currentActiveId: row.currentActiveId,
       operationId: row.operationId,
       createdAt: this.iso(row.createdAt),
       version: row.version,

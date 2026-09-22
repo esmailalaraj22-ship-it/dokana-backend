@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S16.1 starting checkpoint | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Closed execution history  | Stations S0-S15; S16.1-S16.3 closed        |
-| Next candidate            | S16.4 - NEXT / NOT STARTED                 |
+| Closed execution history  | Stations S0-S15; S16.1-S16.4 closed        |
+| Next candidate            | S16.5 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S15                                        |
-| Next task                       | S16.4 next; not started                    |
+| Next task                       | S16.5 next; not started                    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -481,7 +481,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.3 CLOSED; S16.4 NEXT.
+- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.4 CLOSED; S16.5 NEXT.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
@@ -554,21 +554,24 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16.4 - Immutable Expense and Payment Corrections
 
-- **Status:** NEXT - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Correct posted Expense and Payment operations without destructive editing.
-- **Deliverables:** Whole-operation cancel/replacement; current-period reversals; active-
-  leaf lineage; exact Money/Owner reversal; dependency guards; historical Category and
-  Money Account safety; correction reads.
+- **Delivered:** Immutable Expense and later-Payment cancel/replacement; DUE, MONEY_PAID,
+  and OWNER_FUNDED correction; exact historical Money/Owner reversal; active-leaf
+  lineage and reason; current-period correction; active dependent-Payment protection;
+  historical Category/Money Account reversal safety; current replacement eligibility;
+  idempotency, concurrency, atomic rollback, and correction reads/history.
 - **Non-scope:** Cross-domain returns, S17 orchestration, destructive edits, and closed-
   period rewrites.
-- **DB:** Expected zero delta; stop if active-leaf safety requires a physical change.
+- **DB:** 15 applied / 0 pending; S16.4 DB delta 0.
 - **Verification:** Focused PostgreSQL reversal, replacement, dependency, duplicate,
   rollback, archive-history, period, concurrency, RLS, and lineage tests.
+- **Deferred:** Broad final S16 verification to S16.5; SQLite parity to S19.
 - **Exit:** Original facts remain auditable and every active effect reverses exactly once.
 
 ### S16.5 - Final Expense Verification and Closure
 
-- **Status:** NOT STARTED.
+- **Status:** NEXT - NOT STARTED.
 - **Purpose:** Prove S16 completeness and close the Station without adding capability.
 - **Deliverables:** Cross-stage accounting/security audit, focused regression, final
   repository gates, Roadmap closure, and S17 handoff.
@@ -822,8 +825,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S15 and S16.1-S16.3 are closed, and
-S16.4 is next and not started.
+No roadmap-level owner decision is open. Stations S0-S15 and S16.1-S16.4 are closed, and
+S16.5 is next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -852,10 +855,10 @@ decision does not authorize an implementer to invent policy.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S15 - Customer Collections and Settlement  |
 | S16.1 starting checkpoint           | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Safe completed capabilities         | S0-S15; S16.1-S16.3                        |
-| First incomplete release dependency | S16.4 - Expense and Payment Corrections    |
-| Next candidate                      | S16.4 - NEXT / NOT STARTED                 |
-| S16 current status                  | OPEN; S16.1-S16.3 CLOSED                   |
+| Safe completed capabilities         | S0-S15; S16.1-S16.4                        |
+| First incomplete release dependency | S16.5 - Final Expense Verification         |
+| Next candidate                      | S16.5 - NEXT / NOT STARTED                 |
+| S16 current status                  | OPEN; S16.1-S16.4 CLOSED                   |
 
-Do not start S16.4 from this document. It requires an explicit backend-owner execution
+Do not start S16.5 from this document. It requires an explicit backend-owner execution
 prompt.
