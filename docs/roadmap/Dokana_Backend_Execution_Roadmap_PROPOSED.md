@@ -8,7 +8,7 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S16.1 starting checkpoint | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Closed execution history  | Stations S0-S15; S16.1-S16.2 complete      |
+| Closed execution history  | Stations S0-S15; S16.1-S16.2 closed        |
 | Next candidate            | S16.3 - NEXT / NOT STARTED                 |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
@@ -481,7 +481,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.2 COMPLETE; S16.3 NEXT.
+- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.2 CLOSED; S16.3 NEXT.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
@@ -505,7 +505,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16.1 - Expense Orientation and Execution Decomposition
 
-- **Status:** COMPLETE.
+- **Status:** CLOSED.
 - **Purpose:** Verify physical readiness and freeze dependency-correct execution stages.
 - **Deliverables:** PostgreSQL/SQLite/Drizzle/application assessment; accounting boundary;
   database-blocker decision; S16.2-S16.5 plan.
@@ -818,8 +818,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S15 are closed, S16.1-S16.2 are
-complete, and S16.3 is next and not started.
+No roadmap-level owner decision is open. Stations S0-S15 and S16.1-S16.2 are closed, and
+S16.3 is next and not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -851,7 +851,7 @@ decision does not authorize an implementer to invent policy.
 | Safe completed capabilities         | S0-S15; S16.1-S16.2                        |
 | First incomplete release dependency | S16.3 - Due Expense Payments               |
 | Next candidate                      | S16.3 - NEXT / NOT STARTED                 |
-| S16 current status                  | OPEN; S16.1-S16.2 COMPLETE                 |
+| S16 current status                  | OPEN; S16.1-S16.2 CLOSED                   |
 
 Do not start S16.3 from this document. It requires an explicit backend-owner execution
 prompt.
