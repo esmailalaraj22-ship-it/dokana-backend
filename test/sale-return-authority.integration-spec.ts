@@ -46,6 +46,7 @@ const products = [randomUUID(), randomUUID()] as const;
 const units = [randomUUID(), randomUUID()] as const;
 const sales = [randomUUID(), randomUUID()] as const;
 const saleItems = [randomUUID(), randomUUID()] as const;
+const moneyAccounts = [randomUUID(), randomUUID()] as const;
 const periods = [
   deriveAccountingPeriodId(stores[0], 2026, 9),
   deriveAccountingPeriodId(stores[1], 2026, 9),
@@ -59,13 +60,16 @@ function command(
   saleItemId: string,
   quantityMilli = '1000',
   disposition: 'RESTOCK_SALEABLE' | 'DAMAGED_NO_RESTOCK' = 'RESTOCK_SALEABLE',
+  refundMoneyAccountId: string | null = null,
 ) {
   return parseSaleReturnCommand(saleId, {
     operationId: randomUUID(),
     occurredAt: acceptedAt.toISOString(),
     reason: 'Focused S17.2 authority test',
     lines: [{ saleItemId, quantityMilli, disposition }],
-    residualSettlement: null,
+    residualSettlement: refundMoneyAccountId
+      ? { choice: 'REFUND', moneyAccountId: refundMoneyAccountId }
+      : null,
   });
 }
 
@@ -174,6 +178,14 @@ describe('S17.2 Sale Return internal authority', () => {
           track_inventory, status, operation_id
         ) values ($1, $2, 'S17.2 Product', $1::uuid::text, 'count', true, 'active', $3)`,
         [products[index], stores[index], randomUUID()],
+      );
+      await db().admin.query(
+        `insert into ledger.money_accounts(
+          id, store_id, name, normalized_name, account_type,
+          availability, status, device_id, operation_id
+        ) values ($1, $2, 'S17.2 Cash', $1::uuid::text, 'cash',
+          'available', 'active', $3, $4)`,
+        [moneyAccounts[index], stores[index], devices[index], randomUUID()],
       );
       await db().admin.query(
         `insert into ledger.product_units(
@@ -510,6 +522,55 @@ describe('S17.2 Sale Return internal authority', () => {
     } finally {
       await db().admin.query(`update ledger.sales set sale_at=$2 where id=$1`, [sales[0], saleAt]);
     }
+  });
+
+  it('locks one tenant-owned active and available Money Account for a refund residual', async () => {
+    const refundable = command(
+      sales[1],
+      saleItems[1],
+      '1000',
+      'DAMAGED_NO_RESTOCK',
+      moneyAccounts[1],
+    );
+    await expect(
+      runtimeTransaction(1, (transaction) =>
+        repository.buildNewPlanWithinTransaction(transaction, stores[1], refundable),
+      ),
+    ).resolves.toMatchObject({
+      settlement: { refundMinor: 100n, refundMoneyAccountId: moneyAccounts[1] },
+    });
+
+    await db().admin.query(
+      `update ledger.money_accounts
+       set status='archived', archived_at=clock_timestamp()
+       where id=$1`,
+      [moneyAccounts[1]],
+    );
+    try {
+      await expect(
+        runtimeTransaction(1, (transaction) =>
+          repository.buildNewPlanWithinTransaction(transaction, stores[1], refundable),
+        ),
+      ).rejects.toMatchObject({ code: 'SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE' });
+    } finally {
+      await db().admin.query(
+        `update ledger.money_accounts set status='active', archived_at=null where id=$1`,
+        [moneyAccounts[1]],
+      );
+    }
+
+    const foreignAccount = command(
+      sales[1],
+      saleItems[1],
+      '1000',
+      'DAMAGED_NO_RESTOCK',
+      moneyAccounts[0],
+    );
+    await expect(
+      runtimeTransaction(1, (transaction) =>
+        repository.buildNewPlanWithinTransaction(transaction, stores[1], foreignAccount),
+      ),
+    ).rejects.toMatchObject({ code: 'SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE' });
   });
 
   it('reads archived historical Product linkage but requires restoration for saleable restock', async () => {

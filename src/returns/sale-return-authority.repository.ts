@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DatabaseTransaction } from '../database/database.types';
 import {
   customers,
+  moneyAccounts,
   products,
   productUnits,
   saleCustomerCreditApplications,
@@ -198,6 +199,12 @@ export class SaleReturnAuthorityRepository {
       previouslyRestoredOriginalCreditMinor,
       residualSettlement: command.residualSettlement,
     });
+    if (settlement.refundMinor > 0n) {
+      if (settlement.refundMoneyAccountId === null) {
+        throw new SaleReturnAuthorityError('SALE_RETURN_INTEGRITY_CONFLICT');
+      }
+      await this.lockEligibleRefundAccount(transaction, storeId, settlement.refundMoneyAccountId);
+    }
 
     return {
       operationId: command.operationId,
@@ -296,6 +303,21 @@ export class SaleReturnAuthorityRepository {
         and source_sale_id = ${saleId}::uuid
     `);
     return this.nonnegativeAggregate(result.rows[0]?.amount);
+  }
+
+  private async lockEligibleRefundAccount(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    moneyAccountId: string,
+  ): Promise<void> {
+    const [account] = await transaction
+      .select({ status: moneyAccounts.status, availability: moneyAccounts.availability })
+      .from(moneyAccounts)
+      .where(and(eq(moneyAccounts.storeId, storeId), eq(moneyAccounts.id, moneyAccountId)))
+      .for('update');
+    if (account?.status !== 'active' || account.availability !== 'available') {
+      throw new SaleReturnAuthorityError('SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE');
+    }
   }
 
   private async readHistoricalCustomerCreditTender(
