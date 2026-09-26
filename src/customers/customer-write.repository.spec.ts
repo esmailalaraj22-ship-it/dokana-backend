@@ -223,6 +223,7 @@ describe('CustomerWriteRepository', () => {
     harness.execute
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [{ receivableMinor: '0', creditMinor: '0' }] })
       .mockResolvedValueOnce({ rows: [{ operationId }] });
     harness.returningUpdate.mockResolvedValueOnce([
       { ...row, status: 'archived', archivedAt, version: 2n },
@@ -294,6 +295,32 @@ describe('CustomerWriteRepository', () => {
   });
 
   it.each([
+    { receivableMinor: '1', creditMinor: '0' },
+    { receivableMinor: '0', creditMinor: '1' },
+  ])('rejects archive while a Customer financial balance remains', async (balance) => {
+    const harness = createHarness();
+    harness.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [balance] })
+      .mockResolvedValueOnce({ rows: [{ operationId }] });
+
+    await expect(
+      harness.repository.changeLifecycle(context, {
+        customerId,
+        operationId,
+        expectedVersion: 1n,
+        action: 'archive',
+        requestHash: '9'.repeat(64),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'CUSTOMER_FINANCIAL_BALANCE_NONZERO' },
+    });
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
     {
       action: 'archive' as const,
       current: [] as { status: 'active' | 'archived'; version: bigint }[],
@@ -344,7 +371,8 @@ describe('CustomerWriteRepository', () => {
     const unexpected = new Error('unexpected lifecycle database failure');
     harness.execute
       .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ claimed: true }] });
+      .mockResolvedValueOnce({ rows: [{ claimed: true }] })
+      .mockResolvedValueOnce({ rows: [{ receivableMinor: '0', creditMinor: '0' }] });
     harness.returningUpdate.mockRejectedValueOnce(unexpected);
 
     await expect(
@@ -356,6 +384,6 @@ describe('CustomerWriteRepository', () => {
         requestHash: '1'.repeat(64),
       }),
     ).rejects.toBe(unexpected);
-    expect(harness.execute).toHaveBeenCalledTimes(2);
+    expect(harness.execute).toHaveBeenCalledTimes(3);
   });
 });

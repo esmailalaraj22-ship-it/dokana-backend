@@ -4,3 +4,4 @@ export * from './inventory';
 export * from './supplier-finance';
 export * from './sales';
 export * from './expenses';
+export * from './returns';

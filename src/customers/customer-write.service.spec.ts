@@ -34,6 +34,10 @@ function rejected(code: CustomerMutationFailureCode): CustomerMutationResult {
   const definitions = {
     CONFLICT: ['The request conflicts with existing state.', 409],
     CUSTOMER_ARCHIVED: ['Archived Customer cannot be updated.', 409],
+    CUSTOMER_FINANCIAL_BALANCE_NONZERO: [
+      'Customer with a receivable or Customer Credit balance cannot be archived.',
+      409,
+    ],
     CUSTOMER_NOT_FOUND: ['Customer not found.', 404],
     CUSTOMER_PHONE_CONFLICT: ['A Customer with this phone already exists.', 409],
     CUSTOMER_VERSION_CONFLICT: ['Customer version conflict.', 409],
@@ -404,6 +408,7 @@ describe('CustomerWriteService', () => {
   it.each([
     ['CUSTOMER_NOT_FOUND', NotFoundException],
     ['CUSTOMER_ARCHIVED', ConflictException],
+    ['CUSTOMER_FINANCIAL_BALANCE_NONZERO', ConflictException],
     ['CUSTOMER_PHONE_CONFLICT', ConflictException],
     ['CUSTOMER_VERSION_CONFLICT', ConflictException],
     ['OPERATION_ID_CONFLICT', ConflictException],

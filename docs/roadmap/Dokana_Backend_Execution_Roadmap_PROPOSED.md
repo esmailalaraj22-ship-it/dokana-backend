@@ -2,14 +2,14 @@
 
 ## 1. Document Status and Governance
 
-| Field                       | Value                                      |
-| --------------------------- | ------------------------------------------ |
-| Status                      | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
-| Repository                  | `C:\Users\esmail\Desktop\Dokana`           |
-| Review branch               | `main`                                     |
-| S17.1 assessment checkpoint | `b718bd8bf9550224564ff297a2fe71e2f9f91b4f` |
-| Closed execution history    | Stations S0-S16; S17.1 orientation         |
-| Next candidate              | S17.2 - BLOCKED ON OWNER POLICY DECISIONS  |
+| Field                     | Value                                       |
+| ------------------------- | ------------------------------------------- |
+| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**     |
+| Repository                | `C:\Users\esmail\Desktop\Dokana`            |
+| Review branch             | `main`                                      |
+| S17.2 starting checkpoint | `2d11441e590d52d54d28041330d275e25ea980d9`  |
+| Closed execution history  | Stations S0-S16; S17.1-S17.2                |
+| Next candidate            | S17.3 - Atomic Customer Sale Return Posting |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -58,18 +58,18 @@ backend owner before implementation.
 
 The roadmap was reconstructed against this verified state:
 
-| Check                           | Verified state                             |
-| ------------------------------- | ------------------------------------------ |
-| Branch                          | `main`                                     |
-| S17.1 starting HEAD             | `b718bd8bf9550224564ff297a2fe71e2f9f91b4f` |
-| Starting `origin/main`          | `b718bd8bf9550224564ff297a2fe71e2f9f91b4f` |
-| Ahead/behind                    | `0/0`                                      |
-| Working tree                    | Clean                                      |
-| Migrations                      | 15 applied, 0 pending                      |
-| Migration checksum verification | Pass                                       |
-| Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S16                                        |
-| Next task                       | S17.2 blocked on owner policy decisions    |
+| Check                           | Verified state                              |
+| ------------------------------- | ------------------------------------------- |
+| Branch                          | `main`                                      |
+| S17.2 starting HEAD             | `2d11441e590d52d54d28041330d275e25ea980d9`  |
+| Starting `origin/main`          | `2d11441e590d52d54d28041330d275e25ea980d9`  |
+| Ahead/behind                    | `0/0`                                       |
+| Working tree                    | Clean                                       |
+| Migrations                      | 15 applied, 0 pending                       |
+| Migration checksum verification | Pass                                        |
+| Reference SHA-256 verification  | 11 files checked, 0 mismatches              |
+| Last fully closed Station       | S16                                         |
+| Next task                       | S17.3 - Atomic Customer Sale Return Posting |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -598,7 +598,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** ORIENTED; S17.1 CLOSED; S17.2 BLOCKED ON OWNER POLICY DECISIONS.
+- **Status:** OPEN; S17.1-S17.2 CLOSED; S17.3 NEXT / NOT STARTED.
 - **Purpose:** Append later Customer Sale Return and approved Supplier financial Return
   documents that atomically coordinate existing period, receivable/payable, Customer
   Credit, money, and inventory authorities without rewriting valid original postings,
@@ -618,24 +618,37 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   RLS, audit, and change capture provide a partial foundation. Sale and Sale-line lineage,
   the two approved `saleable`/`damaged` dispositions, current-period posting, split
   settlement representation, and Supplier financial settlement representation exist.
-  Drizzle mappings and application/API authorities are absent. PostgreSQL's Return
-  validator does not by itself serialize returnable quantity/value or validate every
-  cross-domain link, and the existing child authorities require transaction-aware
-  composition/refactoring. Verdict: **S17 PHYSICAL FOUNDATION PARTIAL - APPLICATION WORK
-  REQUIRED, DATABASE DELTA 0 EXPECTED**.
-- **Database decision:** No migration is authorized or currently required. S17 must lock
-  the trusted Customer/Sale/Sale-line and affected Product/Unit/Money Account resources,
-  calculate remaining returnable quantity/value server-side, and write the Return,
+  S17.2 now supplies exact Drizzle mappings and non-public Customer Return calculation and
+  locking authority. PostgreSQL's Return validator does not by itself serialize
+  returnable quantity/value or validate every cross-domain link, and atomic posting still
+  requires transaction-aware composition of the existing child authorities. Verdict:
+  **S17 PHYSICAL FOUNDATION PARTIAL - APPLICATION WORK REQUIRED, DATABASE DELTA 0
+  EXPECTED**.
+- **Database decision:** No migration is authorized or currently required. S17.2 locks the
+  trusted Customer/Sale/Sale-line and affected Product/Unit resources and calculates
+  remaining returnable quantity/value server-side. S17.3 must compose the Return,
   financial, inventory, audit/change, and operation effects atomically. A later owner
   decision requiring a new Return against archived Product/Unit state without restoration
   would need a separate physical review because migration `0013` permits archived catalog
   use only for an exact linked correction reversal.
-- **Policy gate:** Before S17.2, the backend owner must approve partial/full and manual-line
-  returns; settlement ordering across Receivable, Customer Credit, refund, later
-  collections, and original Credit tender; eligible refund accounts; archived Customer
-  and catalog behavior; historical partial COGS rounding and `unknown`/`pending` cost;
-  Return cancellation/replacement dependency rules; and the Supplier Return/Credit scope.
-- **Hard dependencies:** Closed S11-S16 transactional workflows and the policy gate above.
+- **Backend-owner Customer Return policy:** Ordinary eligibility is 48 actual hours from
+  the original Sale occurrence, evaluated using server transaction time. Full, partial,
+  line-level, registered-Customer, and anonymous Returns are supported against the active
+  Sale leaf using its existing readable number and historical net value. Settlement
+  reduces the Sale Receivable first, restores historically consumed Customer Credit next,
+  then requires explicit Refund or Customer Credit for a registered Customer; anonymous
+  residual value is Refund only. Refund uses one currently eligible Money Account.
+  Tracked lines require explicit `RESTOCK_SALEABLE` or `DAMAGED_NO_RESTOCK`; historical
+  cost controls any cost reversal. Cumulative Returns cannot exceed original quantity or
+  value. Customer archive requires both Receivable and Customer Credit to be zero.
+- **Backend-owner Supplier Return policy:** There is no fixed system-wide Return time
+  limit. A Supplier financial Return links to its Supplier Invoice, reduces Payable first,
+  and records excess as distinct Supplier Credit that may later be applied explicitly or
+  refunded. A Supplier refund is a Money inflow, not Revenue. No automatic Supplier
+  inventory Return is approved; future supplier inventory-return authority requires
+  Purchase/Goods Receipt lineage and a separate approval.
+- **Hard dependencies:** Closed S11-S16 transactional workflows and the frozen policies
+  above.
 - **Explicit non-scope:** Ordinary Sale, collection, Supplier Payment, Expense correction,
   or manual Inventory operations; Goods Receipt/Purchase Receipt; recursive cancellation
   of valid history; reports/export/OpenAPI; offline sync/SQLite implementation;
@@ -663,21 +676,27 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17.2 - Sale Return Contract, Mapping, and Internal Authority
 
-- **Status:** BLOCKED - BACKEND-OWNER POLICY DECISIONS REQUIRED.
+- **Status:** CLOSED.
 - **Purpose:** Freeze the approved Customer Sale Return command/read contract, map the
   existing Return tables, and build non-public server-calculated returnable
   quantity/value authority.
 - **Dependencies/owners reused:** S9 posting context, S14 Sale/Receivable lineage, S15
   Customer state/Credit semantics, and the S17 policy gate.
-- **Deliverables:** Drizzle mappings, canonical validation/hash/identity, Return lineage
-  and remaining-value calculation, replay claim, canonical Customer-before-Sale lock
-  order, and internal repository primitives; no incomplete public posting route.
+- **Delivered:** Owner policy freeze; exact Drizzle mappings for the six existing Return
+  tables; canonical command validation/hash identity; active Sale and Sale-line authority;
+  server-time 48-hour eligibility; full/partial cumulative quantity, historical value,
+  historical cost, and disposition calculation; Customer settlement waterfall; canonical
+  Customer-before-Sale and Sale-line lock preparation; and transaction-aware internal
+  repository primitives. No incomplete public posting route was exposed.
 - **Non-scope/DB:** No settlement payout, stock effect, public Return workflow, Supplier
   Return, migration, or SQLite change; expected database delta 0.
-- **Invariants/tests:** Server-derived Sale/line/value authority, tenant privacy,
-  over-return rejection, manual/untracked-line boundaries, exact replay/conflict, and
-  real PostgreSQL concurrent-return serialization. Close only after focused unit and
-  PostgreSQL tests prove the internal authority without exposing partial effects.
+- **Verification:** Focused unit coverage proves the policy calculations and canonical
+  identity; focused real-PostgreSQL coverage proves exact mapping, tenant/Sale/line
+  linkage, prior active quantities, lock serialization, archive guard, and forced-RLS
+  fail-closed behavior. DB: 15 applied / 0 pending; S17.2 database delta 0.
+- **Exit:** Internal authority is ready for S17.3 atomic posting composition. Public
+  posting, idempotency claim persistence, financial/Inventory effects, reads, and Return
+  corrections remain in their planned stages.
 
 ### S17.3 - Atomic Customer Sale Return Posting
 
@@ -729,7 +748,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17.6 - Supplier Financial Returns
 
-- **Status:** PROPOSED - POLICY-GATED.
+- **Status:** PROPOSED - NOT STARTED.
 - **Purpose:** Append an approved Supplier financial Return/credit against Supplier
   payable history without automatically creating or reversing inventory.
 - **Dependencies/owners reused:** S12 Invoice/Payable, S13 settlement, S9 period, S10 Money,
@@ -986,17 +1005,9 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure decision is open. S17.1 is closed, but S17.2 is blocked until the
-backend owner approves the Station-local policy gate recorded in the S17 section:
-
-1. partial/full and manual-line Sale Return scope;
-2. Receivable/Credit/refund ordering, later-collection treatment, original Credit-tender
-   treatment, and refund-account eligibility;
-3. archived Customer and archived Product/Product Unit Return eligibility;
-4. historical partial COGS rounding and `unknown`/`pending` cost treatment;
-5. Return cancel/replace active-leaf and dependent Credit/inventory behavior; and
-6. Supplier financial Return, Supplier Credit, invoice linkage, and inventory-separation
-   scope.
+No roadmap-structure decision is open. The backend owner resolved the S17 Return policy
+gate, and S17.2 records the approved Customer and Supplier Return boundaries. S17.3 is the
+next implementation stage and is not started by this document.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -1021,15 +1032,15 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                               | Current position                           |
-| ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S16 - Expenses and Expense Payments        |
-| S17.1 starting checkpoint           | `b718bd8bf9550224564ff297a2fe71e2f9f91b4f` |
-| Safe completed capabilities         | S0-S16                                     |
-| First incomplete release dependency | S17 - Cross-Domain Corrections             |
-| Next candidate                      | S17.2 - BLOCKED ON OWNER POLICY DECISIONS  |
-| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                 |
-| S17 current status                  | S17.1 CLOSED; implementation not started   |
+| Field                               | Current position                             |
+| ----------------------------------- | -------------------------------------------- |
+| Last fully closed Station           | S16 - Expenses and Expense Payments          |
+| S17.2 starting checkpoint           | `2d11441e590d52d54d28041330d275e25ea980d9`   |
+| Safe completed capabilities         | S0-S16 plus S17.1-S17.2                      |
+| First incomplete release dependency | S17 - Cross-Domain Corrections               |
+| Next candidate                      | S17.3 - Atomic Customer Sale Return Posting  |
+| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                   |
+| S17 current status                  | S17.1-S17.2 CLOSED; S17.3 NEXT / NOT STARTED |
 
-Do not start S17.2 from this document. It requires the policy decisions listed above and
-an explicit backend-owner execution prompt.
+Do not start S17.3 from this document. It requires an explicit backend-owner execution
+prompt.

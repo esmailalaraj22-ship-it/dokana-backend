@@ -44,6 +44,7 @@ export interface CustomerMutationRow extends CustomerDetailRow {
 export type CustomerMutationFailureCode =
   | 'CONFLICT'
   | 'CUSTOMER_ARCHIVED'
+  | 'CUSTOMER_FINANCIAL_BALANCE_NONZERO'
   | 'CUSTOMER_NOT_FOUND'
   | 'CUSTOMER_PHONE_CONFLICT'
   | 'CUSTOMER_VERSION_CONFLICT'

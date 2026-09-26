@@ -4,6 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service';
 import { customers } from '../database/schema';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
+import { customerHasNoFinancialBalance } from './customer-financial-archive-guard';
 import {
   mapCustomerMutationResponse,
   parseStoredCustomerMutationResponse,
@@ -41,6 +42,11 @@ const failureDefinitions: Readonly<Record<CustomerMutationFailureCode, CustomerM
   CUSTOMER_ARCHIVED: {
     code: 'CUSTOMER_ARCHIVED',
     message: 'Archived Customer cannot be updated.',
+    statusCode: 409,
+  },
+  CUSTOMER_FINANCIAL_BALANCE_NONZERO: {
+    code: 'CUSTOMER_FINANCIAL_BALANCE_NONZERO',
+    message: 'Customer with a receivable or Customer Credit balance cannot be archived.',
     statusCode: 409,
   },
   CUSTOMER_NOT_FOUND: {
@@ -282,6 +288,19 @@ export class CustomerWriteRepository {
       if (conflict) {
         await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
         return conflict;
+      }
+      if (
+        input.action === 'archive' &&
+        !(await customerHasNoFinancialBalance(transaction, context.storeId, input.customerId))
+      ) {
+        const financialConflict = failure('CUSTOMER_FINANCIAL_BALANCE_NONZERO');
+        await this.rejectOperation(
+          transaction,
+          context.storeId,
+          operation.operationId,
+          financialConflict,
+        );
+        return financialConflict;
       }
 
       const updates =
