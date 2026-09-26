@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S16.1 starting checkpoint | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Closed execution history  | Stations S0-S15; S16.1-S16.4 closed        |
-| Next candidate            | S16.5 - NEXT / NOT STARTED                 |
+| Closed execution history  | Stations S0-S16                            |
+| Next candidate            | S17 - NEXT / NOT STARTED                   |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -68,39 +68,40 @@ The roadmap was reconstructed against this verified state:
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S15                                        |
-| Next task                       | S16.5 next; not started                    |
+| Last fully closed Station       | S16                                        |
+| Next task                       | S17 next; not started                      |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S15
+## 5. Completed Stations S0-S16
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
 
-| Station                                                 | Status | Delivered capability                                                                                                                                                                 | Historical coverage                                                | Evidence                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| S0 - Repository and Reference Assessment                | CLOSED | Repository, baseline, SQLite, mapping, and test-reference assessment                                                                                                                 | Historical repository/reference assessment                         | Project history and reference package                                                                                                                                                                                                                                 |
-| S1 - PostgreSQL Runtime Validation                      | CLOSED | Real PostgreSQL baseline/runtime assessment and documented limitations                                                                                                               | Historical PostgreSQL validation                                   | Reference runtime evidence and project history                                                                                                                                                                                                                        |
-| S2 - NestJS Backend Infrastructure                      | CLOSED | Configuration, logging, health, database transaction context, and test infrastructure                                                                                                | Historical NestJS infrastructure                                   | Git history and [README](../../README.md)                                                                                                                                                                                                                             |
-| S3 - Authentication and Database Security Foundation    | CLOSED | Controlled migration ledger/runner, role boundaries, auth API, sessions/tokens, membership and device bootstrap, RLS/security tests                                                  | Historical migration foundation and much of identity/platform core | [Station 3 architecture](../station-3-architecture.md) and migrations `0001`-`0005`                                                                                                                                                                                   |
-| S4 - Business Foundation and Customers                  | CLOSED | Store business-write gate plus Customer database, validation, read, write, lifecycle, privacy, and idempotency contracts                                                             | Customer portion of historical master data                         | Commits through `a6f567f` and Customer contracts                                                                                                                                                                                                                      |
-| S5 - Product and Product Unit Catalog                   | CLOSED | Product/unit mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                                                                   | Product/unit portion of historical master data                     | [Station 5 closure](../product-unit-station5-closure-v1.md)                                                                                                                                                                                                           |
-| S6 - Supplier Master Data Foundation                    | CLOSED | Supplier mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                                                                       | Supplier-master portion of historical master data                  | [Station 6 closure](../supplier-station6-closure-v1.md)                                                                                                                                                                                                               |
-| S7 - Store Operational Settings Foundation              | CLOSED | Settings mapping, operational-time context, tenant-safe reads, initialization, and idempotent owner-authorized mutations                                                             | Operational settings portion of historical master data             | [S7 contract](../contracts/store-settings-operational-time-v1.md) and [S7.4 record](../settings-station7-safe-mutation-v1.md)                                                                                                                                         |
-| S8 - Money Account Catalog Foundation                   | CLOSED | Money Account mapping, validation, tenant-safe reads/writes, lifecycle, idempotency, and one-active-Cash invariants                                                                  | Money Account portion of historical master data                    | [S8.2 record](../money-account-station8-physical-foundation-v1.md), [S8.3 record](../money-account-station8-read-v1.md), and [S8.4 record](../money-account-station8-lifecycle-v1.md)                                                                                 |
-| S9 - Accounting Periods and Posting Controls            | CLOSED | Monthly period mapping/identity, boundaries, non-overlap, tenant-safe reads, on-demand provisioning, terminal owner close, idempotency, and posting-context/close-vs-post control    | Accounting-period portion historically deferred with corrections   | [S9.1 contract](../contracts/accounting-period-v1.md), [S9.2 record](../accounting-period-station9-physical-foundation-v1.md), [S9.3 record](../accounting-period-station9-read-v1.md), and [S9.4 record](../accounting-period-station9-provisioning-lifecycle-v1.md) |
-| S10 - Money Posting, Opening Balances, and Owner Ledger | CLOSED | Authoritative money movements and balances, owner ledger, internal transfers, opening balances, and same-domain corrections                                                          | Historical money and owner-ledger foundation                       | [Money Posting Contract v1](../contracts/money-posting-v1.md), current implementation, and migration `0006`                                                                                                                                                           |
-| S11 - Manual Inventory, Stock Projection, and Costing   | CLOSED | Independent manual inventory posting, protected stock projection, costing, stock counts, and correction workflows                                                                    | Historical manual inventory and costing foundation                 | Current inventory implementation, tests, and migrations `0007`-`0008`                                                                                                                                                                                                 |
-| S12 - Supplier Invoices and Payables                    | CLOSED | Supplier financial reads, opening payables, payable-only invoice posting, immutable edit/cancel correction chains, and zero automatic inventory or money effects                     | Historical supplier-invoice and payable recognition                | Current Supplier financial implementation, tests, and migrations `0009`-`0010`                                                                                                                                                                                        |
-| S13 - Supplier Payments and Allocations                 | CLOSED | Explicit Invoice/Opening Payable allocations, Money Account or owner funding, settlement reads, and immutable payment cancellation/replacement chains                                | Historical supplier settlement                                     | Current Supplier Payment implementation, tests, and migration `0011`                                                                                                                                                                                                  |
-| S14 - Sales Posting and Customer Receivables            | CLOSED | Paid, partial, credit, split-tender, tracked/untracked and manual-line Sale posting; Customer Opening Receivables; tenant-safe reads; immutable Sale cancellation/replacement chains | Historical sales posting and receivable origination                | Current Sales implementation, tests, and migrations `0012`-`0013`                                                                                                                                                                                                     |
-| S15 - Customer Collections, Credits, and Settlement     | CLOSED | Customer collections, Sale/Opening allocation, overpayment/advance Credit, refunds, non-cash settlement, Sale Credit tender, and immutable active-leaf correction chains             | Historical customer collection, credit, and settlement authority   | Current Customer financial implementation, tests, and migrations `0014`-`0015`                                                                                                                                                                                        |
+| Station                                                 | Status | Delivered capability                                                                                                                                                                    | Historical coverage                                                | Evidence                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S0 - Repository and Reference Assessment                | CLOSED | Repository, baseline, SQLite, mapping, and test-reference assessment                                                                                                                    | Historical repository/reference assessment                         | Project history and reference package                                                                                                                                                                                                                                 |
+| S1 - PostgreSQL Runtime Validation                      | CLOSED | Real PostgreSQL baseline/runtime assessment and documented limitations                                                                                                                  | Historical PostgreSQL validation                                   | Reference runtime evidence and project history                                                                                                                                                                                                                        |
+| S2 - NestJS Backend Infrastructure                      | CLOSED | Configuration, logging, health, database transaction context, and test infrastructure                                                                                                   | Historical NestJS infrastructure                                   | Git history and [README](../../README.md)                                                                                                                                                                                                                             |
+| S3 - Authentication and Database Security Foundation    | CLOSED | Controlled migration ledger/runner, role boundaries, auth API, sessions/tokens, membership and device bootstrap, RLS/security tests                                                     | Historical migration foundation and much of identity/platform core | [Station 3 architecture](../station-3-architecture.md) and migrations `0001`-`0005`                                                                                                                                                                                   |
+| S4 - Business Foundation and Customers                  | CLOSED | Store business-write gate plus Customer database, validation, read, write, lifecycle, privacy, and idempotency contracts                                                                | Customer portion of historical master data                         | Commits through `a6f567f` and Customer contracts                                                                                                                                                                                                                      |
+| S5 - Product and Product Unit Catalog                   | CLOSED | Product/unit mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                                                                      | Product/unit portion of historical master data                     | [Station 5 closure](../product-unit-station5-closure-v1.md)                                                                                                                                                                                                           |
+| S6 - Supplier Master Data Foundation                    | CLOSED | Supplier mapping, validation, reads, writes, lifecycle, privacy, replay, and rollback behavior                                                                                          | Supplier-master portion of historical master data                  | [Station 6 closure](../supplier-station6-closure-v1.md)                                                                                                                                                                                                               |
+| S7 - Store Operational Settings Foundation              | CLOSED | Settings mapping, operational-time context, tenant-safe reads, initialization, and idempotent owner-authorized mutations                                                                | Operational settings portion of historical master data             | [S7 contract](../contracts/store-settings-operational-time-v1.md) and [S7.4 record](../settings-station7-safe-mutation-v1.md)                                                                                                                                         |
+| S8 - Money Account Catalog Foundation                   | CLOSED | Money Account mapping, validation, tenant-safe reads/writes, lifecycle, idempotency, and one-active-Cash invariants                                                                     | Money Account portion of historical master data                    | [S8.2 record](../money-account-station8-physical-foundation-v1.md), [S8.3 record](../money-account-station8-read-v1.md), and [S8.4 record](../money-account-station8-lifecycle-v1.md)                                                                                 |
+| S9 - Accounting Periods and Posting Controls            | CLOSED | Monthly period mapping/identity, boundaries, non-overlap, tenant-safe reads, on-demand provisioning, terminal owner close, idempotency, and posting-context/close-vs-post control       | Accounting-period portion historically deferred with corrections   | [S9.1 contract](../contracts/accounting-period-v1.md), [S9.2 record](../accounting-period-station9-physical-foundation-v1.md), [S9.3 record](../accounting-period-station9-read-v1.md), and [S9.4 record](../accounting-period-station9-provisioning-lifecycle-v1.md) |
+| S10 - Money Posting, Opening Balances, and Owner Ledger | CLOSED | Authoritative money movements and balances, owner ledger, internal transfers, opening balances, and same-domain corrections                                                             | Historical money and owner-ledger foundation                       | [Money Posting Contract v1](../contracts/money-posting-v1.md), current implementation, and migration `0006`                                                                                                                                                           |
+| S11 - Manual Inventory, Stock Projection, and Costing   | CLOSED | Independent manual inventory posting, protected stock projection, costing, stock counts, and correction workflows                                                                       | Historical manual inventory and costing foundation                 | Current inventory implementation, tests, and migrations `0007`-`0008`                                                                                                                                                                                                 |
+| S12 - Supplier Invoices and Payables                    | CLOSED | Supplier financial reads, opening payables, payable-only invoice posting, immutable edit/cancel correction chains, and zero automatic inventory or money effects                        | Historical supplier-invoice and payable recognition                | Current Supplier financial implementation, tests, and migrations `0009`-`0010`                                                                                                                                                                                        |
+| S13 - Supplier Payments and Allocations                 | CLOSED | Explicit Invoice/Opening Payable allocations, Money Account or owner funding, settlement reads, and immutable payment cancellation/replacement chains                                   | Historical supplier settlement                                     | Current Supplier Payment implementation, tests, and migration `0011`                                                                                                                                                                                                  |
+| S14 - Sales Posting and Customer Receivables            | CLOSED | Paid, partial, credit, split-tender, tracked/untracked and manual-line Sale posting; Customer Opening Receivables; tenant-safe reads; immutable Sale cancellation/replacement chains    | Historical sales posting and receivable origination                | Current Sales implementation, tests, and migrations `0012`-`0013`                                                                                                                                                                                                     |
+| S15 - Customer Collections, Credits, and Settlement     | CLOSED | Customer collections, Sale/Opening allocation, overpayment/advance Credit, refunds, non-cash settlement, Sale Credit tender, and immutable active-leaf correction chains                | Historical customer collection, credit, and settlement authority   | Current Customer financial implementation, tests, and migrations `0014`-`0015`                                                                                                                                                                                        |
+| S16 - Expenses and Expense Payments                     | CLOSED | Expense Category lifecycle; DUE, immediate Money-paid, and Owner-funded recognition; later settlement; derived outstanding; immutable Expense/Payment corrections and operational reads | Historical expense recognition and settlement authority            | Current Expense implementation, tests, and S9/S10 posting authorities                                                                                                                                                                                                 |
 
-The safe completed boundary does not include subscription lifecycle, expenses, generic
+The safe completed boundary does not include subscription lifecycle, generic
 synchronization, reporting, or recovery.
 
 ## 6. Historical Roadmap Reconciliation
@@ -110,15 +111,15 @@ synchronization, reporting, or recovery.
 | Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
 | PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
 | NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S15                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S16                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
 | Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
 | Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
 | Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
 | Sales/receivables                       | SPLIT, COMPLETE         | Sale/receivable origination S14; collections and settlement S15         | None                                                   | None                  |
 | Supplier invoices/payables              | SPLIT, COMPLETE         | Supplier invoice/payable recognition S12; settlement S13                | None                                                   | None                  |
 | Manual inventory/costing                | DONE                    | S11                                                                     | None                                                   | None                  |
-| Expenses/owner ledger                   | SPLIT, PARTIAL          | Money and owner-ledger foundation S10                                   | Expenses                                               | S16                   |
-| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S15                  | Cross-domain corrections                               | S17                   |
+| Expenses/owner ledger                   | SPLIT, COMPLETE         | Money and owner-ledger foundation S10; Expenses S16                     | None                                                   | None                  |
+| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S16                  | Cross-domain corrections                               | S17                   |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
 | Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
@@ -153,6 +154,9 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 - Sale posting for paid, partial, credit, split-tender, inventory-tracked, untracked, and
   manual-line Sales; Customer Opening Receivables; tenant-safe Sale/Receivable reads; and
   immutable active-leaf Sale cancellation/replacement chains.
+- Expense Category lifecycle; DUE, immediate Money-paid, and Owner-funded Expense
+  recognition; partial/full/repeated later settlement; authoritative derived outstanding;
+  and immutable Expense/Payment active-leaf correction chains.
 - Domain mutation foundations using stable UUIDs, `operationId`, canonical request
   hashes, exact/rejected replay, versions, processed operations, audit effects, and
   change events.
@@ -168,7 +172,7 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 
 ### Still required
 
-Expenses, cross-domain returns/corrections, platform lifecycle, generic synchronization,
+Cross-domain returns/corrections, platform lifecycle, generic synchronization,
 reports, notifications, attachments, backup/restore, and final release validation.
 
 ## 8. Remaining PRD Coverage and Completeness Map
@@ -189,7 +193,7 @@ reports, notifications, attachments, backup/restore, and final release validatio
 | Supplier payments/allocations/credits              | Implemented                          | S13 (closed)                 |
 | Sales and customer receivable origination          | Implemented                          | S14 (closed)                 |
 | Customer collections/credit/settlement             | Implemented                          | S15 (closed)                 |
-| Expenses and expense payments                      | Still required                       | S16                          |
+| Expenses and expense payments                      | Implemented                          | S16 (closed)                 |
 | Returns/reversals/corrections                      | Still required                       | S17 and each source Station  |
 | Subscription/offline licensing/SaaS administration | Partially implemented                | S18                          |
 | Generic sync and consistent data bootstrap         | Partially implemented foundation     | S19                          |
@@ -481,7 +485,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16 - Expenses and Expense Payments
 
-- **Status:** OPEN FOR APPROVED TASK EXECUTION; S16.1-S16.4 CLOSED; S16.5 NEXT.
+- **Status:** CLOSED; S16.1-S16.5 are closed.
 - **Purpose:** Recognize paid and due expenses once and settle liabilities correctly.
 - **Distinct boundary:** Expense recognition has separate accounting semantics from
   owner capital and supplier payable workflows.
@@ -501,7 +505,15 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   payment creates an Owner claim and no fake Money Movement; recurrence policy beyond
   manual entry is not inferred from the current schema.
 - **Start condition:** S9-S10 closed and expense lifecycle approved.
-- **Closure intent:** Single-recognition expense accounting with correct settlement.
+- **Delivered:** Expense Categories; DUE, immediate Money-paid, and Owner-funded
+  recognition; partial/full/repeated Money or Owner settlement; authoritative derived
+  outstanding; exact bigint; idempotency, concurrency, RLS, read-only enforcement,
+  atomic rollback, operational reads, and immutable active-leaf Expense/Payment
+  corrections through S9/S10 authorities.
+- **Approved limitations:** Split or mixed funding and one Payment spanning multiple
+  Expenses are not approved. SQLite parity remains deferred to S19.
+- **DB:** 15 applied / 0 pending; S16 DB delta 0.
+- **Closure:** Single-recognition Expense accounting and settlement verified end to end.
 
 ### S16.1 - Expense Orientation and Execution Decomposition
 
@@ -571,19 +583,22 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S16.5 - Final Expense Verification and Closure
 
-- **Status:** NEXT - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Prove S16 completeness and close the Station without adding capability.
 - **Deliverables:** Cross-stage accounting/security audit, focused regression, final
   repository gates, Roadmap closure, and S17 handoff.
 - **Non-scope:** New Expense behavior, S17 implementation, reporting, sync, or files.
-- **DB:** No unreviewed delta; verify final applied/pending state and checksums.
-- **Verification:** Focused S16 regression first; full unit/broad integration only at the
-  approved final closure gate; reference/secret/tree checks.
-- **Exit:** Independent review and backend-owner approval close S16; S17 becomes next.
+- **DB:** 15 applied / 0 pending; checksum verification passed; S16.5 DB delta 0.
+- **Verification:** Focused S16 regression passed 71/71 tests across 5 suites; full unit
+  passed 942/942 across 104 suites; broad PostgreSQL integration passed 692/692 across
+  54 suites; no skipped tests. Typecheck, lint, build, role checks, reference integrity,
+  residue, and idle-transaction gates passed.
+- **Exit:** S16 closed after integrated recognition, settlement, correction, accounting,
+  tenant-security, and repository verification; S17 is next and not started.
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT - NOT STARTED.
 - **Purpose:** Coordinate business returns and corrections spanning completed domains.
 - **Distinct boundary:** Cross-domain returns combine inventory, money, receivables,
   payables, and period effects beyond each source workflow's basic reversal mechanism.
@@ -825,8 +840,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-level owner decision is open. Stations S0-S15 and S16.1-S16.4 are closed, and
-S16.5 is next and not started.
+No roadmap-level owner decision is open. Stations S0-S16 are closed, and S17 is next and
+not started.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -834,9 +849,9 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S15 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S16 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S16-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S17-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -853,12 +868,12 @@ decision does not authorize an implementer to invent policy.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S15 - Customer Collections and Settlement  |
+| Last fully closed Station           | S16 - Expenses and Expense Payments        |
 | S16.1 starting checkpoint           | `a20326133170bafc7e0583e7b446aa87aa95209c` |
-| Safe completed capabilities         | S0-S15; S16.1-S16.4                        |
-| First incomplete release dependency | S16.5 - Final Expense Verification         |
-| Next candidate                      | S16.5 - NEXT / NOT STARTED                 |
-| S16 current status                  | OPEN; S16.1-S16.4 CLOSED                   |
+| Safe completed capabilities         | S0-S16                                     |
+| First incomplete release dependency | S17 - Cross-Domain Corrections             |
+| Next candidate                      | S17 - NEXT / NOT STARTED                   |
+| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                 |
 
-Do not start S16.5 from this document. It requires an explicit backend-owner execution
+Do not start S17 from this document. It requires an explicit backend-owner execution
 prompt.

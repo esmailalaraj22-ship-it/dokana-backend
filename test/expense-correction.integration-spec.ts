@@ -563,6 +563,162 @@ describe('S16.4 immutable Expense corrections on isolated PostgreSQL', () => {
     }
   });
 
+  it('executes all approved recognition-mode transitions through one linear active leaf', async () => {
+    const cashBefore = await balance(accountIds.cash);
+    const bankBefore = await balance(accountIds.bank);
+    const ownerBefore = await ownerLiability();
+
+    const due = await recognize('DUE', { amountMinor: '220' });
+    const dueToOwnerOperation = randomUUID();
+    const dueToOwner = await editExpense(
+      due.operationId,
+      dueReplacement('220', { mode: 'OWNER_FUNDED' }),
+      dueToOwnerOperation,
+    ).expect(201);
+    expect((dueToOwner.body as ExpenseRecognitionCorrectionResponse).replacement).toMatchObject({
+      mode: 'OWNER_FUNDED',
+      ownerLedgerEntry: { ownerLiabilityDeltaMinor: '220' },
+      moneyMovement: null,
+    });
+
+    const money = await recognize('MONEY_PAID', {
+      amountMinor: '500',
+      accountId: accountIds.cash,
+    });
+    const moneyToDueOperation = randomUUID();
+    const moneyToDue = await editExpense(
+      money.operationId,
+      dueReplacement('400', { mode: 'DUE' }),
+      moneyToDueOperation,
+    ).expect(201);
+    expect(moneyToDue.body).toMatchObject({
+      reversal: { moneyMovement: { accountId: accountIds.cash, amountDeltaMinor: '500' } },
+      replacement: { mode: 'DUE', expense: { amountMinor: '400' }, moneyMovement: null },
+    });
+
+    const dueToMoneyOperation = randomUUID();
+    const dueToMoney = await editExpense(
+      moneyToDueOperation,
+      dueReplacement('300', { mode: 'MONEY_PAID', accountId: accountIds.bank }),
+      dueToMoneyOperation,
+    ).expect(201);
+    const finalMoneyReplacement = dueToMoney.body as ExpenseRecognitionCorrectionResponse;
+    expect(finalMoneyReplacement).toMatchObject({
+      reversal: { moneyMovement: null, ownerLedgerEntry: null },
+      replacement: {
+        mode: 'MONEY_PAID',
+        expense: { amountMinor: '300' },
+        moneyMovement: { accountId: accountIds.bank, amountDeltaMinor: '-300' },
+      },
+    });
+    await cancelExpense(money.operationId).expect(409);
+    await cancelExpense(moneyToDueOperation).expect(409);
+    const originalMoneyDetail = await request(server)
+      .get(`/v1/expenses/${money.response.expense.id}`)
+      .set(auth())
+      .expect(200);
+    expect(originalMoneyDetail.body).toMatchObject({
+      status: 'cancelled',
+      currentActiveId: finalMoneyReplacement.replacement?.expense.id,
+    });
+
+    const owner = await recognize('OWNER_FUNDED', { amountMinor: '444' });
+    const ownerToMoney = await editExpense(
+      owner.operationId,
+      dueReplacement('333', { mode: 'MONEY_PAID', accountId: accountIds.cash }),
+    ).expect(201);
+    expect(ownerToMoney.body).toMatchObject({
+      reversal: { ownerLedgerEntry: { ownerLiabilityDeltaMinor: '-444' } },
+      replacement: {
+        mode: 'MONEY_PAID',
+        moneyMovement: { accountId: accountIds.cash, amountDeltaMinor: '-333' },
+      },
+    });
+
+    expect(await balance(accountIds.cash)).toBe((BigInt(cashBefore) - 333n).toString());
+    expect(await balance(accountIds.bank)).toBe((BigInt(bankBefore) - 300n).toString());
+    expect(await ownerLiability()).toBe((BigInt(ownerBefore) + 220n).toString());
+  });
+
+  it('preserves one recognition through full settlement and payment-correction lifecycles', async () => {
+    const expense = await recognize('DUE', { amountMinor: '500' });
+    const expenseCountBefore = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count from ledger.expenses where store_id=$1`,
+      [ownerA.storeId],
+    );
+    const first = await pay(expense.response.expense.id, { amountMinor: '200' });
+    const second = await pay(expense.response.expense.id, {
+      amountMinor: '300',
+      accountId: accountIds.bank,
+    });
+    expect(await settlement(expense.response.expense.id)).toEqual({ paid: '500', due: '0' });
+
+    const cancelledSecond = await cancelPayment(second.operationId).expect(201);
+    expect(cancelledSecond.body).toMatchObject({
+      reversal: { expenseRecognitionDeltaMinor: '0' },
+    });
+    expect(await settlement(expense.response.expense.id)).toEqual({ paid: '200', due: '300' });
+
+    const replacement = await pay(expense.response.expense.id, {
+      amountMinor: '250',
+      accountId: accountIds.bank,
+    });
+    expect(replacement.response.settlement).toEqual({
+      recognizedAmountMinor: '500',
+      settledBeforeMinor: '200',
+      settledAfterMinor: '450',
+      outstandingBeforeMinor: '300',
+      outstandingAfterMinor: '50',
+    });
+    expect(await settlement(expense.response.expense.id)).toEqual({ paid: '450', due: '50' });
+
+    const recognition = await db().admin.query<{
+      amount: string;
+      paidTotal: string;
+      count: number;
+      activePayments: number;
+      historicalPayments: number;
+    }>(
+      `select e.amount_minor::text as amount, e.paid_total_minor::text as "paidTotal",
+         (select count(*)::integer from ledger.expenses x where x.store_id=e.store_id) as count,
+         (select count(*)::integer from ledger.expense_payments p
+          where p.store_id=e.store_id and p.expense_id=e.id and p.status='posted') as "activePayments",
+         (select count(*)::integer from ledger.expense_payments p
+          where p.store_id=e.store_id and p.expense_id=e.id) as "historicalPayments"
+       from ledger.expenses e where e.store_id=$1 and e.id=$2`,
+      [ownerA.storeId, expense.response.expense.id],
+    );
+    expect(recognition.rows[0]).toEqual({
+      amount: '500',
+      paidTotal: '0',
+      count: expenseCountBefore.rows[0]?.count,
+      activePayments: 2,
+      historicalPayments: 3,
+    });
+
+    const correctionSequence = await recognize('DUE', { amountMinor: '500' });
+    const paymentA = await pay(correctionSequence.response.expense.id, { amountMinor: '200' });
+    const paymentB = await pay(correctionSequence.response.expense.id, { amountMinor: '100' });
+    await cancelPayment(paymentA.operationId).expect(201);
+    expect(await settlement(correctionSequence.response.expense.id)).toEqual({
+      paid: '100',
+      due: '400',
+    });
+    const replaced = await editPayment(
+      paymentB.operationId,
+      correctionSequence.response.expense.id,
+      { amountMinor: '250' },
+    ).expect(201);
+    expect((replaced.body as ExpensePaymentCorrectionResponse).reversal).toMatchObject({
+      expenseRecognitionDeltaMinor: '0',
+    });
+    expect(await settlement(correctionSequence.response.expense.id)).toEqual({
+      paid: '250',
+      due: '250',
+    });
+    expect(first.response.settlement.recognizedAmountMinor).toBe('500');
+  });
+
   it('cancels an earlier Money Payment while a later Payment remains active', async () => {
     const expense = await recognize('DUE');
     const first = await pay(expense.response.expense.id, { amountMinor: '200' });
