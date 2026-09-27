@@ -15,6 +15,7 @@ import { MoneyMovementsModule } from './money-movements/money-movements.module';
 import { MoneyTransfersModule } from './money-transfers/money-transfers.module';
 import { OwnerLedgerModule } from './owner-ledger/owner-ledger.module';
 import { ProductsModule } from './products/products.module';
+import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
@@ -36,6 +37,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     CustomersModule,
     ExpensesModule,
     ProductsModule,
+    ReturnsModule,
     SalesModule,
     SuppliersModule,
     SettingsModule,

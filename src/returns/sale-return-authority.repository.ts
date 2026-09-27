@@ -269,7 +269,7 @@ export class SaleReturnAuthorityRepository {
             .from(products)
             .where(and(eq(products.storeId, storeId), inArray(products.id, productIds)))
             .orderBy(asc(products.id))
-            .for('share');
+            .for('update');
     const unitRows =
       unitIds.length === 0
         ? []

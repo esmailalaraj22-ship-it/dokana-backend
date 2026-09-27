@@ -2,14 +2,14 @@
 
 ## 1. Document Status and Governance
 
-| Field                     | Value                                       |
-| ------------------------- | ------------------------------------------- |
-| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**     |
-| Repository                | `C:\Users\esmail\Desktop\Dokana`            |
-| Review branch             | `main`                                      |
-| S17.2 starting checkpoint | `2d11441e590d52d54d28041330d275e25ea980d9`  |
-| Closed execution history  | Stations S0-S16; S17.1-S17.2                |
-| Next candidate            | S17.3 - Atomic Customer Sale Return Posting |
+| Field                     | Value                                                 |
+| ------------------------- | ----------------------------------------------------- |
+| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**               |
+| Repository                | `C:\Users\esmail\Desktop\Dokana`                      |
+| Review branch             | `main`                                                |
+| S17.3 starting checkpoint | `b1069393d0c65761822627f9c88361e1941867b7`            |
+| Closed execution history  | Stations S0-S16; S17.1-S17.3                          |
+| Next candidate            | S17.4 - Tenant-Safe Return Reads and Settlement Trace |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -58,18 +58,18 @@ backend owner before implementation.
 
 The roadmap was reconstructed against this verified state:
 
-| Check                           | Verified state                              |
-| ------------------------------- | ------------------------------------------- |
-| Branch                          | `main`                                      |
-| S17.2 starting HEAD             | `2d11441e590d52d54d28041330d275e25ea980d9`  |
-| Starting `origin/main`          | `2d11441e590d52d54d28041330d275e25ea980d9`  |
-| Ahead/behind                    | `0/0`                                       |
-| Working tree                    | Clean                                       |
-| Migrations                      | 15 applied, 0 pending                       |
-| Migration checksum verification | Pass                                        |
-| Reference SHA-256 verification  | 11 files checked, 0 mismatches              |
-| Last fully closed Station       | S16                                         |
-| Next task                       | S17.3 - Atomic Customer Sale Return Posting |
+| Check                           | Verified state                                        |
+| ------------------------------- | ----------------------------------------------------- |
+| Branch                          | `main`                                                |
+| S17.3 starting HEAD             | `b1069393d0c65761822627f9c88361e1941867b7`            |
+| Starting `origin/main`          | `b1069393d0c65761822627f9c88361e1941867b7`            |
+| Ahead/behind                    | `0/0`                                                 |
+| Working tree                    | Clean                                                 |
+| Migrations                      | 15 applied, 0 pending                                 |
+| Migration checksum verification | Pass                                                  |
+| Reference SHA-256 verification  | 11 files checked, 0 mismatches                        |
+| Last fully closed Station       | S16                                                   |
+| Next task                       | S17.4 - Tenant-Safe Return Reads and Settlement Trace |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -598,7 +598,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** OPEN; S17.1-S17.2 CLOSED; S17.3 NEXT / NOT STARTED.
+- **Status:** OPEN; S17.1-S17.3 CLOSED; S17.4 NEXT / NOT STARTED.
 - **Purpose:** Append later Customer Sale Return and approved Supplier financial Return
   documents that atomically coordinate existing period, receivable/payable, Customer
   Credit, money, and inventory authorities without rewriting valid original postings,
@@ -619,15 +619,16 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   the two approved `saleable`/`damaged` dispositions, current-period posting, split
   settlement representation, and Supplier financial settlement representation exist.
   S17.2 now supplies exact Drizzle mappings and non-public Customer Return calculation and
-  locking authority. PostgreSQL's Return validator does not by itself serialize
-  returnable quantity/value or validate every cross-domain link, and atomic posting still
-  requires transaction-aware composition of the existing child authorities. Verdict:
+  locking authority, and S17.3 now supplies the owner-authorized atomic posting
+  composition across existing period, money, inventory, Sale, and Customer authorities.
+  PostgreSQL's Return validator does not by itself serialize returnable quantity/value or
+  validate every cross-domain link; the application transaction remains authoritative. Verdict:
   **S17 PHYSICAL FOUNDATION PARTIAL - APPLICATION WORK REQUIRED, DATABASE DELTA 0
   EXPECTED**.
 - **Database decision:** No migration is authorized or currently required. S17.2 locks the
   trusted Customer/Sale/Sale-line and affected Product/Unit resources and calculates
-  remaining returnable quantity/value server-side. S17.3 must compose the Return,
-  financial, inventory, audit/change, and operation effects atomically. A later owner
+  remaining returnable quantity/value server-side. S17.3 composes the Return, financial,
+  inventory, audit/change, and operation effects atomically. A later owner
   decision requiring a new Return against archived Product/Unit state without restoration
   would need a separate physical review because migration `0013` permits archived catalog
   use only for an exact linked correction reversal.
@@ -700,21 +701,24 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17.3 - Atomic Customer Sale Return Posting
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Expose Customer Sale Return posting only when every approved financial,
   Money, Inventory, and historical-cost consequence can commit atomically.
 - **Dependencies/owners reused:** S17.2 plus S9, S10, S11, S14, and S15 transaction-aware
   authorities.
-- **Deliverables:** Owner-authorized posting API, Receivable/Credit/refund settlement,
+- **Delivered:** Owner-authorized posting API, Receivable/Credit/refund settlement,
   tracked saleable/damaged and untracked/manual inventory behavior, historical cost
   treatment, audit/change facts, and applied/rejected replay.
 - **Non-scope/DB:** No ordinary source-domain posting, Supplier Return, correction of a
   posted Return, SQLite, or expected migration.
-- **Invariants/tests:** Item and settlement totals equal the Return, active returned
+- **Verification:** Item and settlement totals equal the Return, active returned
   quantity/value never exceeds the original under concurrency, no current-cost
   recomputation, no stock from refund or untracked/manual lines, S9 period/account rules,
-  atomic rollback, RLS/cross-tenant isolation, and exact duplicate behavior. Close only
-  after focused unit plus real PostgreSQL happy, rejection, rollback, and race tests pass.
+  atomic rollback, RLS/cross-tenant isolation, and exact duplicate behavior. Focused unit
+  and isolated real-PostgreSQL happy, rejection, rollback, replay, and cross-domain race
+  tests passed with database delta 0.
+- **Exit:** Atomic Customer Sale Return posting is complete. Tenant-safe Return reads and
+  settlement trace remain owned by S17.4; Return correction remains owned by S17.5.
 
 ### S17.4 - Tenant-Safe Return Reads and Settlement Trace
 
@@ -1006,8 +1010,9 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-structure decision is open. The backend owner resolved the S17 Return policy
-gate, and S17.2 records the approved Customer and Supplier Return boundaries. S17.3 is the
-next implementation stage and is not started by this document.
+gate, S17.2 records the approved Customer and Supplier Return boundaries, and S17.3
+implements atomic Customer Sale Return posting. S17.4 is the next implementation stage
+and is not started by this document.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -1032,15 +1037,15 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                               | Current position                             |
-| ----------------------------------- | -------------------------------------------- |
-| Last fully closed Station           | S16 - Expenses and Expense Payments          |
-| S17.2 starting checkpoint           | `2d11441e590d52d54d28041330d275e25ea980d9`   |
-| Safe completed capabilities         | S0-S16 plus S17.1-S17.2                      |
-| First incomplete release dependency | S17 - Cross-Domain Corrections               |
-| Next candidate                      | S17.3 - Atomic Customer Sale Return Posting  |
-| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                   |
-| S17 current status                  | S17.1-S17.2 CLOSED; S17.3 NEXT / NOT STARTED |
+| Field                               | Current position                                      |
+| ----------------------------------- | ----------------------------------------------------- |
+| Last fully closed Station           | S16 - Expenses and Expense Payments                   |
+| S17.3 starting checkpoint           | `b1069393d0c65761822627f9c88361e1941867b7`            |
+| Safe completed capabilities         | S0-S16 plus S17.1-S17.3                               |
+| First incomplete release dependency | S17 - Cross-Domain Corrections                        |
+| Next candidate                      | S17.4 - Tenant-Safe Return Reads and Settlement Trace |
+| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                            |
+| S17 current status                  | S17.1-S17.3 CLOSED; S17.4 NEXT / NOT STARTED          |
 
-Do not start S17.3 from this document. It requires an explicit backend-owner execution
+Do not start S17.4 from this document. It requires an explicit backend-owner execution
 prompt.

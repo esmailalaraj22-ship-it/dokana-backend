@@ -17,6 +17,33 @@ export interface CustomerFinancialLedgerEffect {
   createdAt: string;
 }
 
+export interface CustomerReturnLedgerEffectInsert {
+  commandOperationId: string;
+  discriminator: string;
+  returnId: string;
+  saleId: string;
+  customerId: string;
+  accountingPeriodId: string;
+  transactionGroupId: string;
+  occurredAt: Date;
+  reason: string;
+  entryType: 'return' | 'credit_created';
+  receivableDeltaMinor: bigint;
+  creditDeltaMinor: bigint;
+  referenceType: 'sale_return' | 'sale_return_original_credit_restoration';
+}
+
+export interface CustomerReturnLedgerEffect {
+  id: string;
+  operationId: string;
+  entryType: 'return' | 'credit_created';
+  receivableDeltaMinor: string;
+  creditDeltaMinor: string;
+  referenceType: 'sale_return' | 'sale_return_original_credit_restoration';
+  occurredAt: string;
+  createdAt: string;
+}
+
 export interface CustomerFinancialResponse {
   operationId: string;
   action: CustomerFinancialAction;

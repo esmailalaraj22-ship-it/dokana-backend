@@ -26,6 +26,8 @@ import type {
   CustomerFinancialLedgerEffect,
   CustomerFinancialResponse,
   CustomerFinancialResult,
+  CustomerReturnLedgerEffect,
+  CustomerReturnLedgerEffectInsert,
 } from './customer-credit.types';
 import {
   CustomerReceivablePlanningError,
@@ -177,6 +179,47 @@ export class CustomerCreditRepository {
         return this.persistKnownRejection(transaction, context.storeId, command.operationId, error);
       }
     });
+  }
+
+  async insertReturnLedgerEffectWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    spec: CustomerReturnLedgerEffectInsert,
+  ): Promise<CustomerReturnLedgerEffect> {
+    const id = deriveMoneyFactId(spec.commandOperationId, spec.discriminator);
+    const operationId = deriveMoneyFactOperationId(spec.commandOperationId, spec.discriminator);
+    const rows = await transaction
+      .insert(customerLedgerEntries)
+      .values({
+        id,
+        storeId: context.storeId,
+        customerId: spec.customerId,
+        accountingPeriodId: spec.accountingPeriodId,
+        entryType: spec.entryType,
+        receivableDeltaMinor: spec.receivableDeltaMinor,
+        creditDeltaMinor: spec.creditDeltaMinor,
+        sourceSaleId: spec.saleId,
+        referenceType: spec.referenceType,
+        referenceId: spec.returnId,
+        transactionGroupId: spec.transactionGroupId,
+        occurredAt: spec.occurredAt,
+        reason: spec.reason,
+        deviceId: context.deviceId,
+        operationId,
+      })
+      .returning({ createdAt: customerLedgerEntries.createdAt });
+    const row = rows[0];
+    if (!row) throw new Error('Customer Return ledger insertion did not return a row.');
+    return {
+      id,
+      operationId,
+      entryType: spec.entryType,
+      receivableDeltaMinor: spec.receivableDeltaMinor.toString(),
+      creditDeltaMinor: spec.creditDeltaMinor.toString(),
+      referenceType: spec.referenceType,
+      occurredAt: spec.occurredAt.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+    };
   }
 
   async insertFinancialWithinTransaction(

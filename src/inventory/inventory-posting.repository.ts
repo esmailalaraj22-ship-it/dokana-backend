@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -22,13 +22,22 @@ import {
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
 import { inventoryBaseQuantity, inventoryCostResponse } from './inventory-math';
 import type { InventoryPostingCommand } from './inventory-posting-command';
-import { inventoryPostingEffect } from './inventory-posting-math';
+import { inventoryHistoricalInboundEffect, inventoryPostingEffect } from './inventory-posting-math';
 import {
   inventoryPostingResponseSchema,
   inventoryPostingRejectionSchema,
   type InventoryPostingResponse,
   type InventoryPostingResult,
 } from './inventory-posting-response';
+import type {
+  CustomerReturnRestockInput,
+  PostedCustomerReturnRestock,
+} from './inventory-return.types';
+import {
+  deriveMoneyFactId,
+  deriveMoneyFactOperationId,
+  deriveTransactionGroupId,
+} from '../money-movements/money-movement-identity';
 
 const failures = {
   INVENTORY_PRODUCT_NOT_FOUND: [404, 'Inventory Product not found.'],
@@ -156,6 +165,150 @@ export class InventoryPostingRepository {
     posting: AccountingPeriodPostingContext,
   ): Promise<InventoryPostingResponse> {
     return this.insertAccepted(tx, context, command, posting, true);
+  }
+
+  async insertCustomerReturnRestocksWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    input: CustomerReturnRestockInput,
+  ): Promise<PostedCustomerReturnRestock[]> {
+    if (input.lines.length === 0) return [];
+
+    const productIds = [...new Set(input.lines.map((line) => line.productId))].sort();
+    const unitIds = [...new Set(input.lines.map((line) => line.productUnitId))].sort();
+    const productRows = await transaction
+      .select({ id: products.id, status: products.status, trackInventory: products.trackInventory })
+      .from(products)
+      .where(and(eq(products.storeId, context.storeId), inArray(products.id, productIds)))
+      .orderBy(asc(products.id))
+      .for('update');
+    const productById = new Map(productRows.map((row) => [row.id, row]));
+    const unitRows = await transaction
+      .select({
+        id: productUnits.id,
+        productId: productUnits.productId,
+        status: productUnits.status,
+        factorNum: productUnits.factorNum,
+        factorDen: productUnits.factorDen,
+      })
+      .from(productUnits)
+      .where(and(eq(productUnits.storeId, context.storeId), inArray(productUnits.id, unitIds)))
+      .orderBy(asc(productUnits.id))
+      .for('share');
+    const unitById = new Map(unitRows.map((row) => [`${row.productId}:${row.id}`, row]));
+
+    const ordered = [...input.lines].sort((left, right) => {
+      if (left.productId !== right.productId) return left.productId.localeCompare(right.productId);
+      return left.saleItemId.localeCompare(right.saleItemId);
+    });
+    const effects: PostedCustomerReturnRestock[] = [];
+    for (const line of ordered) {
+      const product = productById.get(line.productId);
+      const unit = unitById.get(`${line.productId}:${line.productUnitId}`);
+      if (product?.status !== 'active' || !product.trackInventory) {
+        throw new SaleReturnInventoryError('SALE_RETURN_RESTOCK_UNAVAILABLE');
+      }
+      if (
+        unit?.status !== 'active' ||
+        unit.factorNum !== line.factorNum ||
+        unit.factorDen !== line.factorDen
+      ) {
+        throw new SaleReturnInventoryError('SALE_RETURN_RESTOCK_UNAVAILABLE');
+      }
+      let baseQuantity: bigint;
+      try {
+        baseQuantity = inventoryBaseQuantity(
+          line.selectedQuantityMilli,
+          line.factorNum,
+          line.factorDen,
+        );
+      } catch (error) {
+        if (error instanceof RangeError) {
+          throw new SaleReturnInventoryError('SALE_RETURN_AMOUNT_INVALID');
+        }
+        throw error;
+      }
+      if (baseQuantity !== line.expectedBaseQuantityMilli || baseQuantity <= 0n) {
+        throw new SaleReturnInventoryError('SALE_RETURN_INTEGRITY_CONFLICT');
+      }
+
+      const [balance] = await transaction
+        .select()
+        .from(stockBalances)
+        .where(
+          and(
+            eq(stockBalances.storeId, context.storeId),
+            eq(stockBalances.productId, line.productId),
+          ),
+        );
+      const before = balance ?? {
+        quantityMilli: 0n,
+        inventoryValueMinor: 0n,
+        costState: 'known' as const,
+      };
+      let effect: ReturnType<typeof inventoryHistoricalInboundEffect>;
+      try {
+        effect = inventoryHistoricalInboundEffect(
+          before,
+          baseQuantity,
+          line.historicalCostState,
+          line.historicalCostMinor,
+        );
+      } catch (error) {
+        if (error instanceof RangeError) {
+          throw new SaleReturnInventoryError('SALE_RETURN_AMOUNT_INVALID');
+        }
+        throw error;
+      }
+
+      const discriminator = `sale-return-item:${line.saleItemId}:inventory`;
+      const movementId = deriveMoneyFactId(input.operationId, discriminator);
+      const movementOperationId = deriveMoneyFactOperationId(input.operationId, discriminator);
+      await transaction.insert(inventoryMovements).values({
+        id: movementId,
+        storeId: context.storeId,
+        productId: line.productId,
+        productUnitId: line.productUnitId,
+        accountingPeriodId: input.posting.accountingPeriodId,
+        movementType: 'customer_return_saleable',
+        quantityBeforeMilli: before.quantityMilli,
+        quantityDeltaMilli: baseQuantity,
+        quantityAfterMilli: effect.quantityAfterMilli,
+        inventoryValueBeforeMinor: before.inventoryValueMinor,
+        valueDeltaMinor: effect.valueDeltaMinor,
+        inventoryValueAfterMinor: effect.inventoryValueAfterMinor,
+        averageUnitCostAfterMinor: effect.averageUnitCostAfterMinor,
+        costStatus: effect.costStatus,
+        hasPendingCostAfter: effect.hasPendingCostAfter,
+        referenceType: 'sale_return',
+        referenceId: input.returnId,
+        transactionGroupId: deriveTransactionGroupId(input.operationId),
+        occurredAt: input.occurredAt,
+        reason: input.reason,
+        deviceId: context.deviceId,
+        operationId: movementOperationId,
+        selectedQuantityMilli: line.selectedQuantityMilli,
+        factorNum: line.factorNum,
+        factorDen: line.factorDen,
+        businessDate: input.posting.postingDate,
+        postingDate: input.posting.postingDate,
+        costStateBefore: before.costState,
+        costStateAfter: effect.costStateAfter,
+      });
+      effects.push({
+        saleItemId: line.saleItemId,
+        returnItemId: line.returnItemId,
+        movementId,
+        movementOperationId,
+        productId: line.productId,
+        productUnitId: line.productUnitId,
+        quantityDeltaMilli: baseQuantity.toString(),
+        valueDeltaMinor:
+          line.historicalCostState === 'known' ? effect.valueDeltaMinor.toString() : null,
+        costStatus: line.historicalCostState,
+      });
+    }
+    return effects;
   }
 
   private async insertAccepted(
@@ -372,5 +525,16 @@ export class InventoryPostingRepository {
       error_code=${result.ok ? null : result.code}, completed_at=clock_timestamp()
       where store_id=${storeId}::uuid and operation_id=${operationId}::uuid and status='processing' returning operation_id`);
     if (rows.rows.length !== 1) throw new Error('Inventory operation completion failed.');
+  }
+}
+
+export class SaleReturnInventoryError extends Error {
+  constructor(
+    readonly code:
+      | 'SALE_RETURN_AMOUNT_INVALID'
+      | 'SALE_RETURN_INTEGRITY_CONFLICT'
+      | 'SALE_RETURN_RESTOCK_UNAVAILABLE',
+  ) {
+    super(code);
   }
 }

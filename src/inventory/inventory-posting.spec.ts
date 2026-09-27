@@ -4,7 +4,7 @@ import {
   parseInventoryPostingCommand,
   type InventoryCommandKind,
 } from './inventory-posting-command';
-import { inventoryPostingEffect } from './inventory-posting-math';
+import { inventoryHistoricalInboundEffect, inventoryPostingEffect } from './inventory-posting-math';
 import { INVENTORY_INT8_MAX, inventoryBaseQuantity } from './inventory-math';
 
 const request = {
@@ -191,5 +191,48 @@ describe('S11.4 quantity and cost transition matrix', () => {
     expect(() =>
       inventoryPostingEffect({ ...known, inventoryValueMinor: INVENTORY_INT8_MAX }, 1000n, 1n),
     ).toThrow();
+  });
+});
+
+describe('S17.3 historical Customer Return inventory valuation', () => {
+  const known = { quantityMilli: 2000n, inventoryValueMinor: 200n, costState: 'known' as const };
+
+  it('restores exact known historical cost without consulting current cost', () => {
+    expect(inventoryHistoricalInboundEffect(known, 1000n, 'known', 75n)).toMatchObject({
+      quantityAfterMilli: 3000n,
+      inventoryValueAfterMinor: 275n,
+      valueDeltaMinor: 75n,
+      costStatus: 'known',
+      costStateAfter: 'known',
+    });
+  });
+
+  it.each(['unknown', 'pending'] as const)(
+    'keeps a %s historical contribution nonnumeric',
+    (costState) => {
+      expect(inventoryHistoricalInboundEffect(known, 1000n, costState, null)).toMatchObject({
+        inventoryValueAfterMinor: 0n,
+        valueDeltaMinor: -200n,
+        costStatus: costState,
+        costStateAfter: costState,
+      });
+    },
+  );
+
+  it('does not backfill negative pending history and validates contribution shape', () => {
+    expect(
+      inventoryHistoricalInboundEffect(
+        { quantityMilli: -1000n, inventoryValueMinor: 0n, costState: 'pending' },
+        2000n,
+        'known',
+        80n,
+      ),
+    ).toMatchObject({
+      quantityAfterMilli: 1000n,
+      inventoryValueAfterMinor: 0n,
+      costStateAfter: 'pending',
+    });
+    expect(() => inventoryHistoricalInboundEffect(known, 1000n, 'known', null)).toThrow();
+    expect(() => inventoryHistoricalInboundEffect(known, 1000n, 'unknown', 1n)).toThrow();
   });
 });

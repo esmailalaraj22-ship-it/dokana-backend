@@ -69,3 +69,61 @@ export function inventoryPostingEffect(
     hasPendingCostAfter: state === 'pending',
   };
 }
+
+export function inventoryHistoricalInboundEffect(
+  before: InventoryValuation,
+  delta: bigint,
+  contributionState: InventoryCostState,
+  contributionValueMinor: bigint | null,
+) {
+  const afterQuantity = before.quantityMilli + delta;
+  if (
+    delta <= 0n ||
+    delta > INVENTORY_INT8_MAX ||
+    afterQuantity < -INVENTORY_INT8_MAX - 1n ||
+    afterQuantity > INVENTORY_INT8_MAX ||
+    (contributionState === 'known' &&
+      (contributionValueMinor === null ||
+        contributionValueMinor < 0n ||
+        contributionValueMinor > INVENTORY_INT8_MAX)) ||
+    (contributionState !== 'known' && contributionValueMinor !== null)
+  ) {
+    throw new RangeError('Historical inventory effect is outside accepted bounds.');
+  }
+
+  let state: InventoryCostState;
+  let value = 0n;
+  if (afterQuantity === 0n) {
+    state = 'known';
+  } else if (
+    afterQuantity < 0n ||
+    before.quantityMilli < 0n ||
+    before.costState === 'pending' ||
+    contributionState === 'pending'
+  ) {
+    state = 'pending';
+  } else if (
+    contributionState === 'unknown' ||
+    (before.quantityMilli > 0n && before.costState === 'unknown')
+  ) {
+    state = 'unknown';
+  } else {
+    state = 'known';
+    value = before.inventoryValueMinor + (contributionValueMinor ?? 0n);
+  }
+
+  if (value < 0n || value > INVENTORY_INT8_MAX) {
+    throw new RangeError('Historical inventory value exceeds int8.');
+  }
+  const average =
+    state === 'known' && afterQuantity > 0n ? inventoryUnitCost(value, afterQuantity) : 0n;
+  return {
+    quantityAfterMilli: afterQuantity,
+    inventoryValueAfterMinor: value,
+    averageUnitCostAfterMinor: average,
+    valueDeltaMinor: value - before.inventoryValueMinor,
+    costStateAfter: state,
+    costStatus: contributionState,
+    hasPendingCostAfter: state === 'pending',
+  };
+}

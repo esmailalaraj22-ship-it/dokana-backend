@@ -63,6 +63,8 @@ export interface SaleReturnCalculatedLine {
   cumulativeReturnedQuantityMilli: bigint;
   remainingQuantityMilli: bigint;
   historicalNetValueMinor: bigint;
+  conversionFactorNum: number;
+  conversionFactorDen: number;
   previousReturnedValueMinor: bigint;
   returnValueMinor: bigint;
   remainingReturnableValueMinor: bigint;

@@ -193,6 +193,8 @@ export function calculateSaleReturnLine(
     cumulativeReturnedQuantityMilli,
     remainingQuantityMilli: authority.originalQuantityMilli - cumulativeReturnedQuantityMilli,
     historicalNetValueMinor: authority.historicalNetValueMinor,
+    conversionFactorNum: authority.conversionFactorNum,
+    conversionFactorDen: authority.conversionFactorDen,
     previousReturnedValueMinor,
     returnValueMinor,
     remainingReturnableValueMinor: authority.historicalNetValueMinor - cumulativeValueMinor,

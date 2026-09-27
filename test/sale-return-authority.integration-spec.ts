@@ -54,6 +54,7 @@ const periods = [
 const repository = new SaleReturnAuthorityRepository();
 let saleAt: Date;
 let acceptedAt: Date;
+let businessDate: string;
 
 function command(
   saleId: string,
@@ -125,12 +126,18 @@ describe('S17.2 Sale Return internal authority', () => {
       migrator.release();
     }
 
-    const clock = await db().admin.query<{ acceptedAt: string }>(
-      `select transaction_timestamp()::text as "acceptedAt"`,
+    const clock = await db().admin.query<{ acceptedAt: string; businessDate: string }>(
+      `select transaction_timestamp()::text as "acceptedAt",
+              ((transaction_timestamp() - interval '1 hour') at time zone 'Asia/Hebron')::date::text
+                as "businessDate"`,
     );
     const acceptedAtText = clock.rows[0]?.acceptedAt;
-    if (!acceptedAtText) throw new Error('PostgreSQL transaction time is unavailable.');
+    const resolvedBusinessDate = clock.rows[0]?.businessDate;
+    if (!acceptedAtText || !resolvedBusinessDate) {
+      throw new Error('PostgreSQL transaction time is unavailable.');
+    }
     acceptedAt = new Date(acceptedAtText);
+    businessDate = resolvedBusinessDate;
     saleAt = new Date(acceptedAt.getTime() - 60 * 60 * 1000);
 
     const boundaries = resolveAccountingPeriodBoundaries(2026, 9);
@@ -210,7 +217,7 @@ describe('S17.2 Sale Return internal authority', () => {
           1000, -251, 749, 150, 'known', false,
           'sale', $5, $6, $7,
           $8, $9, $10, 5000,
-          1, 1, '2026-09-26', '2026-09-26', 'known', 'known'
+          1, 1, $11, $11, 'known', 'known'
         )`,
         [
           inventoryMovementId,
@@ -223,6 +230,7 @@ describe('S17.2 Sale Return internal authority', () => {
           devices[index],
           randomUUID(),
           units[index],
+          businessDate,
         ],
       );
       await db().admin.query(
