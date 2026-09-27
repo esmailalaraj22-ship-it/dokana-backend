@@ -11,6 +11,8 @@ import { ReturnsController } from './returns.controller';
 import { SaleReturnAuthorityRepository } from './sale-return-authority.repository';
 import { SaleReturnPostingRepository } from './sale-return-posting.repository';
 import { SaleReturnPostingService } from './sale-return-posting.service';
+import { SaleReturnReadRepository } from './sale-return-read.repository';
+import { SaleReturnReadService } from './sale-return-read.service';
 
 @Module({
   imports: [
@@ -23,6 +25,12 @@ import { SaleReturnPostingService } from './sale-return-posting.service';
     SalesModule,
   ],
   controllers: [ReturnsController],
-  providers: [SaleReturnAuthorityRepository, SaleReturnPostingRepository, SaleReturnPostingService],
+  providers: [
+    SaleReturnAuthorityRepository,
+    SaleReturnPostingRepository,
+    SaleReturnPostingService,
+    SaleReturnReadRepository,
+    SaleReturnReadService,
+  ],
 })
 export class ReturnsModule {}
