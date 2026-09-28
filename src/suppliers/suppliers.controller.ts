@@ -27,7 +27,7 @@ import type {
 } from './supplier-financial-read.types';
 import { SupplierReadService } from './supplier-read.service';
 import { SupplierInvoiceCorrectionService } from './supplier-invoice-correction.service';
-import type { SupplierFinancialCorrectionResponse } from './supplier-invoice-correction.types';
+import type { SupplierFinancialCorrectionResponse as SupplierInvoiceFinancialCorrectionResponse } from './supplier-invoice-correction.types';
 import { SupplierInvoicePostingService } from './supplier-invoice-posting.service';
 import type {
   SupplierInvoicePostingResponse,
@@ -46,6 +46,12 @@ import type {
 import type { SupplierDetailResponse, SupplierListResponse } from './supplier-read.types';
 import { SupplierWriteService } from './supplier-write.service';
 import type { SupplierMutationResponse } from './supplier-write.types';
+import { SupplierReturnService } from './supplier-return.service';
+import type {
+  SupplierFinancialCorrectionResponse as SupplierReturnFinancialCorrectionResponse,
+  SupplierFinancialPostingResponse,
+  SupplierFinancialReturnReadResponse,
+} from './supplier-return.types';
 
 @Controller('suppliers')
 @UseGuards(AuthenticationGuard)
@@ -59,6 +65,7 @@ export class SuppliersController {
     private readonly supplierPaymentReads: SupplierPaymentReadService,
     private readonly supplierReads: SupplierReadService,
     private readonly supplierWrites: SupplierWriteService,
+    private readonly supplierReturns: SupplierReturnService,
   ) {}
 
   @Get()
@@ -133,6 +140,152 @@ export class SuppliersController {
     );
   }
 
+  @Post(':supplierId/financial-returns')
+  postFinancialReturn(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialPostingResponse> {
+    return this.supplierReturns.postReturn(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      body,
+    );
+  }
+
+  @Post(':supplierId/credit-applications')
+  applySupplierCredit(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialPostingResponse> {
+    return this.supplierReturns.applyCredit(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      body,
+    );
+  }
+
+  @Post(':supplierId/refunds')
+  recordSupplierRefund(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+    @Body() body: unknown,
+  ): Promise<SupplierFinancialPostingResponse> {
+    return this.supplierReturns.recordRefund(
+      request.principal,
+      request.tenantContext,
+      params.supplierId,
+      body,
+    );
+  }
+
+  @Get(':supplierId/return-financials')
+  getSupplierReturnFinancials(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: SupplierIdParamDto,
+  ): Promise<SupplierFinancialReturnReadResponse> {
+    return this.supplierReturns.read(request.principal, request.tenantContext, params.supplierId);
+  }
+
+  @Post('financial-returns/:targetOperationId/cancel')
+  cancelSupplierReturn(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_return',
+      'cancel',
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('financial-returns/:targetOperationId/replace')
+  replaceSupplierReturn(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_return',
+      'replace',
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('credit-applications/:targetOperationId/cancel')
+  cancelSupplierCreditApplication(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_credit_application',
+      'cancel',
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('credit-applications/:targetOperationId/replace')
+  replaceSupplierCreditApplication(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_credit_application',
+      'replace',
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('refunds/:targetOperationId/cancel')
+  cancelSupplierRefund(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_refund',
+      'cancel',
+      targetOperationId,
+      body,
+    );
+  }
+
+  @Post('refunds/:targetOperationId/replace')
+  replaceSupplierRefund(
+    @Req() request: AuthenticatedRequest,
+    @Param('targetOperationId') targetOperationId: string,
+    @Body() body: unknown,
+  ): Promise<SupplierReturnFinancialCorrectionResponse> {
+    return this.supplierReturns.correct(
+      request.principal,
+      request.tenantContext,
+      'supplier_refund',
+      'replace',
+      targetOperationId,
+      body,
+    );
+  }
+
   @Get(':supplierId/payments')
   listPayments(
     @Req() request: AuthenticatedRequest,
@@ -193,7 +346,7 @@ export class SuppliersController {
     @Req() request: AuthenticatedRequest,
     @Param('targetOperationId') targetOperationId: string,
     @Body() body: unknown,
-  ): Promise<SupplierFinancialCorrectionResponse> {
+  ): Promise<SupplierInvoiceFinancialCorrectionResponse> {
     return this.supplierInvoiceCorrections.cancelInvoice(
       request.principal,
       request.tenantContext,
@@ -207,7 +360,7 @@ export class SuppliersController {
     @Req() request: AuthenticatedRequest,
     @Param('targetOperationId') targetOperationId: string,
     @Body() body: unknown,
-  ): Promise<SupplierFinancialCorrectionResponse> {
+  ): Promise<SupplierInvoiceFinancialCorrectionResponse> {
     return this.supplierInvoiceCorrections.editInvoice(
       request.principal,
       request.tenantContext,
@@ -221,7 +374,7 @@ export class SuppliersController {
     @Req() request: AuthenticatedRequest,
     @Param('targetOperationId') targetOperationId: string,
     @Body() body: unknown,
-  ): Promise<SupplierFinancialCorrectionResponse> {
+  ): Promise<SupplierInvoiceFinancialCorrectionResponse> {
     return this.supplierInvoiceCorrections.cancelOpeningPayable(
       request.principal,
       request.tenantContext,
@@ -235,7 +388,7 @@ export class SuppliersController {
     @Req() request: AuthenticatedRequest,
     @Param('targetOperationId') targetOperationId: string,
     @Body() body: unknown,
-  ): Promise<SupplierFinancialCorrectionResponse> {
+  ): Promise<SupplierInvoiceFinancialCorrectionResponse> {
     return this.supplierInvoiceCorrections.editOpeningPayable(
       request.principal,
       request.tenantContext,

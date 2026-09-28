@@ -44,6 +44,7 @@ export interface SupplierMutationRow extends SupplierDetailRow {
 export type SupplierMutationFailureCode =
   | 'CONFLICT'
   | 'SUPPLIER_ARCHIVED'
+  | 'SUPPLIER_FINANCIAL_BALANCE_OUTSTANDING'
   | 'SUPPLIER_NOT_FOUND'
   | 'SUPPLIER_PHONE_CONFLICT'
   | 'SUPPLIER_VERSION_CONFLICT'

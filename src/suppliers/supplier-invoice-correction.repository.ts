@@ -98,6 +98,11 @@ const correctionFailureDefinitions: Readonly<
     message: 'Supplier financial correction target has active payment allocations.',
     statusCode: 409,
   },
+  SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_RETURNS: {
+    code: 'SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_RETURNS',
+    message: 'Supplier Invoice has active financial Return or Credit application facts.',
+    statusCode: 409,
+  },
   SUPPLIER_CORRECTION_TARGET_NOT_ACTIVE: {
     code: 'SUPPLIER_CORRECTION_TARGET_NOT_ACTIVE',
     message: 'Supplier financial correction target is not the active operation.',
@@ -250,6 +255,11 @@ export class SupplierInvoiceCorrectionRepository {
     correctionOfId: string | null,
     posting: AccountingPeriodPostingContext,
   ): Promise<SupplierInvoiceCorrectionResponse> {
+    const lockedSupplierId = await this.lockInvoiceSupplier(
+      transaction,
+      context.storeId,
+      invoiceId,
+    );
     const target = await this.loadInvoiceTarget(
       transaction,
       context.storeId,
@@ -257,6 +267,9 @@ export class SupplierInvoiceCorrectionRepository {
       invoiceId,
       correctionOfId,
     );
+    if (target.supplierId !== lockedSupplierId) {
+      reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
+    }
     await this.assertTargetIsActive(transaction, context.storeId, command.targetOperationId);
     const reversal = await this.insertReversal(transaction, context, command, posting, {
       supplierId: target.supplierId,
@@ -486,7 +499,28 @@ export class SupplierInvoiceCorrectionRepository {
       reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     }
     await this.assertNoActivePaymentAllocations(transaction, storeId, 'invoice', row.invoiceId);
+    await this.assertNoActiveSupplierReturnFacts(transaction, storeId, row.invoiceId);
     return row;
+  }
+
+  private async lockInvoiceSupplier(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    invoiceId: string,
+  ): Promise<string> {
+    const result = await transaction.execute<{ supplierId: string }>(sql`
+      select supplier.id as "supplierId"
+      from ledger.purchase_invoices invoice
+      inner join ledger.suppliers supplier
+        on supplier.store_id=invoice.store_id and supplier.id=invoice.supplier_id
+      where invoice.store_id=${storeId}::uuid and invoice.id=${invoiceId}::uuid
+      for update of supplier
+    `);
+    const row = result.rows[0];
+    if (!row || result.rows.length !== 1) {
+      reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
+    }
+    return row.supplierId;
   }
 
   private parseTargetResponse(value: unknown): SupplierFinancialCorrectionResponse {
@@ -560,6 +594,38 @@ export class SupplierInvoiceCorrectionRepository {
     `);
     if (result.rows[0]?.present === true) {
       reject('SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS');
+    }
+  }
+
+  private async assertNoActiveSupplierReturnFacts(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    invoiceId: string,
+  ): Promise<void> {
+    const result = await transaction.execute<{ present: boolean }>(sql`
+      select exists(
+        select 1
+        from ledger.supplier_returns supplier_return
+        where supplier_return.store_id=${storeId}::uuid
+          and supplier_return.purchase_invoice_id=${invoiceId}::uuid
+          and supplier_return.status='posted'
+        union all
+        select 1
+        from ledger.supplier_ledger_entries application
+        where application.store_id=${storeId}::uuid
+          and application.source_purchase_invoice_id=${invoiceId}::uuid
+          and application.entry_type='credit_used'
+          and application.reference_type='supplier_credit_application'
+          and not exists (
+            select 1
+            from ledger.supplier_ledger_entries reversal
+            where reversal.store_id=application.store_id
+              and reversal.reversal_of_id=application.id
+          )
+      ) as present
+    `);
+    if (result.rows[0]?.present === true) {
+      reject('SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_RETURNS');
     }
   }
 

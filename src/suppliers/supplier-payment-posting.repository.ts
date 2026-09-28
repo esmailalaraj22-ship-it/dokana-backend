@@ -58,6 +58,7 @@ interface InvoiceTargetRow extends Record<string, unknown> {
   status: 'draft' | 'open' | 'closed' | 'cancelled';
   totalMinor: string;
   payableMinor: string;
+  adjustedObligationMinor: string;
   childCount: string;
   reversalCount: string;
 }
@@ -459,6 +460,10 @@ export class SupplierPaymentPostingRepository {
       select p.id, p.supplier_id as "supplierId", p.status,
         p.total_minor::text as "totalMinor",
         l.payable_delta_minor::text as "payableMinor",
+        (select coalesce(sum(adjustment.payable_delta_minor), 0)::text
+          from ledger.supplier_ledger_entries adjustment
+          where adjustment.store_id=p.store_id
+            and adjustment.source_purchase_invoice_id=p.id) as "adjustedObligationMinor",
         (select count(*)::text from ledger.purchase_invoices child
           where child.store_id=p.store_id and child.correction_of_id=p.id) as "childCount",
         (select count(*)::text from ledger.supplier_ledger_entries reversal
@@ -481,7 +486,11 @@ export class SupplierPaymentPostingRepository {
     if (row.totalMinor !== row.payableMinor || BigInt(row.payableMinor) <= 0n) {
       reject('SUPPLIER_PAYMENT_TARGET_INTEGRITY_CONFLICT');
     }
-    await this.assertOutstanding(transaction, storeId, allocation, BigInt(row.payableMinor));
+    const adjustedObligation = BigInt(row.adjustedObligationMinor);
+    if (adjustedObligation < 0n || adjustedObligation > BigInt(row.payableMinor)) {
+      reject('SUPPLIER_PAYMENT_TARGET_INTEGRITY_CONFLICT');
+    }
+    await this.assertOutstanding(transaction, storeId, allocation, adjustedObligation);
   }
 
   private async lockAndValidateOpening(

@@ -22,6 +22,8 @@ import { SupplierPaymentReadService } from './supplier-payment-read.service';
 import { SuppliersController } from './suppliers.controller';
 import { SupplierWriteRepository } from './supplier-write.repository';
 import { SupplierWriteService } from './supplier-write.service';
+import { SupplierReturnRepository } from './supplier-return.repository';
+import { SupplierReturnService } from './supplier-return.service';
 
 @Module({
   imports: [
@@ -49,6 +51,8 @@ import { SupplierWriteService } from './supplier-write.service';
     SupplierReadService,
     SupplierWriteRepository,
     SupplierWriteService,
+    SupplierReturnRepository,
+    SupplierReturnService,
   ],
 })
 export class SuppliersModule {}

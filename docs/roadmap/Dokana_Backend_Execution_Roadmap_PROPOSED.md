@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S17.5 starting checkpoint | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
-| Closed execution history  | Stations S0-S16; S17.1-S17.5               |
-| Next candidate            | S17.6 - Supplier Financial Returns         |
+| S17.6 starting checkpoint | `a5b6757859648214e6916d948ade220f9623552b` |
+| Closed execution history  | Stations S0-S16; S17.1-S17.6               |
+| Next candidate            | S17.7 - Final Returns Verification         |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S17.5 starting HEAD             | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
-| Starting `origin/main`          | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
+| S17.6 starting HEAD             | `a5b6757859648214e6916d948ade220f9623552b` |
+| Starting `origin/main`          | `a5b6757859648214e6916d948ade220f9623552b` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S16                                        |
-| Next task                       | S17.6 - Supplier Financial Returns         |
+| Next task                       | S17.7 - Final Returns Verification         |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -598,7 +598,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** OPEN; S17.1-S17.5 CLOSED; S17.6 NEXT / NOT STARTED.
+- **Status:** OPEN; S17.1-S17.6 CLOSED; S17.7 NEXT / NOT STARTED.
 - **Purpose:** Append later Customer Sale Return and approved Supplier financial Return
   documents that atomically coordinate existing period, receivable/payable, Customer
   Credit, money, and inventory authorities without rewriting valid original postings,
@@ -774,26 +774,35 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17.6 - Supplier Financial Returns
 
-- **Status:** NEXT / NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Append an approved Supplier financial Return/credit against Supplier
   payable history without automatically creating or reversing inventory.
 - **Dependencies/owners reused:** S12 Invoice/Payable, S13 settlement, S9 period, S10 Money,
   and the approved Supplier Return/Credit policy.
-- **Deliverables:** Supplier Return financial posting and reads, payable reduction,
-  approved Supplier Credit or refund-received effects, exact invoice/reference trace,
-  idempotency, audit, and immutable correction behavior.
+- **Delivered:** Supplier Financial Return with no global Return time limit and exact
+  Supplier Invoice linkage; payable-first settlement without negative payable; distinct
+  Supplier Credit creation, application, available-balance reads, and actual Supplier
+  Refunds through S10 Money authority; no automatic Inventory, COGS, Revenue, or Expense
+  effect; Supplier archive protection while payable or credit remains outstanding;
+  immutable Return/Application/Refund cancel-or-replace corrections, active-leaf lineage,
+  spent-Credit dependency safety, idempotent replay, serialized concurrency, and
+  tenant-safe operational reads.
 - **Non-scope/DB:** No Goods Receipt, automatic/partial receipt, automatic stock movement,
-  or implicit invoice-to-inventory lineage. Supplier inventory-return handling remains
-  owner-policy-gated; if approved as a separate operation, it must route through S11 with
-  optional traceability. Expected database delta 0 is conditional on the approved policy
-  fitting the existing root/item/settlement model.
-- **Invariants/tests:** No payable/inventory or expense double count, no over-reduction,
-  current-period/account eligibility, exact replay, rollback, RLS, cross-tenant and
-  competing-return tests. Close only after focused unit and real PostgreSQL verification.
+  implicit invoice-to-inventory lineage, PostgreSQL reference change, or SQLite change.
+  SQLite parity remains deferred to S19.
+- **Verification:** Focused unit passed 20/20 and isolated real-PostgreSQL S17.6 coverage
+  passed 16/16 with no skips, including required concurrency, RLS, read-only, rollback,
+  balance, and zero-inventory assertions. Targeted S9/S10/S12/S13 regression passed 79/79;
+  the final invoice-correction lock-order change additionally passed its focused 10/10
+  regression. Typecheck, lint, build, changed-file format, migration status/checksums,
+  database role checks, reference integrity, residue, and idle-transaction gates passed.
+  DB: 15 applied / 0 pending; S17.6 database delta 0.
+- **Exit:** Supplier financial Returns and Supplier Credit lifecycle are complete. S17.7
+  is next and not started; S17 remains open.
 
 ### S17.7 - Final Returns Verification and Closure
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Purpose:** Prove integrated Customer and approved Supplier Return behavior and close
   S17 without adding new capability.
 - **Dependencies/owners reused:** Completed S17.2-S17.6 and all reused source authorities.
@@ -1035,7 +1044,8 @@ No roadmap-structure decision is open. The backend owner resolved the S17 Return
 gate, S17.2 records the approved Customer and Supplier Return boundaries, S17.3
 implements atomic Customer Sale Return posting, and S17.4 provides operational Return
 reads and immutable settlement trace. S17.5 implements immutable Customer Sale Return
-corrections and dependency safety. S17.6 is next and is not started by this document.
+corrections and dependency safety. S17.6 implements Supplier Financial Returns and the
+Supplier Credit lifecycle. S17.7 is next and is not started by this document.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -1063,12 +1073,12 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                             |
 | ----------------------------------- | -------------------------------------------- |
 | Last fully closed Station           | S16 - Expenses and Expense Payments          |
-| S17.5 starting checkpoint           | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe`   |
-| Safe completed capabilities         | S0-S16 plus S17.1-S17.5                      |
+| S17.6 starting checkpoint           | `a5b6757859648214e6916d948ade220f9623552b`   |
+| Safe completed capabilities         | S0-S16 plus S17.1-S17.6                      |
 | First incomplete release dependency | S17 - Cross-Domain Corrections               |
-| Next candidate                      | S17.6 - Supplier Financial Returns           |
+| Next candidate                      | S17.7 - Final Returns Verification           |
 | S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                   |
-| S17 current status                  | S17.1-S17.5 CLOSED; S17.6 NEXT / NOT STARTED |
+| S17 current status                  | S17.1-S17.6 CLOSED; S17.7 NEXT / NOT STARTED |
 
-Do not start S17.6 from this document. It requires an explicit backend-owner execution
+Do not start S17.7 from this document. It requires an explicit backend-owner execution
 prompt.

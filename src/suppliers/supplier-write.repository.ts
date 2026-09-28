@@ -43,6 +43,11 @@ const failureDefinitions: Readonly<Record<SupplierMutationFailureCode, SupplierM
     message: 'Archived Supplier cannot be updated.',
     statusCode: 409,
   },
+  SUPPLIER_FINANCIAL_BALANCE_OUTSTANDING: {
+    code: 'SUPPLIER_FINANCIAL_BALANCE_OUTSTANDING',
+    message: 'Supplier with outstanding Payable or Credit cannot be archived.',
+    statusCode: 409,
+  },
   SUPPLIER_NOT_FOUND: {
     code: 'SUPPLIER_NOT_FOUND',
     message: 'Supplier not found.',
@@ -291,6 +296,26 @@ export class SupplierWriteRepository {
         const conflict = failure('SUPPLIER_VERSION_CONFLICT');
         await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
         return conflict;
+      }
+
+      if (input.action === 'archive') {
+        const balances = await transaction.execute<{
+          payableMinor: string;
+          creditMinor: string;
+        }>(sql`
+          select
+            coalesce(sum(entry.payable_delta_minor), 0)::text as "payableMinor",
+            coalesce(sum(entry.credit_delta_minor), 0)::text as "creditMinor"
+          from ledger.supplier_ledger_entries entry
+          where entry.store_id=${context.storeId}::uuid
+            and entry.supplier_id=${input.supplierId}::uuid
+        `);
+        const balance = balances.rows[0];
+        if (!balance || BigInt(balance.payableMinor) !== 0n || BigInt(balance.creditMinor) !== 0n) {
+          const conflict = failure('SUPPLIER_FINANCIAL_BALANCE_OUTSTANDING');
+          await this.rejectOperation(transaction, context.storeId, input.operationId, conflict);
+          return conflict;
+        }
       }
 
       const targetStatus = input.action === 'archive' ? 'archived' : 'active';
