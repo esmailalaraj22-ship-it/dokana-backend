@@ -111,6 +111,12 @@ function summary(overrides: Partial<SaleReturnSummaryRow> = {}): SaleReturnSumma
       damagedNoRestockLineCount: 3,
       noInventoryEffectLineCount: 3,
     },
+    correctionLineage: {
+      predecessorReturnId: null,
+      successorReturnId: null,
+      activeLeaf: true,
+      correction: null,
+    },
     ...overrides,
   };
 }
@@ -256,6 +262,7 @@ describe('S17.4 Sale Return operational reads', () => {
       totalMinor: '300',
       isAnonymous: false,
       lifecycle: { status: 'posted', effective: true, version: '2' },
+      lineage: { predecessorReturnId: null, successorReturnId: null },
     });
     repository.list.mockResolvedValue([]);
     await expect(
@@ -263,6 +270,46 @@ describe('S17.4 Sale Return operational reads', () => {
         cursor: first.nextCursor ?? undefined,
       }),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('exposes immutable correction lineage while preserving historical Return facts', async () => {
+    const successorReturnId = randomUUID();
+    repository.list.mockResolvedValue([
+      summary({
+        status: 'cancelled',
+        cancelledAt: new Date('2026-09-28T12:00:00.000Z'),
+        version: 3n,
+        correctionLineage: {
+          predecessorReturnId: null,
+          successorReturnId,
+          activeLeaf: false,
+          correction: {
+            type: 'REPLACE',
+            reason: 'Corrected returned quantity',
+            correctedAt: new Date('2026-09-28T12:00:00.000Z'),
+            businessDate: '2026-09-28',
+            postingDate: '2026-09-28',
+            accountingPeriodId: periodId,
+          },
+        },
+      }),
+    ]);
+    const response = await service.list(principal, context, {});
+    expect(response.items[0]).toMatchObject({
+      id: returnId,
+      totalMinor: '300',
+      lifecycle: {
+        status: 'cancelled',
+        effective: false,
+        activeLeaf: false,
+        correction: {
+          type: 'REPLACE',
+          reason: 'Corrected returned quantity',
+          correctedAt: '2026-09-28T12:00:00.000Z',
+        },
+      },
+      lineage: { predecessorReturnId: null, successorReturnId },
+    });
   });
 
   it('maps registered multi-line history with four distinct settlement buckets and exact costs', async () => {
@@ -315,6 +362,11 @@ describe('S17.4 Sale Return operational reads', () => {
       '0',
       '0',
     ]);
+    expect(response.lineage).toMatchObject({
+      predecessorReturnId: null,
+      successorReturnId: null,
+      activeLeaf: true,
+    });
   });
 
   it('keeps an anonymous Return free of fabricated Customer and ledger effects', async () => {

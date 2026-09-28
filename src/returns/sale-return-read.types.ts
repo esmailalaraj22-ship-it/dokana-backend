@@ -49,6 +49,20 @@ export interface SaleReturnDispositionSummaryRow {
   noInventoryEffectLineCount: number;
 }
 
+export interface SaleReturnCorrectionLineageRow {
+  predecessorReturnId: string | null;
+  successorReturnId: string | null;
+  activeLeaf: boolean;
+  correction: {
+    type: 'CANCEL' | 'REPLACE';
+    reason: string;
+    correctedAt: Date;
+    businessDate: string;
+    postingDate: string;
+    accountingPeriodId: string;
+  } | null;
+}
+
 export interface SaleReturnSummaryRow {
   id: string;
   saleId: string;
@@ -72,6 +86,7 @@ export interface SaleReturnSummaryRow {
   postingSnapshot: SaleReturnPostingResponse;
   settlementSummary: SaleReturnSettlementSummaryRow;
   dispositionSummary: SaleReturnDispositionSummaryRow;
+  correctionLineage: SaleReturnCorrectionLineageRow;
 }
 
 export interface SaleReturnInventoryEffectRow {
@@ -214,8 +229,21 @@ export interface SaleReturnSummaryResponse {
   lifecycle: {
     status: ReturnStatus;
     effective: boolean;
+    activeLeaf: boolean;
     cancelledAt: string | null;
     version: string;
+    correction: {
+      type: 'CANCEL' | 'REPLACE';
+      reason: string;
+      correctedAt: string;
+      businessDate: string;
+      postingDate: string;
+      accountingPeriodId: string;
+    } | null;
+  };
+  lineage: {
+    predecessorReturnId: string | null;
+    successorReturnId: string | null;
   };
   settlementSummary: SaleReturnSettlementSummaryResponse;
   dispositionSummary: SaleReturnDispositionSummaryRow;
@@ -305,6 +333,9 @@ export interface SaleReturnDetailResponse {
   lineage: {
     operationId: string;
     transactionGroupId: string;
+    predecessorReturnId: string | null;
+    successorReturnId: string | null;
+    activeLeaf: boolean;
   };
 }
 

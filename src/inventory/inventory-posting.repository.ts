@@ -20,7 +20,7 @@ import {
   stores,
 } from '../database/schema';
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
-import { inventoryBaseQuantity, inventoryCostResponse } from './inventory-math';
+import { inventoryBaseQuantity, inventoryCostResponse, inventoryUnitCost } from './inventory-math';
 import type { InventoryPostingCommand } from './inventory-posting-command';
 import { inventoryHistoricalInboundEffect, inventoryPostingEffect } from './inventory-posting-math';
 import {
@@ -31,7 +31,9 @@ import {
 } from './inventory-posting-response';
 import type {
   CustomerReturnRestockInput,
+  CustomerReturnRestockReversalInput,
   PostedCustomerReturnRestock,
+  PostedCustomerReturnRestockReversal,
 } from './inventory-return.types';
 import {
   deriveMoneyFactId,
@@ -311,6 +313,194 @@ export class InventoryPostingRepository {
     return effects;
   }
 
+  async insertCustomerReturnRestockReversalsWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    input: CustomerReturnRestockReversalInput,
+  ): Promise<PostedCustomerReturnRestockReversal[]> {
+    if (input.movementIds.length === 0) return [];
+    const requestedIds = [...new Set(input.movementIds)].sort();
+    if (requestedIds.length !== input.movementIds.length) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+
+    const discovered = await transaction
+      .select({ id: inventoryMovements.id, productId: inventoryMovements.productId })
+      .from(inventoryMovements)
+      .where(
+        and(
+          eq(inventoryMovements.storeId, context.storeId),
+          inArray(inventoryMovements.id, requestedIds),
+        ),
+      );
+    if (discovered.length !== requestedIds.length) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+    const productIds = [...new Set(discovered.map((row) => row.productId))].sort();
+    const productRows = await transaction
+      .select()
+      .from(products)
+      .where(and(eq(products.storeId, context.storeId), inArray(products.id, productIds)))
+      .orderBy(asc(products.id))
+      .for('update');
+    const productById = new Map(productRows.map((row) => [row.id, row]));
+    if (productIds.some((id) => !productById.get(id)?.trackInventory)) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+
+    const originals = await transaction
+      .select()
+      .from(inventoryMovements)
+      .where(
+        and(
+          eq(inventoryMovements.storeId, context.storeId),
+          inArray(inventoryMovements.id, requestedIds),
+        ),
+      )
+      .orderBy(asc(inventoryMovements.productId), asc(inventoryMovements.id));
+    if (
+      originals.length !== requestedIds.length ||
+      originals.some(
+        (movement) =>
+          movement.movementType !== 'customer_return_saleable' ||
+          movement.referenceType !== 'sale_return' ||
+          movement.referenceId !== input.returnId ||
+          movement.reversalOfId !== null ||
+          movement.quantityDeltaMilli <= 0n,
+      )
+    ) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+
+    const unitIds = [...new Set(originals.map((movement) => movement.productUnitId))].sort();
+    const unitRows = await transaction
+      .select({ id: productUnits.id, productId: productUnits.productId })
+      .from(productUnits)
+      .where(and(eq(productUnits.storeId, context.storeId), inArray(productUnits.id, unitIds)))
+      .orderBy(asc(productUnits.productId), asc(productUnits.id))
+      .for('share');
+    if (unitRows.length !== unitIds.length) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+    const priorReversals = await transaction
+      .select({ id: inventoryMovements.id })
+      .from(inventoryMovements)
+      .where(
+        and(
+          eq(inventoryMovements.storeId, context.storeId),
+          inArray(inventoryMovements.reversalOfId, requestedIds),
+        ),
+      )
+      .limit(1);
+    if (priorReversals.length > 0) {
+      throw new SaleReturnInventoryReversalError('INTEGRITY_CONFLICT');
+    }
+
+    const [settings] = await transaction
+      .select({ allowNegativeStock: appSettings.allowNegativeStock })
+      .from(appSettings)
+      .where(eq(appSettings.storeId, context.storeId))
+      .for('share');
+    const effects: PostedCustomerReturnRestockReversal[] = [];
+    for (const original of originals) {
+      const [before] = await transaction
+        .select()
+        .from(stockBalances)
+        .where(
+          and(
+            eq(stockBalances.storeId, context.storeId),
+            eq(stockBalances.productId, original.productId),
+          ),
+        )
+        .limit(1);
+      if (!before) {
+        throw new SaleReturnInventoryReversalError('INVENTORY_STATE_CONFLICT');
+      }
+      if (
+        before.lastMovementId !== original.id ||
+        before.quantityMilli !== original.quantityAfterMilli ||
+        before.inventoryValueMinor !== original.inventoryValueAfterMinor ||
+        before.averageUnitCostMinor !== original.averageUnitCostAfterMinor ||
+        before.costState !== original.costStateAfter ||
+        before.hasPendingCost !== original.hasPendingCostAfter
+      ) {
+        throw new SaleReturnInventoryReversalError('INVENTORY_STATE_CONFLICT');
+      }
+
+      const quantityAfterMilli = original.quantityBeforeMilli;
+      const inventoryValueAfterMinor = original.inventoryValueBeforeMinor;
+      if (
+        inventoryValueAfterMinor < 0n ||
+        (quantityAfterMilli === 0n && inventoryValueAfterMinor !== 0n) ||
+        (original.costStateBefore !== 'known' && inventoryValueAfterMinor !== 0n)
+      ) {
+        throw new SaleReturnInventoryReversalError('INVENTORY_STATE_CONFLICT');
+      }
+      const product = productById.get(original.productId);
+      if (
+        quantityAfterMilli < 0n &&
+        !(product?.allowNegativeStockOverride ?? settings?.allowNegativeStock ?? false)
+      ) {
+        throw new SaleReturnInventoryReversalError('NEGATIVE_STOCK_NOT_ALLOWED');
+      }
+      const costStateAfter = original.costStateBefore;
+      const averageUnitCostAfterMinor =
+        costStateAfter === 'known' && quantityAfterMilli > 0n
+          ? inventoryUnitCost(inventoryValueAfterMinor, quantityAfterMilli)
+          : 0n;
+      const discriminator = `sale-return-inventory-reversal:${original.id}`;
+      const id = deriveMoneyFactId(input.operationId, discriminator);
+      const operationId = deriveMoneyFactOperationId(input.operationId, discriminator);
+      await transaction.insert(inventoryMovements).values({
+        id,
+        storeId: context.storeId,
+        productId: original.productId,
+        productUnitId: original.productUnitId,
+        accountingPeriodId: input.posting.accountingPeriodId,
+        movementType: 'correction',
+        quantityBeforeMilli: before.quantityMilli,
+        quantityDeltaMilli: -original.quantityDeltaMilli,
+        quantityAfterMilli,
+        inventoryValueBeforeMinor: before.inventoryValueMinor,
+        valueDeltaMinor: -original.valueDeltaMinor,
+        inventoryValueAfterMinor,
+        averageUnitCostAfterMinor,
+        costStatus: original.costStatus,
+        hasPendingCostAfter: costStateAfter === 'pending',
+        referenceType: 'sale_return_correction',
+        referenceId: input.returnId,
+        transactionGroupId: deriveTransactionGroupId(input.operationId),
+        occurredAt: input.occurredAt,
+        reversalOfId: original.id,
+        reason: input.reason,
+        deviceId: context.deviceId,
+        operationId,
+        selectedQuantityMilli: original.selectedQuantityMilli,
+        factorNum: original.factorNum,
+        factorDen: original.factorDen,
+        businessDate: input.posting.postingDate,
+        postingDate: input.posting.postingDate,
+        costStateBefore: before.costState,
+        costStateAfter,
+      });
+      effects.push({
+        id,
+        operationId,
+        reversalOfId: original.id,
+        productId: original.productId,
+        productUnitId: original.productUnitId,
+        quantityDeltaMilli: (-original.quantityDeltaMilli).toString(),
+        valueDeltaMinor:
+          original.costStatus === 'known' ? (-original.valueDeltaMinor).toString() : null,
+        costStatus: original.costStatus,
+      });
+    }
+    await transaction.execute(
+      sql`set constraints ledger.stock_balances_last_movement_fkey immediate`,
+    );
+    return effects;
+  }
+
   private async insertAccepted(
     tx: DatabaseTransaction,
     context: TenantTransactionContext,
@@ -536,5 +726,14 @@ export class SaleReturnInventoryError extends Error {
       | 'SALE_RETURN_RESTOCK_UNAVAILABLE',
   ) {
     super(code);
+  }
+}
+
+export class SaleReturnInventoryReversalError extends Error {
+  constructor(
+    readonly code: 'INTEGRITY_CONFLICT' | 'INVENTORY_STATE_CONFLICT' | 'NEGATIVE_STOCK_NOT_ALLOWED',
+  ) {
+    super(code);
+    this.name = 'SaleReturnInventoryReversalError';
   }
 }

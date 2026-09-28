@@ -1,5 +1,5 @@
 import { HttpException, Injectable } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import {
   AccountingPeriodNotPostingEligibleError,
@@ -8,7 +8,7 @@ import {
 import type { AccountingPeriodPostingContext } from '../accounting-periods/accounting-period-posting-context.types';
 import { AccountingPeriodIntegrityError } from '../accounting-periods/accounting-period-provisioning.service';
 import { DatabaseService } from '../database/database.service';
-import { customerLedgerEntries } from '../database/schema';
+import { customerLedgerEntries, customers } from '../database/schema';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
 import {
@@ -28,6 +28,8 @@ import type {
   CustomerFinancialResult,
   CustomerReturnLedgerEffect,
   CustomerReturnLedgerEffectInsert,
+  CustomerReturnLedgerReversal,
+  CustomerReturnLedgerReversalInput,
 } from './customer-credit.types';
 import {
   CustomerReceivablePlanningError,
@@ -140,6 +142,13 @@ export class CustomerFinancialRejectedError extends Error {
   }
 }
 
+export class CustomerReturnCreditDependencyError extends Error {
+  constructor(readonly code: 'CREDIT_DEPENDENCY' | 'INTEGRITY_CONFLICT') {
+    super(code);
+    this.name = 'CustomerReturnCreditDependencyError';
+  }
+}
+
 function failure(code: CustomerFinancialFailureCode): FailureResult {
   return { ok: false, error: customerFinancialFailureDefinitions[code] };
 }
@@ -220,6 +229,79 @@ export class CustomerCreditRepository {
       occurredAt: spec.occurredAt.toISOString(),
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  async insertReturnLedgerReversalsWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    input: CustomerReturnLedgerReversalInput,
+  ): Promise<CustomerReturnLedgerReversal[]> {
+    if (input.effects.length === 0) return [];
+    const customerRows = await transaction
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.storeId, context.storeId), eq(customers.id, input.customerId)))
+      .limit(1)
+      .for('update');
+    if (!customerRows[0]) {
+      throw new CustomerReturnCreditDependencyError('INTEGRITY_CONFLICT');
+    }
+
+    const creditToRemove = input.effects.reduce(
+      (sum, effect) => sum + (effect.creditDeltaMinor > 0n ? effect.creditDeltaMinor : 0n),
+      0n,
+    );
+    if (creditToRemove > 0n) {
+      const availableCredit = await this.receivables.readAvailableCredit(
+        transaction,
+        context.storeId,
+        input.customerId,
+      );
+      if (availableCredit < creditToRemove) {
+        throw new CustomerReturnCreditDependencyError('CREDIT_DEPENDENCY');
+      }
+    }
+
+    const reversals: CustomerReturnLedgerReversal[] = [];
+    for (const effect of [...input.effects].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )) {
+      if (
+        (effect.receivableDeltaMinor === 0n && effect.creditDeltaMinor === 0n) ||
+        (effect.receivableDeltaMinor !== 0n && effect.creditDeltaMinor !== 0n)
+      ) {
+        throw new CustomerReturnCreditDependencyError('INTEGRITY_CONFLICT');
+      }
+      const discriminator = `sale-return-ledger-reversal:${effect.id}`;
+      const id = deriveMoneyFactId(input.commandOperationId, discriminator);
+      const operationId = deriveMoneyFactOperationId(input.commandOperationId, discriminator);
+      await transaction.insert(customerLedgerEntries).values({
+        id,
+        storeId: context.storeId,
+        customerId: input.customerId,
+        accountingPeriodId: input.accountingPeriodId,
+        entryType: 'correction',
+        receivableDeltaMinor: -effect.receivableDeltaMinor,
+        creditDeltaMinor: -effect.creditDeltaMinor,
+        sourceSaleId: input.saleId,
+        referenceType: 'sale_return_correction',
+        referenceId: input.returnId,
+        transactionGroupId: input.transactionGroupId,
+        occurredAt: input.occurredAt,
+        reversalOfId: effect.id,
+        reason: input.reason,
+        deviceId: context.deviceId,
+        operationId,
+      });
+      reversals.push({
+        id,
+        operationId,
+        reversalOfId: effect.id,
+        receivableDeltaMinor: (-effect.receivableDeltaMinor).toString(),
+        creditDeltaMinor: (-effect.creditDeltaMinor).toString(),
+      });
+    }
+    return reversals;
   }
 
   async insertFinancialWithinTransaction(

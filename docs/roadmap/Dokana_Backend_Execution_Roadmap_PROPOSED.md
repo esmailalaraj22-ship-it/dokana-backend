@@ -2,14 +2,14 @@
 
 ## 1. Document Status and Governance
 
-| Field                     | Value                                           |
-| ------------------------- | ----------------------------------------------- |
-| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**         |
-| Repository                | `C:\Users\esmail\Desktop\Dokana`                |
-| Review branch             | `main`                                          |
-| S17.4 starting checkpoint | `5856cb3cdacf57958ca1d9feb6e37fecdf8b05ad`      |
-| Closed execution history  | Stations S0-S16; S17.1-S17.4                    |
-| Next candidate            | S17.5 - Immutable Return Corrections and Safety |
+| Field                     | Value                                      |
+| ------------------------- | ------------------------------------------ |
+| Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
+| Repository                | `C:\Users\esmail\Desktop\Dokana`           |
+| Review branch             | `main`                                     |
+| S17.5 starting checkpoint | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
+| Closed execution history  | Stations S0-S16; S17.1-S17.5               |
+| Next candidate            | S17.6 - Supplier Financial Returns         |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -58,18 +58,18 @@ backend owner before implementation.
 
 The roadmap was reconstructed against this verified state:
 
-| Check                           | Verified state                                  |
-| ------------------------------- | ----------------------------------------------- |
-| Branch                          | `main`                                          |
-| S17.4 starting HEAD             | `5856cb3cdacf57958ca1d9feb6e37fecdf8b05ad`      |
-| Starting `origin/main`          | `5856cb3cdacf57958ca1d9feb6e37fecdf8b05ad`      |
-| Ahead/behind                    | `0/0`                                           |
-| Working tree                    | Clean                                           |
-| Migrations                      | 15 applied, 0 pending                           |
-| Migration checksum verification | Pass                                            |
-| Reference SHA-256 verification  | 11 files checked, 0 mismatches                  |
-| Last fully closed Station       | S16                                             |
-| Next task                       | S17.5 - Immutable Return Corrections and Safety |
+| Check                           | Verified state                             |
+| ------------------------------- | ------------------------------------------ |
+| Branch                          | `main`                                     |
+| S17.5 starting HEAD             | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
+| Starting `origin/main`          | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe` |
+| Ahead/behind                    | `0/0`                                      |
+| Working tree                    | Clean                                      |
+| Migrations                      | 15 applied, 0 pending                      |
+| Migration checksum verification | Pass                                       |
+| Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
+| Last fully closed Station       | S16                                        |
+| Next task                       | S17.6 - Supplier Financial Returns         |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -598,7 +598,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** OPEN; S17.1-S17.4 CLOSED; S17.5 NEXT / NOT STARTED.
+- **Status:** OPEN; S17.1-S17.5 CLOSED; S17.6 NEXT / NOT STARTED.
 - **Purpose:** Append later Customer Sale Return and approved Supplier financial Return
   documents that atomically coordinate existing period, receivable/payable, Customer
   Credit, money, and inventory authorities without rewriting valid original postings,
@@ -621,7 +621,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   S17.2 now supplies exact Drizzle mappings and non-public Customer Return calculation and
   locking authority, S17.3 supplies the owner-authorized atomic posting composition
   across existing period, money, inventory, Sale, and Customer authorities, and S17.4
-  supplies tenant-safe operational reads and immutable settlement trace.
+  supplies tenant-safe operational reads and immutable settlement trace. S17.5 supplies
+  immutable active-leaf cancellation/replacement, exact cross-domain reversal, dependency
+  safety, and correction lineage reads.
   PostgreSQL's Return validator does not by itself serialize returnable quantity/value or
   validate every cross-domain link; the application transaction remains authoritative. Verdict:
   **S17 PHYSICAL FOUNDATION PARTIAL - APPLICATION WORK REQUIRED, DATABASE DELTA 0
@@ -743,27 +745,36 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   cleanup. Typecheck, lint, build, migration status/checksums, runtime DB safety, reference
   integrity, residue, and idle-transaction gates passed. Database delta 0.
 - **Exit:** Operational Customer Sale Return reads and settlement trace are complete.
-  Immutable Return correction and dependency safety remain owned by S17.5.
+  Immutable Return correction and dependency safety are delivered by S17.5.
 
 ### S17.5 - Immutable Return Corrections and Dependency Safety
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Cancel or replace the active Return leaf through linked compensating facts
   in the current eligible period without mutating original economic history.
 - **Dependencies/owners reused:** S17.3 plus S10/S11/S14/S15 correction and reversal
   primitives.
-- **Deliverables:** Active-leaf target validation, atomic financial/Money/Inventory/cost
-  reversal, optional replacement, dependency checks for spent Credit and later stock
-  facts, replay, audit, and reads.
+- **Delivered:** Owner-authorized immutable Return cancel/replace APIs; active-leaf and
+  linear predecessor/successor validation; exact Receivable, both Customer Credit sources,
+  historical Money refund, Inventory quantity, and known/unknown/pending cost reversal;
+  spent-Credit and later-stock dependency protection; current S9 correction posting over
+  closed historical periods; archived historical refund-account reversal; current
+  replacement eligibility; non-expansive replacement after 48-hour expiry; exact replay,
+  rollback, audit/change capture, and correction lineage reads.
 - **Non-scope/DB:** No recursive cascade cancellation, source Sale correction redesign,
   Supplier Return correction, or expected migration.
-- **Invariants/tests:** One effective reversal, no negative Credit or invalid inventory,
-  current-period posting, exact historical links, deterministic competing-correction
-  winner, rollback, tenant isolation, and real PostgreSQL concurrency coverage.
+- **Verification:** Focused unit/shared regression passed 49/49. Isolated real-PostgreSQL
+  correction coverage passed 20/20 with no skips, including the eight required race
+  classes; targeted S17.3/S17.4 regression passed 10 selected tests. Typecheck, full lint,
+  build, changed-file format, migration status/checksums, database role checks, reference
+  integrity, RLS/read_only, residue, and idle-transaction gates passed. DB: 15 applied / 0
+  pending; S17.5 database delta 0; PostgreSQL reference and SQLite deltas 0.
+- **Exit:** Customer Sale Return correction and dependency safety are complete. S17.6 is
+  next and not started; S17 remains open.
 
 ### S17.6 - Supplier Financial Returns
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Purpose:** Append an approved Supplier financial Return/credit against Supplier
   payable history without automatically creating or reversing inventory.
 - **Dependencies/owners reused:** S12 Invoice/Payable, S13 settlement, S9 period, S10 Money,
@@ -1023,8 +1034,8 @@ authorize editing or replaying the baseline or changing the read-only reference 
 No roadmap-structure decision is open. The backend owner resolved the S17 Return policy
 gate, S17.2 records the approved Customer and Supplier Return boundaries, S17.3
 implements atomic Customer Sale Return posting, and S17.4 provides operational Return
-reads and immutable settlement trace. S17.5 is the next implementation stage and is not
-started by this document.
+reads and immutable settlement trace. S17.5 implements immutable Customer Sale Return
+corrections and dependency safety. S17.6 is next and is not started by this document.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -1049,15 +1060,15 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                               | Current position                                |
-| ----------------------------------- | ----------------------------------------------- |
-| Last fully closed Station           | S16 - Expenses and Expense Payments             |
-| S17.4 starting checkpoint           | `5856cb3cdacf57958ca1d9feb6e37fecdf8b05ad`      |
-| Safe completed capabilities         | S0-S16 plus S17.1-S17.4                         |
-| First incomplete release dependency | S17 - Cross-Domain Corrections                  |
-| Next candidate                      | S17.5 - Immutable Return Corrections and Safety |
-| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                      |
-| S17 current status                  | S17.1-S17.4 CLOSED; S17.5 NEXT / NOT STARTED    |
+| Field                               | Current position                             |
+| ----------------------------------- | -------------------------------------------- |
+| Last fully closed Station           | S16 - Expenses and Expense Payments          |
+| S17.5 starting checkpoint           | `a6e2ce61a70746d7d6f3106ea80973ca3a370cbe`   |
+| Safe completed capabilities         | S0-S16 plus S17.1-S17.5                      |
+| First incomplete release dependency | S17 - Cross-Domain Corrections               |
+| Next candidate                      | S17.6 - Supplier Financial Returns           |
+| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                   |
+| S17 current status                  | S17.1-S17.5 CLOSED; S17.6 NEXT / NOT STARTED |
 
-Do not start S17.5 from this document. It requires an explicit backend-owner execution
+Do not start S17.6 from this document. It requires an explicit backend-owner execution
 prompt.

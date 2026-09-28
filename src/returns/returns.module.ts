@@ -8,6 +8,8 @@ import { MoneyMovementsModule } from '../money-movements/money-movements.module'
 import { SalesModule } from '../sales/sales.module';
 import { SettingsModule } from '../settings/settings.module';
 import { ReturnsController } from './returns.controller';
+import { SaleReturnCorrectionRepository } from './sale-return-correction.repository';
+import { SaleReturnCorrectionService } from './sale-return-correction.service';
 import { SaleReturnAuthorityRepository } from './sale-return-authority.repository';
 import { SaleReturnPostingRepository } from './sale-return-posting.repository';
 import { SaleReturnPostingService } from './sale-return-posting.service';
@@ -26,6 +28,8 @@ import { SaleReturnReadService } from './sale-return-read.service';
   ],
   controllers: [ReturnsController],
   providers: [
+    SaleReturnCorrectionRepository,
+    SaleReturnCorrectionService,
     SaleReturnAuthorityRepository,
     SaleReturnPostingRepository,
     SaleReturnPostingService,

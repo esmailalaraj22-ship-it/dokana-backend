@@ -55,95 +55,96 @@ interface ProcessedOperationRow extends Record<string, unknown> {
   errorCode: string | null;
 }
 
-const failureDefinitions: Readonly<Record<SaleReturnPostingFailureCode, SaleReturnPostingFailure>> =
-  {
-    ACCOUNTING_PERIOD_INTEGRITY_CONFLICT: definition(
-      'ACCOUNTING_PERIOD_INTEGRITY_CONFLICT',
-      'Accounting Period identity or boundaries are inconsistent.',
-      409,
-    ),
-    ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE: definition(
-      'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE',
-      'Accounting Period is not eligible for posting.',
-      409,
-    ),
-    OPERATION_ID_CONFLICT: definition(
-      'OPERATION_ID_CONFLICT',
-      'Operation ID was reused with a different request.',
-      409,
-    ),
-    OPERATION_IN_PROGRESS: definition(
-      'OPERATION_IN_PROGRESS',
-      'The operation is still being processed.',
-      409,
-    ),
-    SALE_RETURN_AMOUNT_INVALID: definition(
-      'SALE_RETURN_AMOUNT_INVALID',
-      'Sale Return amount is invalid or not representable.',
-      400,
-    ),
-    SALE_RETURN_CUSTOMER_CREDIT_NOT_ALLOWED: definition(
-      'SALE_RETURN_CUSTOMER_CREDIT_NOT_ALLOWED',
-      'Customer Credit is not available for this Sale Return.',
-      409,
-    ),
-    SALE_RETURN_CUSTOMER_RESTORE_REQUIRED: definition(
-      'SALE_RETURN_CUSTOMER_RESTORE_REQUIRED',
-      'The Customer must be active before creating new Customer Credit.',
-      409,
-    ),
-    SALE_RETURN_INTEGRITY_CONFLICT: definition(
-      'SALE_RETURN_INTEGRITY_CONFLICT',
-      'Sale Return state is inconsistent.',
-      409,
-    ),
-    SALE_RETURN_LINE_NOT_FOUND: definition(
-      'SALE_RETURN_LINE_NOT_FOUND',
-      'Sale Return line not found.',
-      404,
-    ),
-    SALE_RETURN_OPERATION_CONFLICT: definition(
-      'SALE_RETURN_OPERATION_CONFLICT',
-      'Sale Return operation conflicts with the stored operation.',
-      409,
-    ),
-    SALE_RETURN_QUANTITY_EXCEEDED: definition(
-      'SALE_RETURN_QUANTITY_EXCEEDED',
-      'Returned quantity exceeds the remaining Sale quantity.',
-      409,
-    ),
-    SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE: definition(
-      'SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE',
-      'Refund Money Account is not available.',
-      409,
-    ),
-    SALE_RETURN_RESTOCK_UNAVAILABLE: definition(
-      'SALE_RETURN_RESTOCK_UNAVAILABLE',
-      'Saleable restock is not available for this Sale line.',
-      409,
-    ),
-    SALE_RETURN_RESIDUAL_CHOICE_INVALID: definition(
-      'SALE_RETURN_RESIDUAL_CHOICE_INVALID',
-      'Residual settlement choice is not applicable.',
-      409,
-    ),
-    SALE_RETURN_RESIDUAL_CHOICE_REQUIRED: definition(
-      'SALE_RETURN_RESIDUAL_CHOICE_REQUIRED',
-      'Residual settlement choice is required.',
-      409,
-    ),
-    SALE_RETURN_SALE_INACTIVE: definition(
-      'SALE_RETURN_SALE_INACTIVE',
-      'Sale is not active for a new Return.',
-      409,
-    ),
-    SALE_RETURN_SALE_NOT_FOUND: definition('SALE_RETURN_SALE_NOT_FOUND', 'Sale not found.', 404),
-    SALE_RETURN_WINDOW_EXPIRED: definition(
-      'SALE_RETURN_WINDOW_EXPIRED',
-      'The 48-hour Sale Return window has expired.',
-      409,
-    ),
-  };
+export const saleReturnPostingFailureDefinitions: Readonly<
+  Record<SaleReturnPostingFailureCode, SaleReturnPostingFailure>
+> = {
+  ACCOUNTING_PERIOD_INTEGRITY_CONFLICT: definition(
+    'ACCOUNTING_PERIOD_INTEGRITY_CONFLICT',
+    'Accounting Period identity or boundaries are inconsistent.',
+    409,
+  ),
+  ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE: definition(
+    'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE',
+    'Accounting Period is not eligible for posting.',
+    409,
+  ),
+  OPERATION_ID_CONFLICT: definition(
+    'OPERATION_ID_CONFLICT',
+    'Operation ID was reused with a different request.',
+    409,
+  ),
+  OPERATION_IN_PROGRESS: definition(
+    'OPERATION_IN_PROGRESS',
+    'The operation is still being processed.',
+    409,
+  ),
+  SALE_RETURN_AMOUNT_INVALID: definition(
+    'SALE_RETURN_AMOUNT_INVALID',
+    'Sale Return amount is invalid or not representable.',
+    400,
+  ),
+  SALE_RETURN_CUSTOMER_CREDIT_NOT_ALLOWED: definition(
+    'SALE_RETURN_CUSTOMER_CREDIT_NOT_ALLOWED',
+    'Customer Credit is not available for this Sale Return.',
+    409,
+  ),
+  SALE_RETURN_CUSTOMER_RESTORE_REQUIRED: definition(
+    'SALE_RETURN_CUSTOMER_RESTORE_REQUIRED',
+    'The Customer must be active before creating new Customer Credit.',
+    409,
+  ),
+  SALE_RETURN_INTEGRITY_CONFLICT: definition(
+    'SALE_RETURN_INTEGRITY_CONFLICT',
+    'Sale Return state is inconsistent.',
+    409,
+  ),
+  SALE_RETURN_LINE_NOT_FOUND: definition(
+    'SALE_RETURN_LINE_NOT_FOUND',
+    'Sale Return line not found.',
+    404,
+  ),
+  SALE_RETURN_OPERATION_CONFLICT: definition(
+    'SALE_RETURN_OPERATION_CONFLICT',
+    'Sale Return operation conflicts with the stored operation.',
+    409,
+  ),
+  SALE_RETURN_QUANTITY_EXCEEDED: definition(
+    'SALE_RETURN_QUANTITY_EXCEEDED',
+    'Returned quantity exceeds the remaining Sale quantity.',
+    409,
+  ),
+  SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE: definition(
+    'SALE_RETURN_REFUND_ACCOUNT_UNAVAILABLE',
+    'Refund Money Account is not available.',
+    409,
+  ),
+  SALE_RETURN_RESTOCK_UNAVAILABLE: definition(
+    'SALE_RETURN_RESTOCK_UNAVAILABLE',
+    'Saleable restock is not available for this Sale line.',
+    409,
+  ),
+  SALE_RETURN_RESIDUAL_CHOICE_INVALID: definition(
+    'SALE_RETURN_RESIDUAL_CHOICE_INVALID',
+    'Residual settlement choice is not applicable.',
+    409,
+  ),
+  SALE_RETURN_RESIDUAL_CHOICE_REQUIRED: definition(
+    'SALE_RETURN_RESIDUAL_CHOICE_REQUIRED',
+    'Residual settlement choice is required.',
+    409,
+  ),
+  SALE_RETURN_SALE_INACTIVE: definition(
+    'SALE_RETURN_SALE_INACTIVE',
+    'Sale is not active for a new Return.',
+    409,
+  ),
+  SALE_RETURN_SALE_NOT_FOUND: definition('SALE_RETURN_SALE_NOT_FOUND', 'Sale not found.', 404),
+  SALE_RETURN_WINDOW_EXPIRED: definition(
+    'SALE_RETURN_WINDOW_EXPIRED',
+    'The 48-hour Sale Return window has expired.',
+    409,
+  ),
+};
 
 @Injectable()
 export class SaleReturnPostingRepository {
@@ -181,21 +182,43 @@ export class SaleReturnPostingRepository {
     });
   }
 
+  insertCorrectionReplacementWithinTransaction(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+    command: SaleReturnCommand,
+    posting: AccountingPeriodPostingContext,
+  ): Promise<SaleReturnPostingResponse> {
+    return this.insertWithinTransaction(
+      transaction,
+      context,
+      command,
+      posting.postingDate,
+      deriveMoneyFactId(command.operationId, 'sale-return'),
+      posting,
+      true,
+    );
+  }
+
   private async insertWithinTransaction(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
     command: SaleReturnCommand,
     postingDate: string,
     returnId: string,
+    resolvedPosting?: AccountingPeriodPostingContext,
+    allowExpiredWindow = false,
   ): Promise<SaleReturnPostingResponse> {
-    const posting = await this.postingContext.resolveForWrite(transaction, context, {
-      postingDate,
-      operationId: command.operationId,
-    });
+    const posting =
+      resolvedPosting ??
+      (await this.postingContext.resolveForWrite(transaction, context, {
+        postingDate,
+        operationId: command.operationId,
+      }));
     const plan = await this.authority.buildNewPlanWithinTransaction(
       transaction,
       context.storeId,
       command,
+      { allowExpiredWindow },
     );
     await transaction.execute(
       sql`select set_config('app.audit_reason', ${command.reason}::text, true)`,
@@ -645,7 +668,7 @@ export class SaleReturnPostingRepository {
         values(${context.storeId}::uuid,${command.operationId}::uuid,${AGGREGATE},${returnId}::uuid,
           'duplicate_identity',jsonb_build_object('action',${ACTION}::text,'requestHash',${command.requestHash}::text))
       `);
-      return { ok: false, error: failureDefinitions.OPERATION_ID_CONFLICT };
+      return { ok: false, error: saleReturnPostingFailureDefinitions.OPERATION_ID_CONFLICT };
     }
     if (row.status === 'applied') {
       if (row.responseCode !== 201)
@@ -654,10 +677,10 @@ export class SaleReturnPostingRepository {
     }
     if (row.status === 'rejected') {
       const code = row.errorCode;
-      if (!code || !(code in failureDefinitions)) {
+      if (!code || !(code in saleReturnPostingFailureDefinitions)) {
         throw new Error('Stored Sale Return rejection is invalid.');
       }
-      const error = failureDefinitions[code as SaleReturnPostingFailureCode];
+      const error = saleReturnPostingFailureDefinitions[code as SaleReturnPostingFailureCode];
       const body = row.responseBody;
       if (
         row.responseCode !== error.statusCode ||
@@ -672,7 +695,7 @@ export class SaleReturnPostingRepository {
       }
       return { ok: false, error: { ...error, message: body.message } };
     }
-    return { ok: false, error: failureDefinitions.OPERATION_IN_PROGRESS };
+    return { ok: false, error: saleReturnPostingFailureDefinitions.OPERATION_IN_PROGRESS };
   }
 
   private async applyOperation(
@@ -709,15 +732,18 @@ export class SaleReturnPostingRepository {
   }
 
   private knownFailure(error: unknown): SaleReturnPostingFailure | null {
-    if (error instanceof SaleReturnAuthorityError) return failureDefinitions[error.code];
-    if (error instanceof SaleReturnInventoryError) return failureDefinitions[error.code];
+    if (error instanceof SaleReturnAuthorityError)
+      return saleReturnPostingFailureDefinitions[error.code];
+    if (error instanceof SaleReturnInventoryError)
+      return saleReturnPostingFailureDefinitions[error.code];
     if (error instanceof AccountingPeriodNotPostingEligibleError) {
-      return failureDefinitions.ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE;
+      return saleReturnPostingFailureDefinitions.ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE;
     }
     if (error instanceof AccountingPeriodIntegrityError) {
-      return failureDefinitions.ACCOUNTING_PERIOD_INTEGRITY_CONFLICT;
+      return saleReturnPostingFailureDefinitions.ACCOUNTING_PERIOD_INTEGRITY_CONFLICT;
     }
-    if (error instanceof RangeError) return failureDefinitions.SALE_RETURN_AMOUNT_INVALID;
+    if (error instanceof RangeError)
+      return saleReturnPostingFailureDefinitions.SALE_RETURN_AMOUNT_INVALID;
     return null;
   }
 }

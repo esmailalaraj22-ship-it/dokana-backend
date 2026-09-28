@@ -12,6 +12,7 @@ import {
   allocateHistoricalLineNetValues,
   cumulativeProportionalAmount,
 } from './sale-return-policy';
+import { parseStoredSaleReturnCorrectionResponse } from './sale-return-correction-response';
 import { parseStoredSaleReturnPostingResponse } from './sale-return-posting-response';
 import type {
   SaleReturnPostingResponse,
@@ -59,6 +60,9 @@ interface SummaryPhysicalRow extends Record<string, unknown> {
   updatedAt: string;
   version: string;
   postingResponse: unknown;
+  postingAction: 'sale_returns.post' | 'sale_returns.replace';
+  predecessorReturnId: string | null;
+  correctionResponse: unknown;
   lineCount: number;
   lineTotalMinor: string;
   restockSaleableLineCount: number;
@@ -213,6 +217,9 @@ export class SaleReturnReadRepository {
           return_root.updated_at as "updatedAt",
           return_root.version::text as version,
           operation.response_body as "postingResponse",
+          operation.action as "postingAction",
+          predecessor."predecessorReturnId",
+          correction."correctionResponse",
           line_summary."lineCount",
           line_summary."lineTotalMinor",
           line_summary."restockSaleableLineCount",
@@ -231,10 +238,34 @@ export class SaleReturnReadRepository {
         join sync.processed_operations operation
           on operation.store_id=return_root.store_id
          and operation.operation_id=return_root.operation_id
-         and operation.aggregate_type='sale_returns'
-         and operation.aggregate_id=return_root.id
-         and operation.action='sale_returns.post'
          and operation.status='applied'
+         and (
+           (operation.aggregate_type='sale_returns'
+             and operation.aggregate_id=return_root.id
+             and operation.action='sale_returns.post')
+           or
+           (operation.aggregate_type='sale_return_corrections'
+             and operation.action='sale_returns.replace'
+             and operation.response_body #>> '{replacement,return,id}'=return_root.id::text)
+         )
+        left join lateral (
+          select prior.response_body ->> 'targetReturnId' as "predecessorReturnId"
+          from sync.processed_operations prior
+          where prior.store_id=return_root.store_id
+            and prior.status='applied'
+            and prior.action='sale_returns.replace'
+            and prior.response_body #>> '{replacement,return,id}'=return_root.id::text
+          limit 1
+        ) predecessor on true
+        left join lateral (
+          select applied.response_body as "correctionResponse"
+          from sync.processed_operations applied
+          where applied.store_id=return_root.store_id
+            and applied.status='applied'
+            and applied.action in ('sale_returns.cancel','sale_returns.replace')
+            and applied.response_body ->> 'targetReturnId'=return_root.id::text
+          limit 1
+        ) correction on true
         cross join lateral (
           select count(*)::int as "lineCount",
             coalesce(sum(item.line_refund_minor),0)::text as "lineTotalMinor",
@@ -313,6 +344,9 @@ export class SaleReturnReadRepository {
           return_root.updated_at as "updatedAt",
           return_root.version::text as version,
           operation.response_body as "postingResponse",
+          operation.action as "postingAction",
+          predecessor."predecessorReturnId",
+          correction."correctionResponse",
           line_summary."lineCount",
           line_summary."lineTotalMinor",
           line_summary."restockSaleableLineCount",
@@ -331,10 +365,34 @@ export class SaleReturnReadRepository {
         join sync.processed_operations operation
           on operation.store_id=return_root.store_id
          and operation.operation_id=return_root.operation_id
-         and operation.aggregate_type='sale_returns'
-         and operation.aggregate_id=return_root.id
-         and operation.action='sale_returns.post'
          and operation.status='applied'
+         and (
+           (operation.aggregate_type='sale_returns'
+             and operation.aggregate_id=return_root.id
+             and operation.action='sale_returns.post')
+           or
+           (operation.aggregate_type='sale_return_corrections'
+             and operation.action='sale_returns.replace'
+             and operation.response_body #>> '{replacement,return,id}'=return_root.id::text)
+         )
+        left join lateral (
+          select prior.response_body ->> 'targetReturnId' as "predecessorReturnId"
+          from sync.processed_operations prior
+          where prior.store_id=return_root.store_id
+            and prior.status='applied'
+            and prior.action='sale_returns.replace'
+            and prior.response_body #>> '{replacement,return,id}'=return_root.id::text
+          limit 1
+        ) predecessor on true
+        left join lateral (
+          select applied.response_body as "correctionResponse"
+          from sync.processed_operations applied
+          where applied.store_id=return_root.store_id
+            and applied.status='applied'
+            and applied.action in ('sale_returns.cancel','sale_returns.replace')
+            and applied.response_body ->> 'targetReturnId'=return_root.id::text
+          limit 1
+        ) correction on true
         cross join lateral (
           select count(*)::int as "lineCount",
             coalesce(sum(item.line_refund_minor),0)::text as "lineTotalMinor",
@@ -592,7 +650,8 @@ export class SaleReturnReadRepository {
       throw new Error('Sale Return Customer lineage is inconsistent.');
     }
     const customer = this.mapCustomer(row);
-    const postingSnapshot = parseStoredSaleReturnPostingResponse(row.postingResponse);
+    const postingSnapshot = this.parsePostingSnapshot(row);
+    const correctionLineage = this.parseCorrectionLineage(row);
     const totalMinor = BigInt(row.totalMinor);
     const version = BigInt(row.version);
     const settlementSummary = {
@@ -656,6 +715,63 @@ export class SaleReturnReadRepository {
         damagedNoRestockLineCount: row.damagedNoRestockLineCount,
         noInventoryEffectLineCount: row.noInventoryEffectLineCount,
       },
+      correctionLineage,
+    };
+  }
+
+  private parsePostingSnapshot(row: SummaryPhysicalRow): SaleReturnPostingResponse {
+    if (row.postingAction === 'sale_returns.post') {
+      return parseStoredSaleReturnPostingResponse(row.postingResponse);
+    }
+    const correction = parseStoredSaleReturnCorrectionResponse(row.postingResponse);
+    if (correction.intent !== 'replace' || correction.replacement === null) {
+      throw new Error('Persisted replacement Sale Return lineage is inconsistent.');
+    }
+    const replacement = correction.replacement;
+    if (replacement.return.id !== row.id || correction.targetReturnId !== row.predecessorReturnId) {
+      throw new Error('Persisted replacement Sale Return lineage is inconsistent.');
+    }
+    return replacement;
+  }
+
+  private parseCorrectionLineage(
+    row: SummaryPhysicalRow,
+  ): SaleReturnSummaryRow['correctionLineage'] {
+    const correction =
+      row.correctionResponse === null
+        ? null
+        : parseStoredSaleReturnCorrectionResponse(row.correctionResponse);
+    const successorReturnId = correction?.replacement?.return.id ?? null;
+    if (row.status === 'posted' && (row.cancelledAt !== null || correction !== null)) {
+      throw new Error('Persisted Sale Return correction lineage is inconsistent.');
+    }
+    if (row.status === 'cancelled') {
+      if (row.cancelledAt === null || correction === null) {
+        throw new Error('Persisted Sale Return correction lineage is inconsistent.');
+      }
+      if (
+        correction.targetReturnId !== row.id ||
+        correction.outcome.cancelledAt !== new Date(row.cancelledAt).toISOString() ||
+        correction.outcome.version !== row.version ||
+        correction.outcome.activeReturnId !== successorReturnId
+      ) {
+        throw new Error('Persisted Sale Return correction lineage is inconsistent.');
+      }
+    }
+    return {
+      predecessorReturnId: row.predecessorReturnId,
+      successorReturnId,
+      activeLeaf: row.status === 'posted',
+      correction: correction
+        ? {
+            type: correction.intent === 'cancel' ? 'CANCEL' : 'REPLACE',
+            reason: correction.correctionReason,
+            correctedAt: new Date(correction.occurredAt),
+            businessDate: correction.businessDate,
+            postingDate: correction.postingDate,
+            accountingPeriodId: correction.accountingPeriodId,
+          }
+        : null,
     };
   }
 

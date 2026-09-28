@@ -36,6 +36,7 @@ export class SaleReturnAuthorityRepository {
     transaction: DatabaseTransaction,
     storeId: string,
     command: SaleReturnCommand,
+    options: { allowExpiredWindow?: boolean } = {},
   ): Promise<SaleReturnPlan> {
     const [saleIdentity] = await transaction
       .select({ id: sales.id, customerId: sales.customerId })
@@ -83,7 +84,9 @@ export class SaleReturnAuthorityRepository {
     if (acceptedAt === null || !Number.isFinite(acceptedAt.getTime())) {
       throw new SaleReturnAuthorityError('SALE_RETURN_INTEGRITY_CONFLICT');
     }
-    assertNewCustomerReturnWithinWindow(sale.saleAt, acceptedAt);
+    if (!options.allowExpiredWindow) {
+      assertNewCustomerReturnWithinWindow(sale.saleAt, acceptedAt);
+    }
 
     const lockedLines = await transaction
       .select({

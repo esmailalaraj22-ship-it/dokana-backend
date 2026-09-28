@@ -5,6 +5,8 @@ import { SaleIdParamDto } from '../sales/dto/sale-id-param.dto';
 import { ListSaleReturnsQueryDto } from './dto/list-sale-returns-query.dto';
 import { SaleReturnIdParamDto } from './dto/sale-return-id-param.dto';
 import { SaleReturnPostingService } from './sale-return-posting.service';
+import { SaleReturnCorrectionService } from './sale-return-correction.service';
+import type { SaleReturnCorrectionResponse } from './sale-return-correction.types';
 import { SaleReturnReadService } from './sale-return-read.service';
 import type {
   SaleReturnDetailResponse,
@@ -19,6 +21,7 @@ export class ReturnsController {
   constructor(
     private readonly posting: SaleReturnPostingService,
     private readonly reads: SaleReturnReadService,
+    private readonly corrections: SaleReturnCorrectionService,
   ) {}
 
   @Get('returns')
@@ -61,5 +64,23 @@ export class ReturnsController {
     @Body() body: unknown,
   ): Promise<SaleReturnPostingResponse> {
     return this.posting.post(request.principal, request.tenantContext, saleId, body);
+  }
+
+  @Post('returns/:returnId/cancel')
+  cancelSaleReturn(
+    @Req() request: AuthenticatedRequest,
+    @Param('returnId') returnId: string,
+    @Body() body: unknown,
+  ): Promise<SaleReturnCorrectionResponse> {
+    return this.corrections.cancel(request.principal, request.tenantContext, returnId, body);
+  }
+
+  @Post('returns/:returnId/replace')
+  replaceSaleReturn(
+    @Req() request: AuthenticatedRequest,
+    @Param('returnId') returnId: string,
+    @Body() body: unknown,
+  ): Promise<SaleReturnCorrectionResponse> {
+    return this.corrections.replace(request.principal, request.tenantContext, returnId, body);
   }
 }

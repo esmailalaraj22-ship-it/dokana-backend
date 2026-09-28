@@ -143,8 +143,19 @@ export class SaleReturnReadService {
       lifecycle: {
         status: row.status,
         effective: row.status === 'posted',
+        activeLeaf: row.correctionLineage.activeLeaf,
         cancelledAt: row.cancelledAt?.toISOString() ?? null,
         version: row.version.toString(),
+        correction: row.correctionLineage.correction
+          ? {
+              ...row.correctionLineage.correction,
+              correctedAt: row.correctionLineage.correction.correctedAt.toISOString(),
+            }
+          : null,
+      },
+      lineage: {
+        predecessorReturnId: row.correctionLineage.predecessorReturnId,
+        successorReturnId: row.correctionLineage.successorReturnId,
       },
       settlementSummary: {
         receivableReductionMinor: row.settlementSummary.receivableReductionMinor.toString(),
@@ -208,6 +219,9 @@ export class SaleReturnReadService {
       lineage: {
         operationId: row.operationId,
         transactionGroupId: row.postingSnapshot.transactionGroupId,
+        predecessorReturnId: row.correctionLineage.predecessorReturnId,
+        successorReturnId: row.correctionLineage.successorReturnId,
+        activeLeaf: row.correctionLineage.activeLeaf,
       },
     };
   }

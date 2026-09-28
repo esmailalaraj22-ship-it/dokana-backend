@@ -44,6 +44,30 @@ export interface CustomerReturnLedgerEffect {
   createdAt: string;
 }
 
+export interface CustomerReturnLedgerReversalInput {
+  commandOperationId: string;
+  returnId: string;
+  saleId: string;
+  customerId: string;
+  accountingPeriodId: string;
+  transactionGroupId: string;
+  occurredAt: Date;
+  reason: string;
+  effects: {
+    id: string;
+    receivableDeltaMinor: bigint;
+    creditDeltaMinor: bigint;
+  }[];
+}
+
+export interface CustomerReturnLedgerReversal {
+  id: string;
+  operationId: string;
+  reversalOfId: string;
+  receivableDeltaMinor: string;
+  creditDeltaMinor: string;
+}
+
 export interface CustomerFinancialResponse {
   operationId: string;
   action: CustomerFinancialAction;

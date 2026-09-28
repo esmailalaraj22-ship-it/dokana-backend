@@ -34,3 +34,23 @@ export interface PostedCustomerReturnRestock {
   valueDeltaMinor: string | null;
   costStatus: InventoryCostState;
 }
+
+export interface CustomerReturnRestockReversalInput {
+  operationId: string;
+  returnId: string;
+  occurredAt: Date;
+  reason: string;
+  posting: AccountingPeriodPostingContext;
+  movementIds: string[];
+}
+
+export interface PostedCustomerReturnRestockReversal {
+  id: string;
+  operationId: string;
+  reversalOfId: string;
+  productId: string;
+  productUnitId: string;
+  quantityDeltaMilli: string;
+  valueDeltaMinor: string | null;
+  costStatus: InventoryCostState;
+}
