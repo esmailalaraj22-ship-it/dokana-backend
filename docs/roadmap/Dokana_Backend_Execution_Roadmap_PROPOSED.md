@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S17.7 starting checkpoint | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
-| Closed execution history  | Stations S0-S17                            |
-| Next candidate            | S18 - Subscription, Licensing, and SaaS    |
+| S18.1 starting checkpoint | `5561e6a3f3d65a45215dc31b6f58b2d2df9ff050` |
+| Closed execution history  | Stations S0-S17 and S18.1                  |
+| Current Station           | S18 - Subscription, Licensing, and SaaS    |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S17.7 starting HEAD             | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
-| Starting `origin/main`          | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
+| S18.1 starting HEAD             | `5561e6a3f3d65a45215dc31b6f58b2d2df9ff050` |
+| Starting `origin/main`          | `5561e6a3f3d65a45215dc31b6f58b2d2df9ff050` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S17                                        |
-| Next task                       | S18 - Subscription, Licensing, and SaaS    |
+| Current task                    | S18.1 orientation closed                   |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -834,7 +834,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** NEXT / NOT STARTED.
+- **Status:** OPEN; S18.1 CLOSED; S18.2 BLOCKED ON BACKEND-OWNER POLICY.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -854,6 +854,114 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   authorization are approved.
 - **Closure intent:** Complete least-privileged platform lifecycle ready for offline sync
   and release.
+- **S18.1 authoritative function:** S18 makes PostgreSQL the ultimate Store SaaS
+  entitlement authority; adds least-privileged platform-administrator authorization,
+  audited Store/owner provisioning and subscription lifecycle, online session/write
+  enforcement, and bounded signed Store-and-device offline licenses based on trusted
+  server time. It reuses S3 authentication/RLS, S4-S17 Store lifecycle and business-write
+  controls, and the S8 deterministic Cash provisioner. It does not own shop accounting,
+  payment-provider processing, mobile license storage, or business-data synchronization;
+  S19 owns sync/bootstrap and consumes the approved entitlement handoff.
+- **Physical readiness:** The historical baseline at
+  `database/reference/backend_database_reference/shop_ledger_postgresql_v1_all_in_one.sql`
+  and the live database contain `platform.subscription_plans`,
+  `platform.subscriptions`, `platform.license_issuances`, `platform.admin_actions`, Store
+  and device identities, server-time fields, and forced tenant RLS on Subscription and
+  License rows. All 15 migrations are applied with zero pending and preserve those
+  objects. Current Drizzle does not map the S18 platform tables.
+- **Database verdict:** **S18 PHYSICAL FOUNDATION INSUFFICIENT - DATABASE CHANGE
+  REQUIRED, BACKEND-OWNER AUTHORIZATION REQUIRED.** No durable platform-administrator
+  authorization identity exists, and no least-privileged transaction-safe database path
+  connects entitlement truth to authentication, business-write enforcement, cross-Store
+  administration, or append-only administrative audit. Runtime and authentication roles
+  correctly have no direct access to the platform subscription tables; broad grants or
+  an administrative runtime connection are prohibited substitutes.
+- **Store/Subscription relationship:** Store lifecycle and Subscription lifecycle remain
+  separate authorities. `active`, `read_only`, `suspended`, and `archived` Store states
+  already drive authenticated access and business-write behavior; S18 must compose those
+  states with server-derived entitlement without treating expiry, suspension, and archive
+  as interchangeable or granting SaaS administration access to accounting data.
+- **Offline License boundary:** S18 owns central entitlement, signed Store-and-device
+  License issuance/verification semantics, trusted server-time evidence, key/version
+  identity, and bounded validity. SQLite already has a local-license reference shape, but
+  mobile persistence, clock-state handling, queued business operations, and synchronization
+  execution remain outside this repository and are handed to S19/mobile implementation.
+- **SaaS Admin boundary:** The PRD requires Store/owner, plan/subscription,
+  device/license, activation/renewal/suspension, free-day, and administrative-action
+  management. No current Platform Admin identity or production Store-provisioning flow
+  exists. Future administration must use a dedicated least-privileged boundary and must
+  not obtain runtime accounting authority or bypass tenant RLS globally.
+- **Unresolved policy gate:** Backend-owner approval is required for the minimal
+  Subscription lifecycle; separate grace policy; maximum offline-license duration;
+  clock-rollback handling; queued-operation acceptance after expiry/suspension; exact
+  Platform Admin powers and override rules; one-plan versus multi-plan MVP scope; Store
+  provisioning workflow; signing-key custody/rotation; and mandatory administrative audit
+  payloads. PRD-approved read-only behavior after License expiry, device-bound activation,
+  delayed offline suspension, and deferral of payment-provider integration are not reopened.
+
+### S18.1 - Orientation, Database Readiness, and Stage Decomposition
+
+- **Status:** CLOSED.
+- **Result:** Repository authorities, all 15 migrations, live PostgreSQL catalog,
+  RLS/functions/triggers/roles, Drizzle mappings, the historical PostgreSQL baseline, and
+  relevant SQLite License structures were reconciled read-only. Database delta: 0.
+- **Exit:** S18 scope and stages are defined; policy and future database authorization
+  remain explicit gates.
+
+### S18.2 - Subscription, License, and Platform Authority Contract Freeze
+
+- **Status:** BLOCKED ON BACKEND-OWNER POLICY.
+- **Function:** Freeze lifecycle, expiry/grace, offline duration and clock policy, queued
+  operation treatment, Platform Admin powers, plan scope, provisioning, audit, and signing
+  key policy without implementation.
+- **Database expectation:** 0.
+- **Closure condition:** Every material policy choice is approved and testable.
+
+### S18.3 - Platform Physical and Least-Privilege Security Foundation
+
+- **Status:** PROPOSED - BLOCKED ON BACKEND-OWNER DATABASE AUTHORIZATION.
+- **Function:** Apply one reviewed forward migration for the approved durable Platform
+  Admin authority and narrowly scoped entitlement/admin database API; add exact Drizzle
+  mappings and security/migration tests.
+- **Database expectation:** Backend-owner authorization required.
+- **Closure condition:** No runtime/auth role receives broad `platform` or accounting
+  access; cross-Store administration requires approved identity and is fully audited.
+
+### S18.4 - Central Entitlement and Store Provisioning
+
+- **Status:** PROPOSED - NOT STARTED.
+- **Function:** Implement plans/subscriptions, activation/extension/suspension/history,
+  Store/owner provisioning, and S8 Cash provisioning through the approved authority.
+- **Database expectation:** 0 after S18.3.
+- **Closure condition:** Server-time, idempotent, audited lifecycle and provisioning paths
+  pass focused rollback, concurrency, and authorization tests.
+
+### S18.5 - Online Entitlement Enforcement and SaaS Administration
+
+- **Status:** PROPOSED - NOT STARTED.
+- **Function:** Enforce effective entitlement centrally at login/refresh/session and
+  business-write boundaries; provide least-privileged operational admin reads/actions.
+- **Database expectation:** 0 after S18.3.
+- **Closure condition:** Expired entitlement is read-only, suspended/archived access fails
+  as approved, and no Platform Admin path can modify tenant accounting.
+
+### S18.6 - Signed Offline License and S19 Handoff
+
+- **Status:** PROPOSED - NOT STARTED.
+- **Function:** Issue and validate bounded signed Store/device licenses, implement
+  key/version and renewal/revocation semantics, and freeze the S19 entitlement handoff.
+- **Database expectation:** 0 after S18.3 unless S18.2 approves otherwise.
+- **Closure condition:** Forgery, copy, expiry, rollback, stale-license, and key-rotation
+  cases are covered without implementing mobile storage or synchronization.
+
+### S18.7 - Final Platform Security Verification and Closure
+
+- **Status:** PROPOSED - NOT STARTED.
+- **Function:** Perform integrated migration, RLS, role, session/write, license, audit,
+  concurrency, and accounting-firewall verification and close S18.
+- **Database expectation:** 0.
+- **Closure condition:** Independent high-risk review is approved, S19 handoff is frozen,
+  and S18 is formally closed by the backend owner.
 
 ### S19 - Offline Sync and Consistent Data Bootstrap
 
@@ -1056,13 +1164,14 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure decision is open. S17.1-S17.7 are closed after integrated Customer
-and Supplier Return accounting, security, idempotency, dependency, concurrency, and
-repository verification. S18 is next and is not started by this document.
+No roadmap-structure decision is open. S17.1-S17.7 remain closed after integrated
+Customer and Supplier Return verification. S18.1 is closed after read-only orientation;
+S18 remains open.
 
-Station-local product, accounting, licensing, storage, and operational-policy decisions
-remain intentionally deferred to the relevant Station orientation. A deferred local
-decision does not authorize an implementer to invent policy.
+S18.2 is blocked on the Station-local backend-owner policy decisions recorded in the S18
+record. S18.3 also requires explicit backend-owner database authorization for the minimum
+durable Platform Admin and entitlement-enforcement boundary. These gates do not authorize
+implementation or freeze the recommendations as product decisions.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
@@ -1086,12 +1195,14 @@ decision does not authorize an implementer to invent policy.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
-| S17.7 starting checkpoint           | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
-| Safe completed capabilities         | S0-S17                                     |
+| S18.1 starting checkpoint           | `5561e6a3f3d65a45215dc31b6f58b2d2df9ff050` |
+| Safe completed capabilities         | S0-S17 plus S18.1 orientation              |
 | First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
-| Next candidate                      | S18 - Subscription, Licensing, and SaaS    |
-| S17 current status                  | CLOSED; S17.1-S17.7 CLOSED                 |
-| S18 current status                  | NEXT / NOT STARTED                         |
+| Current Station                     | S18 - OPEN                                 |
+| S18.1 current status                | CLOSED                                     |
+| S18.2 current status                | BLOCKED ON BACKEND-OWNER POLICY            |
+| S18.3 current status                | BLOCKED ON BACKEND-OWNER DB AUTHORIZATION  |
 
-Do not start S18 from this document. It requires an explicit backend-owner execution
-prompt.
+Do not start S18.2 or any implementation stage from this document. S18.2 requires an
+explicit backend-owner policy-resolution prompt, and S18.3 requires separate database
+authorization after that contract is frozen.
