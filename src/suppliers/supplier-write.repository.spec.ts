@@ -274,7 +274,9 @@ describe('SupplierWriteRepository', () => {
     harness.returningUpdate.mockResolvedValueOnce([
       { ...row, status: 'archived', archivedAt, version: 2n },
     ]);
-    harness.execute.mockResolvedValueOnce({ rows: [{ operationId }] });
+    harness.execute
+      .mockResolvedValueOnce({ rows: [{ payableMinor: '0', creditMinor: '0' }] })
+      .mockResolvedValueOnce({ rows: [{ operationId }] });
 
     await expect(
       harness.repository.changeLifecycle(context, {
@@ -349,6 +351,9 @@ describe('SupplierWriteRepository', () => {
     const harness = createHarness();
     const unexpected = new Error('unexpected Supplier lifecycle database failure');
     arrangeNewOperation(harness);
+    harness.execute.mockResolvedValueOnce({
+      rows: [{ payableMinor: '0', creditMinor: '0' }],
+    });
     harness.returningUpdate.mockRejectedValueOnce(unexpected);
 
     await expect(
@@ -360,6 +365,6 @@ describe('SupplierWriteRepository', () => {
         requestHash: '2'.repeat(64),
       }),
     ).rejects.toBe(unexpected);
-    expect(harness.execute).toHaveBeenCalledTimes(2);
+    expect(harness.execute).toHaveBeenCalledTimes(3);
   });
 });

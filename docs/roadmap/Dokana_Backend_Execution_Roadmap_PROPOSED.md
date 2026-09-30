@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S17.6 starting checkpoint | `a5b6757859648214e6916d948ade220f9623552b` |
-| Closed execution history  | Stations S0-S16; S17.1-S17.6               |
-| Next candidate            | S17.7 - Final Returns Verification         |
+| S17.7 starting checkpoint | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
+| Closed execution history  | Stations S0-S17                            |
+| Next candidate            | S18 - Subscription, Licensing, and SaaS    |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,22 +61,22 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S17.6 starting HEAD             | `a5b6757859648214e6916d948ade220f9623552b` |
-| Starting `origin/main`          | `a5b6757859648214e6916d948ade220f9623552b` |
+| S17.7 starting HEAD             | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
+| Starting `origin/main`          | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 15 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S16                                        |
-| Next task                       | S17.7 - Final Returns Verification         |
+| Last fully closed Station       | S17                                        |
+| Next task                       | S18 - Subscription, Licensing, and SaaS    |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S16
+## 5. Completed Stations S0-S17
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -100,6 +100,7 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S14 - Sales Posting and Customer Receivables            | CLOSED | Paid, partial, credit, split-tender, tracked/untracked and manual-line Sale posting; Customer Opening Receivables; tenant-safe reads; immutable Sale cancellation/replacement chains    | Historical sales posting and receivable origination                | Current Sales implementation, tests, and migrations `0012`-`0013`                                                                                                                                                                                                     |
 | S15 - Customer Collections, Credits, and Settlement     | CLOSED | Customer collections, Sale/Opening allocation, overpayment/advance Credit, refunds, non-cash settlement, Sale Credit tender, and immutable active-leaf correction chains                | Historical customer collection, credit, and settlement authority   | Current Customer financial implementation, tests, and migrations `0014`-`0015`                                                                                                                                                                                        |
 | S16 - Expenses and Expense Payments                     | CLOSED | Expense Category lifecycle; DUE, immediate Money-paid, and Owner-funded recognition; later settlement; derived outstanding; immutable Expense/Payment corrections and operational reads | Historical expense recognition and settlement authority            | Current Expense implementation, tests, and S9/S10 posting authorities                                                                                                                                                                                                 |
+| S17 - Returns and Cross-Domain Corrections              | CLOSED | Customer Sale Returns, Supplier financial Returns, settlement/inventory orchestration, tenant-safe reads, replay, dependency protection, and immutable correction chains                | Historical returns and cross-domain correction orchestration       | Current Return implementation and S17.1-S17.7 verification                                                                                                                                                                                                            |
 
 The safe completed boundary does not include subscription lifecycle, generic
 synchronization, reporting, or recovery.
@@ -111,7 +112,7 @@ synchronization, reporting, or recovery.
 | Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
 | PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
 | NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S16                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S17                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
 | Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
 | Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
 | Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
@@ -119,7 +120,7 @@ synchronization, reporting, or recovery.
 | Supplier invoices/payables              | SPLIT, COMPLETE         | Supplier invoice/payable recognition S12; settlement S13                | None                                                   | None                  |
 | Manual inventory/costing                | DONE                    | S11                                                                     | None                                                   | None                  |
 | Expenses/owner ledger                   | SPLIT, COMPLETE         | Money and owner-ledger foundation S10; Expenses S16                     | None                                                   | None                  |
-| Returns/corrections/periods             | SPLIT, PARTIAL          | Period controls S9 and same-domain corrections S10-S16                  | Cross-domain corrections                               | S17                   |
+| Returns/corrections/periods             | SPLIT, COMPLETE         | Period controls S9, same-domain corrections S10-S16, Returns S17        | None                                                   | None                  |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
 | Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
@@ -157,6 +158,12 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 - Expense Category lifecycle; DUE, immediate Money-paid, and Owner-funded Expense
   recognition; partial/full/repeated later settlement; authoritative derived outstanding;
   and immutable Expense/Payment active-leaf correction chains.
+- Customer Sale Returns with a 48 actual-hour window, historical value/cost authority,
+  Receivable-first settlement, Credit restoration, explicit residual settlement,
+  Inventory dispositions, tenant-safe reads, and immutable corrections.
+- Supplier financial Returns with no global deadline, Payable-first settlement, distinct
+  Supplier Credit, explicit Credit Applications, actual Refunds, no automatic Inventory
+  effect, tenant-safe reads, and immutable corrections.
 - Domain mutation foundations using stable UUIDs, `operationId`, canonical request
   hashes, exact/rejected replay, versions, processed operations, audit effects, and
   change events.
@@ -172,8 +179,8 @@ sequence preserves full scope while moving foundations ahead of their consumers.
 
 ### Still required
 
-Cross-domain returns/corrections, platform lifecycle, generic synchronization,
-reports, notifications, attachments, backup/restore, and final release validation.
+Platform lifecycle, generic synchronization, reports, notifications, attachments,
+backup/restore, and final release validation.
 
 ## 8. Remaining PRD Coverage and Completeness Map
 
@@ -194,7 +201,7 @@ reports, notifications, attachments, backup/restore, and final release validatio
 | Sales and customer receivable origination          | Implemented                          | S14 (closed)                 |
 | Customer collections/credit/settlement             | Implemented                          | S15 (closed)                 |
 | Expenses and expense payments                      | Implemented                          | S16 (closed)                 |
-| Returns/reversals/corrections                      | Still required                       | S17 and each source Station  |
+| Returns/reversals/corrections                      | Implemented                          | S17 (closed)                 |
 | Subscription/offline licensing/SaaS administration | Partially implemented                | S18                          |
 | Generic sync and consistent data bootstrap         | Partially implemented foundation     | S19                          |
 | Dashboard/reports/search/documents/export          | Still required                       | S20                          |
@@ -204,7 +211,7 @@ reports, notifications, attachments, backup/restore, and final release validatio
 | Automatic or partial invoice goods receipt         | Superseded by approved design        | No future owner              |
 | Flutter/Drift/SQLite mobile implementation         | Outside backend scope                | Mobile project               |
 
-If S9-S23 are completed against their approved future contracts, every material backend
+If S18-S23 are completed against their approved future contracts, every material backend
 PRD capability has an execution owner. No material capability is intentionally orphaned.
 
 ## 9. Opening and Initial-State Ownership
@@ -598,7 +605,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17 - Returns and Cross-Domain Corrections
 
-- **Status:** OPEN; S17.1-S17.6 CLOSED; S17.7 NEXT / NOT STARTED.
+- **Status:** CLOSED; S17.1-S17.7 CLOSED.
 - **Purpose:** Append later Customer Sale Return and approved Supplier financial Return
   documents that atomically coordinate existing period, receivable/payable, Customer
   Credit, money, and inventory authorities without rewriting valid original postings,
@@ -613,7 +620,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   and settlement; S14 owns Sale/Receivable; S15 owns Customer settlement/Credit; S16
   remains the sole Expense authority. S17 may orchestrate those authorities in one
   transaction but must not create parallel ledgers, balance projections, or corrections.
-- **Physical readiness:** `ledger.sale_returns`, Return items/settlements, Supplier Return
+- **Initial physical readiness:** `ledger.sale_returns`, Return items/settlements, Supplier Return
   counterparts, generic immutable ledgers/movements, `sync.processed_operations`, forced
   RLS, audit, and change capture provide a partial foundation. Sale and Sale-line lineage,
   the two approved `saleable`/`damaged` dispositions, current-period posting, split
@@ -625,10 +632,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   immutable active-leaf cancellation/replacement, exact cross-domain reversal, dependency
   safety, and correction lineage reads.
   PostgreSQL's Return validator does not by itself serialize returnable quantity/value or
-  validate every cross-domain link; the application transaction remains authoritative. Verdict:
-  **S17 PHYSICAL FOUNDATION PARTIAL - APPLICATION WORK REQUIRED, DATABASE DELTA 0
-  EXPECTED**.
-- **Database decision:** No migration is authorized or currently required. S17.2 locks the
+  validate every cross-domain link; the application transaction remains authoritative.
+  S17.2-S17.6 completed the required application work without a database delta.
+- **Database decision:** No migration was required. S17.2 locks the
   trusted Customer/Sale/Sale-line and affected Product/Unit resources and calculates
   remaining returnable quantity/value server-side. S17.3 composes the Return, financial,
   inventory, audit/change, and operation effects atomically. A later owner
@@ -802,22 +808,33 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S17.7 - Final Returns Verification and Closure
 
-- **Status:** NEXT / NOT STARTED.
+- **Status:** CLOSED.
 - **Purpose:** Prove integrated Customer and approved Supplier Return behavior and close
   S17 without adding new capability.
 - **Dependencies/owners reused:** Completed S17.2-S17.6 and all reused source authorities.
-- **Deliverables:** Cross-stage accounting/security review, focused regression, full
-  repository gates, migration/reference integrity, independent review handoff, and
-  Roadmap closure.
+- **Delivered:** Cross-stage accounting/security and completeness audit; focused
+  Customer/Supplier Return regression; final replay-conflict evidence for Supplier
+  Credit Application, Refund, and correction families; full repository, database-role,
+  migration, reference-integrity, residue, and idle-transaction gates; and Roadmap
+  closure.
 - **Non-scope/DB:** No new Return behavior, migration, future Station work, or SQLite
   implementation.
-- **Invariants/tests:** Full S17 happy/rejection/replay/rollback/concurrency/RLS matrix,
-  balance and stock assertions, no skipped relevant suites, and clean repository state.
-  Close only after independent findings are resolved or explicitly accepted.
+- **Verification:** The targeted S17 selection passed 23/23 executed tests across four
+  suites, with 30 intentionally non-selected tests and zero failures. Full unit passed
+  1,050/1,050 across 110 suites; broad real-PostgreSQL integration passed 756/756 across
+  59 suites; neither full suite skipped tests. Existing executed S17.3, S17.5, and S17.6
+  concurrency evidence remained valid and the broad suite re-executed the current race
+  coverage. Typecheck, lint, build, changed-file format, diff, role/security, migration
+  checksum, and 11/11 reference checks passed. DB: 15 applied / 0 pending; S17.7 database
+  delta 0; PostgreSQL reference and SQLite deltas 0; SQLite parity remains deferred to
+  S19.
+- **Exit:** Integrated Customer and Supplier Return accounting, security, reads,
+  idempotency, dependency safety, and corrections are verified. S17 is closed. S18 is
+  next and not started.
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -975,7 +992,6 @@ foundation.
 | Inventory/costing/opening stock          | Requires Products, settings, and periods  | S11          |
 | Sales/receivables/collections            | Requires inventory, money, and periods    | S14-S15      |
 | Expenses                                 | Requires money/owner authority            | S16          |
-| Returns/corrections                      | Requires source workflows                 | S17          |
 | Subscription/license/SaaS administration | Store-status enforcement is only partial  | S18          |
 | Generic sync/business-data bootstrap     | Mutation contracts must stabilize         | S19          |
 | Reports/search/export/OpenAPI debt       | Requires authoritative domain data        | S20          |
@@ -1040,12 +1056,9 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure decision is open. The backend owner resolved the S17 Return policy
-gate, S17.2 records the approved Customer and Supplier Return boundaries, S17.3
-implements atomic Customer Sale Return posting, and S17.4 provides operational Return
-reads and immutable settlement trace. S17.5 implements immutable Customer Sale Return
-corrections and dependency safety. S17.6 implements Supplier Financial Returns and the
-Supplier Credit lifecycle. S17.7 is next and is not started by this document.
+No roadmap-structure decision is open. S17.1-S17.7 are closed after integrated Customer
+and Supplier Return accounting, security, idempotency, dependency, concurrency, and
+repository verification. S18 is next and is not started by this document.
 
 Station-local product, accounting, licensing, storage, and operational-policy decisions
 remain intentionally deferred to the relevant Station orientation. A deferred local
@@ -1053,9 +1066,9 @@ decision does not authorize an implementer to invent policy.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S16 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S17 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S17-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S18-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -1070,15 +1083,15 @@ decision does not authorize an implementer to invent policy.
 
 ## 18. Current Position and Next Candidate Station
 
-| Field                               | Current position                             |
-| ----------------------------------- | -------------------------------------------- |
-| Last fully closed Station           | S16 - Expenses and Expense Payments          |
-| S17.6 starting checkpoint           | `a5b6757859648214e6916d948ade220f9623552b`   |
-| Safe completed capabilities         | S0-S16 plus S17.1-S17.6                      |
-| First incomplete release dependency | S17 - Cross-Domain Corrections               |
-| Next candidate                      | S17.7 - Final Returns Verification           |
-| S16 current status                  | CLOSED; S16.1-S16.5 CLOSED                   |
-| S17 current status                  | S17.1-S17.6 CLOSED; S17.7 NEXT / NOT STARTED |
+| Field                               | Current position                           |
+| ----------------------------------- | ------------------------------------------ |
+| Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
+| S17.7 starting checkpoint           | `f967d85b3a596a53ec8fd4ee4c449469b29cedef` |
+| Safe completed capabilities         | S0-S17                                     |
+| First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
+| Next candidate                      | S18 - Subscription, Licensing, and SaaS    |
+| S17 current status                  | CLOSED; S17.1-S17.7 CLOSED                 |
+| S18 current status                  | NEXT / NOT STARTED                         |
 
-Do not start S17.7 from this document. It requires an explicit backend-owner execution
+Do not start S18 from this document. It requires an explicit backend-owner execution
 prompt.

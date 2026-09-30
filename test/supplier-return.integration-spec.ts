@@ -664,6 +664,13 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       applicationOperationId,
     ).expect(201);
     expect(applicationReplay.body).toEqual(application.body);
+    const applicationConflict = await applyCredit(
+      source.supplierId,
+      target.response.invoice.id,
+      '201',
+      applicationOperationId,
+    ).expect(409);
+    expect(applicationConflict.body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
     await applyCredit(source.supplierId, target.response.invoice.id, '100').expect(201);
     expect(await invoiceOutstanding(target.response.invoice.id)).toBe('200');
     expect(await supplierBalances(source.supplierId)).toEqual({ payable: '200', credit: '200' });
@@ -712,6 +719,13 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     );
     const replay = await refundCredit(source.supplierId, accountId, '100', operationId).expect(201);
     expect(replay.body).toEqual(partial.body);
+    const refundConflict = await refundCredit(
+      source.supplierId,
+      accountId,
+      '101',
+      operationId,
+    ).expect(409);
+    expect(refundConflict.body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
     await refundCredit(source.supplierId, accountId, '200').expect(201);
     expect(await accountBalance(accountId)).toBe('300');
     expect(await supplierBalances(source.supplierId)).toEqual({ payable: '0', credit: '0' });
@@ -801,6 +815,11 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       cancelBody,
     ).expect(201);
     expect(cancelReplay.body).toEqual(cancel.body);
+    const cancelConflict = await correct('financial-returns', 'cancel', originalOperationId, {
+      ...cancelBody,
+      reason: 'Changed Supplier Return correction',
+    }).expect(409);
+    expect(cancelConflict.body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
     expect(cancel.body).toMatchObject({
       family: 'supplier_return',
       intent: 'cancel',
@@ -894,6 +913,16 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       applicationCancelBody,
     ).expect(201);
     expect(applicationCancelReplay.body).toEqual(applicationCancel.body);
+    const applicationCancelConflict = await correct(
+      'credit-applications',
+      'cancel',
+      firstOperationId,
+      {
+        ...applicationCancelBody,
+        reason: 'Changed Supplier Credit Application correction',
+      },
+    ).expect(409);
+    expect(applicationCancelConflict.body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
     expect(await invoiceOutstanding(target.response.invoice.id)).toBe('500');
 
     const secondOperationId = randomUUID();
@@ -963,6 +992,11 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       refundCancelBody,
     ).expect(201);
     expect(refundCancelReplay.body).toEqual(refundCancel.body);
+    const refundCancelConflict = await correct('refunds', 'cancel', refundOperationId, {
+      ...refundCancelBody,
+      reason: 'Changed Supplier Refund correction',
+    }).expect(409);
+    expect(refundCancelConflict.body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
     expect(await accountBalance(historicalAccount)).toBe('0');
 
     const replacementTargetOperationId = randomUUID();
