@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -83,6 +84,193 @@ export const storeMemberships = platformSchema.table(
     ),
     check('store_memberships_version_check', sql`${table.version} >= 1`),
     index('idx_memberships_user').on(table.userId, table.status),
+  ],
+);
+
+export const platformAdminAssignments = platformSchema.table(
+  'platform_admin_assignments',
+  {
+    userId: uuid('user_id').primaryKey(),
+    status: text('status').$type<'active' | 'revoked'>().notNull().default('active'),
+    assignedAt: timestamp('assigned_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    assignedByUserId: uuid('assigned_by_user_id'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+    revokedByUserId: uuid('revoked_by_user_id'),
+    revokeReason: text('revoke_reason'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'platform_admin_assignments_user_id_fkey',
+      columns: [table.userId],
+      foreignColumns: [users.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'platform_admin_assignments_assigned_by_user_id_fkey',
+      columns: [table.assignedByUserId],
+      foreignColumns: [users.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'platform_admin_assignments_revoked_by_user_id_fkey',
+      columns: [table.revokedByUserId],
+      foreignColumns: [users.id],
+    }).onDelete('restrict'),
+    check('platform_admin_assignments_status_check', sql`${table.status} in ('active', 'revoked')`),
+    check('platform_admin_assignments_version_check', sql`${table.version} >= 1`),
+    check(
+      'platform_admin_assignments_state_check',
+      sql`(
+        ${table.status} = 'active'
+        and ${table.revokedAt} is null
+        and ${table.revokedByUserId} is null
+        and ${table.revokeReason} is null
+      ) or (
+        ${table.status} = 'revoked'
+        and ${table.revokedAt} is not null
+        and ${table.revokedByUserId} is not null
+        and length(trim(${table.revokeReason})) > 0
+      )`,
+    ),
+  ],
+);
+
+export const subscriptionPlans = platformSchema.table(
+  'subscription_plans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    durationDays: integer('duration_days').notNull(),
+    priceMinor: bigint('price_minor', { mode: 'bigint' }).notNull(),
+    currencyCode: text('currency_code').notNull().default('ILS'),
+    maxDevices: integer('max_devices').notNull().default(1),
+    offlineGraceDays: integer('offline_grace_days').notNull().default(0),
+    status: text('status').$type<'active' | 'archived'>().notNull().default('active'),
+    features: jsonb('features').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    unique('subscription_plans_code_key').on(table.code),
+    check('subscription_plans_duration_days_check', sql`${table.durationDays} > 0`),
+    check('subscription_plans_price_minor_check', sql`${table.priceMinor} >= 0`),
+    check('subscription_plans_currency_code_check', sql`${table.currencyCode} = 'ILS'`),
+    check('subscription_plans_max_devices_check', sql`${table.maxDevices} > 0`),
+    check('subscription_plans_offline_grace_days_check', sql`${table.offlineGraceDays} >= 0`),
+    check('subscription_plans_status_check', sql`${table.status} in ('active', 'archived')`),
+    check('subscription_plans_version_check', sql`${table.version} >= 1`),
+  ],
+);
+
+export const subscriptions = platformSchema.table(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storeId: uuid('store_id').notNull(),
+    planId: uuid('plan_id').notNull(),
+    status: text('status')
+      .$type<'trial' | 'active' | 'past_due' | 'expired' | 'suspended' | 'cancelled'>()
+      .notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true, mode: 'date' }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    suspendedAt: timestamp('suspended_at', { withTimezone: true, mode: 'date' }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true, mode: 'date' }),
+    externalReference: text('external_reference'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
+  },
+  (table) => [
+    foreignKey({
+      name: 'subscriptions_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'subscriptions_plan_id_fkey',
+      columns: [table.planId],
+      foreignColumns: [subscriptionPlans.id],
+    }).onDelete('restrict'),
+    check(
+      'subscriptions_status_check',
+      sql`${table.status} in ('trial', 'active', 'past_due', 'expired', 'suspended', 'cancelled')`,
+    ),
+    check('subscriptions_check', sql`${table.expiresAt} > ${table.startsAt}`),
+    check('subscriptions_version_check', sql`${table.version} >= 1`),
+    uniqueIndex('uq_platform_one_current_subscription')
+      .on(table.storeId)
+      .where(sql`${table.status} in ('trial', 'active', 'past_due', 'suspended')`),
+    index('idx_subscriptions_store_time').on(table.storeId, table.expiresAt.desc(), table.status),
+  ],
+);
+
+export const licenseIssuances = platformSchema.table(
+  'license_issuances',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    storeId: uuid('store_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    subscriptionId: uuid('subscription_id').notNull(),
+    licenseSerial: bigint('license_serial', { mode: 'bigint' })
+      .notNull()
+      .generatedAlwaysAsIdentity(),
+    signedPayload: jsonb('signed_payload').$type<Record<string, unknown>>().notNull(),
+    signature: text('signature').notNull(),
+    keyId: text('key_id').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+    revokeReason: text('revoke_reason'),
+  },
+  (table) => [
+    foreignKey({
+      name: 'license_issuances_subscription_id_fkey',
+      columns: [table.subscriptionId],
+      foreignColumns: [subscriptions.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'license_issuances_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    }).onDelete('restrict'),
+    unique('license_issuances_license_serial_key').on(table.licenseSerial),
+    check('license_issuances_check', sql`${table.expiresAt} > ${table.issuedAt}`),
+    index('idx_license_store_device').on(table.storeId, table.deviceId, table.expiresAt.desc()),
+  ],
+);
+
+export const adminActions = platformSchema.table(
+  'admin_actions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    adminUserId: uuid('admin_user_id').notNull(),
+    storeId: uuid('store_id'),
+    action: text('action').notNull(),
+    reason: text('reason').notNull(),
+    requestId: uuid('request_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'admin_actions_admin_user_id_fkey',
+      columns: [table.adminUserId],
+      foreignColumns: [users.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'admin_actions_store_id_fkey',
+      columns: [table.storeId],
+      foreignColumns: [stores.id],
+    }).onDelete('restrict'),
+    check('admin_actions_action_nonempty_check', sql`length(trim(${table.action})) > 0`),
+    check('admin_actions_reason_nonempty_check', sql`length(trim(${table.reason})) > 0`),
+    check('admin_actions_metadata_object_check', sql`jsonb_typeof(${table.metadata}) = 'object'`),
   ],
 );
 

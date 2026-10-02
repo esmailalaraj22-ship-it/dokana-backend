@@ -47,10 +47,7 @@ const units = [randomUUID(), randomUUID()] as const;
 const sales = [randomUUID(), randomUUID()] as const;
 const saleItems = [randomUUID(), randomUUID()] as const;
 const moneyAccounts = [randomUUID(), randomUUID()] as const;
-const periods = [
-  deriveAccountingPeriodId(stores[0], 2026, 9),
-  deriveAccountingPeriodId(stores[1], 2026, 9),
-] as const;
+let periods: readonly [string, string];
 const repository = new SaleReturnAuthorityRepository();
 let saleAt: Date;
 let acceptedAt: Date;
@@ -140,7 +137,14 @@ describe('S17.2 Sale Return internal authority', () => {
     businessDate = resolvedBusinessDate;
     saleAt = new Date(acceptedAt.getTime() - 60 * 60 * 1000);
 
-    const boundaries = resolveAccountingPeriodBoundaries(2026, 9);
+    const [periodYearText, periodMonthText] = businessDate.split('-');
+    const periodYear = Number(periodYearText);
+    const periodMonth = Number(periodMonthText);
+    periods = [
+      deriveAccountingPeriodId(stores[0], periodYear, periodMonth),
+      deriveAccountingPeriodId(stores[1], periodYear, periodMonth),
+    ];
+    const boundaries = resolveAccountingPeriodBoundaries(periodYear, periodMonth);
     for (let index = 0; index < stores.length; index += 1) {
       await db().admin.query(
         `insert into ledger.stores(id, name) values ($1, 'S17.2 isolated fixture')`,
@@ -176,8 +180,16 @@ describe('S17.2 Sale Return internal authority', () => {
       await db().admin.query(
         `insert into ledger.accounting_periods(
           id, store_id, period_year, period_month, starts_at, ends_at, status, operation_id
-        ) values ($1, $2, 2026, 9, $3, $4, 'open', $5)`,
-        [periods[index], stores[index], boundaries.startsAt, boundaries.endsAt, randomUUID()],
+        ) values ($1, $2, $3, $4, $5, $6, 'open', $7)`,
+        [
+          periods[index],
+          stores[index],
+          periodYear,
+          periodMonth,
+          boundaries.startsAt,
+          boundaries.endsAt,
+          randomUUID(),
+        ],
       );
       await db().admin.query(
         `insert into ledger.products(

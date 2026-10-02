@@ -7,8 +7,8 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S18.2 starting checkpoint | `38a83f8c63f8e0db3aea887e6e1f4160214cafba` |
-| Closed execution history  | Stations S0-S17 and S18.1-S18.2            |
+| S18.3 starting checkpoint | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
+| Closed execution history  | Stations S0-S17 and S18.1-S18.3            |
 | Current Station           | S18 - Subscription, Licensing, and SaaS    |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S18.2 starting HEAD             | `38a83f8c63f8e0db3aea887e6e1f4160214cafba` |
-| Starting `origin/main`          | `38a83f8c63f8e0db3aea887e6e1f4160214cafba` |
+| S18.3 starting HEAD             | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
+| Starting `origin/main`          | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
-| Migrations                      | 15 applied, 0 pending                      |
+| Migrations                      | 17 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S17                                        |
-| Current task                    | S18.2 policy freeze closed                 |
+| Current task                    | S18.3 physical/security foundation closed  |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -834,8 +834,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** OPEN; S18.1-S18.2 CLOSED; S18.3 BLOCKED ON BACKEND-OWNER DATABASE
-  AUTHORIZATION.
+- **Status:** OPEN; S18.1-S18.3 CLOSED; S18.4 NEXT / NOT STARTED.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -942,12 +941,18 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   sync. S18 hands off entitlement and Store state, License identity and binding,
   `issuedAt`, `offlineValidUntil`, key/version, trusted-time evidence, verification result,
   connected suspension knowledge, and queued-operation policy classification.
-- **S18.3 authorization gate:** S18.1 proved two missing physical capabilities that S18.3
-  must add minimally: (A) durable Platform Admin authorization with an accounting firewall,
-  and (B) atomic server-time effective-entitlement enforcement usable by auth/session,
-  business-write, and License-issuance boundaries without broad grants or application-only
-  TOCTOU checks. S18.2 authorizes no database change or migration; S18.3 remains blocked on
-  separate backend-owner database authorization.
+- **S18.3 physical foundation:** Durable DB-backed Platform Admin assignment is distinct
+  from Store roles and exposes no broad `platform` or accounting privilege. Two narrow,
+  non-PUBLIC `SECURITY DEFINER` functions resolve the current actor's Platform Admin state
+  and lock the Store then current Subscription for server-time effective-entitlement
+  decisions inside the protected transaction. Existing Subscription, License, and
+  administrative-audit objects are mapped in Drizzle; administrative audit is immutable.
+  Migration 0016 introduced the authorized foundation and migration 0017 corrected its
+  demonstrated missing-Subscription NULL result to fail closed without altering 0016.
+  PostgreSQL historical references and SQLite remain unchanged. The seven-day Offline
+  License remains S18.6 work. S18.5 must provide a controlled deployment/operational
+  bootstrap for the first Platform Admin; it must never use public registration, email
+  inference, Store-role promotion, or a migration-seeded person.
 
 ### S18.1 - Orientation, Database Readiness, and Stage Decomposition
 
@@ -972,17 +977,34 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18.3 - Platform Physical and Least-Privilege Security Foundation
 
-- **Status:** PROPOSED - BLOCKED ON BACKEND-OWNER DATABASE AUTHORIZATION.
-- **Function:** After separate database authorization, add only the durable Platform Admin
-  authorization/accounting firewall and atomic server-time effective-entitlement authority;
-  map existing S18 platform objects as needed and add focused security/migration tests.
-- **Database expectation:** Backend-owner authorization required.
-- **Closure condition:** No runtime/auth role receives broad `platform` or accounting
-  access; cross-Store administration requires approved identity and is fully audited.
+- **Status:** CLOSED.
+- **Delivered:** Durable Platform Admin assignment authority, immutable administrative
+  audit hardening, exact Drizzle mappings for the existing Subscription/License/Admin
+  tables, a narrow current-actor authority function, and an atomic server-time entitlement
+  function with canonical Store-then-Subscription locking.
+- **Security:** Platform Admin remains distinct from Store Owner/Manager roles. Runtime and
+  auth roles received no broad `platform` or accounting access; functions are
+  `SECURITY DEFINER` with a pinned `search_path`, no PUBLIC execute, and only the approved
+  narrow execute grants. Forced RLS and the tenant accounting firewall remain intact.
+- **Database:** 17 applied / 0 pending. Migration 0016 added the authorized foundation;
+  immutable corrective migration 0017 made missing Subscription eligibility explicitly
+  false after a focused PostgreSQL test demonstrated the NULL defect. Applied migrations
+  were not edited. PostgreSQL historical reference delta 0; SQLite delta 0.
+- **Verification:** Focused Platform Admin, entitlement, exact-end-boundary, RLS, and real
+  PostgreSQL concurrency coverage passed 15/15; focused auth/write/RLS regression passed
+  50/50. Full unit passed 1,050/1,050 across 110 suites. After correcting a pre-existing
+  calendar-sensitive S17 test fixture, broad PostgreSQL integration passed 771/771 across
+  60 suites with no skips. Typecheck, lint, build, migration checksum, role, live catalog,
+  residue, and idle-transaction gates passed.
+- **Deferred:** S18.5 owns a controlled deployment/operational first-Platform-Admin
+  bootstrap. S18.6 owns the seven-day signed Offline License. No real administrator was
+  seeded and no public administration API was added.
+- **Exit:** The approved physical and least-privilege foundation is complete. S18.4 is next
+  and not started; S18 remains open.
 
 ### S18.4 - Central Entitlement and Store Provisioning
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Function:** Implement plans/subscriptions, activation/extension/cancellation/history,
   Store/owner provisioning, and S8 Cash provisioning through the approved authority.
 - **Database expectation:** 0 after S18.3.
@@ -1218,13 +1240,10 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-structure or S18 policy decision is open. S17.1-S17.7 remain closed after
-integrated Customer and Supplier Return verification. S18.1 orientation and S18.2 policy
-freeze are closed; S18 remains open.
-
-S18.3 requires explicit backend-owner database authorization for only the minimum durable
-Platform Admin authorization/accounting firewall and atomic effective-entitlement
-enforcement capabilities. S18.2 did not authorize a migration, database mutation, or S18.3
-implementation.
+integrated Customer and Supplier Return verification. S18.1-S18.3 are closed; S18 remains
+open. The first-Platform-Admin mechanism remains a precise S18.5 implementation requirement:
+controlled deployment/operational bootstrap only, with no public self-promotion or
+Store-role-derived authority.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
@@ -1248,14 +1267,14 @@ implementation.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
-| S18.2 starting checkpoint           | `38a83f8c63f8e0db3aea887e6e1f4160214cafba` |
-| Safe completed capabilities         | S0-S17 plus S18.1-S18.2                    |
+| S18.3 starting checkpoint           | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
+| Safe completed capabilities         | S0-S17 plus S18.1-S18.3                    |
 | First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
 | Current Station                     | S18 - OPEN                                 |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
-| S18.3 current status                | BLOCKED ON BACKEND-OWNER DB AUTHORIZATION  |
+| S18.3 current status                | CLOSED                                     |
+| S18.4 current status                | NEXT / NOT STARTED                         |
 
-Do not start S18.3 from this document. Its physical/security scope is frozen, but it
-requires separate explicit backend-owner database authorization before any migration,
-database object, Drizzle mapping, production code, or test implementation begins.
+Do not start S18.4 from this document. It requires a separate execution prompt and retains
+database delta 0 by default; S18.3 authorization does not carry forward.

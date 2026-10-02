@@ -127,3 +127,10 @@ export const station2ContextFunctions = [
 ] as const;
 
 export const ownershipFoundationAdditions = ['platform.schema_migrations'] as const;
+
+export const platformAuthorityFoundationTables = ['platform.platform_admin_assignments'] as const;
+
+export const platformAuthorityFoundationRoutines = [
+  'ledger.current_actor_is_platform_admin()',
+  'ledger.lock_effective_entitlement(p_store_id uuid)',
+] as const;

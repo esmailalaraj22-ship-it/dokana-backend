@@ -9,6 +9,8 @@ import {
   applicationTables,
   applicationViews,
   ownershipFoundationAdditions,
+  platformAuthorityFoundationRoutines,
+  platformAuthorityFoundationTables,
   station2ContextFunctions,
 } from './application-object-inventory';
 
@@ -55,6 +57,7 @@ export async function verifyApplicationInventory(
   let supplierPaymentAllocationFoundationApplied = false;
   let customerReceivableAllocationTargetsApplied = false;
   let saleCustomerCreditTenderApplied = false;
+  let platformAuthorityFoundationApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -103,6 +106,18 @@ export async function verifyApplicationInventory(
       }
       saleCustomerCreditTenderApplied = true;
     }
+
+    const platformAuthorityFoundation = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0016_platform_admin_entitlement_foundation.sql'`,
+    );
+    if (platformAuthorityFoundation.rows[0]) {
+      const file = await readMigrationFile('0016_platform_admin_entitlement_foundation.sql');
+      if (platformAuthorityFoundation.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Platform authority foundation migration checksum mismatch.');
+      }
+      platformAuthorityFoundationApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -147,6 +162,7 @@ export async function verifyApplicationInventory(
     ...(includeFoundation ? ownershipFoundationAdditions : []),
     ...(inventoryFoundationApplied ? ['ledger.manual_inventory_entries'] : []),
     ...(saleCustomerCreditTenderApplied ? ['ledger.sale_customer_credit_applications'] : []),
+    ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -200,6 +216,7 @@ export async function verifyApplicationInventory(
       ...(saleCustomerCreditTenderApplied
         ? ['ledger.validate_sale_customer_credit_application()']
         : []),
+      ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {
