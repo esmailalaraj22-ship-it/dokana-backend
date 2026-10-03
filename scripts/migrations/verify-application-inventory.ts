@@ -12,6 +12,7 @@ import {
   platformAuthorityFoundationRoutines,
   platformAuthorityFoundationTables,
   station2ContextFunctions,
+  subscriptionLifecycleProvisioningRoutines,
 } from './application-object-inventory';
 
 interface RelationRow {
@@ -58,6 +59,7 @@ export async function verifyApplicationInventory(
   let customerReceivableAllocationTargetsApplied = false;
   let saleCustomerCreditTenderApplied = false;
   let platformAuthorityFoundationApplied = false;
+  let subscriptionLifecycleProvisioningApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -117,6 +119,20 @@ export async function verifyApplicationInventory(
         throw new Error('Platform authority foundation migration checksum mismatch.');
       }
       platformAuthorityFoundationApplied = true;
+    }
+
+    const subscriptionLifecycleProvisioning = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0018_subscription_lifecycle_store_provisioning.sql'`,
+    );
+    if (subscriptionLifecycleProvisioning.rows[0]) {
+      const file = await readMigrationFile('0018_subscription_lifecycle_store_provisioning.sql');
+      if (subscriptionLifecycleProvisioning.rows[0].checksum !== file.checksumSha256) {
+        throw new Error(
+          'Subscription lifecycle and Store provisioning migration checksum mismatch.',
+        );
+      }
+      subscriptionLifecycleProvisioningApplied = true;
     }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
@@ -217,6 +233,9 @@ export async function verifyApplicationInventory(
         ? ['ledger.validate_sale_customer_credit_application()']
         : []),
       ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationRoutines : []),
+      ...(subscriptionLifecycleProvisioningApplied
+        ? subscriptionLifecycleProvisioningRoutines
+        : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

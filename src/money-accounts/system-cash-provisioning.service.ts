@@ -38,47 +38,54 @@ export class SystemCashProvisioningService {
 
   ensureForStore(context: TenantTransactionContext): Promise<SystemCashProvisioningResult> {
     return this.database.withBusinessWriteTransaction(context, async (transaction) => {
-      const existing = await this.readCashRows(transaction, context.storeId);
-      if (existing.length > 0) {
-        return requireSingleValidSystemCash(existing);
-      }
-
-      try {
-        const created = await transaction.transaction(async (savepoint) => {
-          const rows = await savepoint
-            .insert(moneyAccounts)
-            .values({
-              id: randomUUID(),
-              storeId: context.storeId,
-              name: SYSTEM_CASH_MONEY_ACCOUNT.name,
-              normalizedName: SYSTEM_CASH_NORMALIZED_NAME,
-              accountType: SYSTEM_CASH_MONEY_ACCOUNT.accountType,
-              availability: SYSTEM_CASH_MONEY_ACCOUNT.availability,
-              isDefault: SYSTEM_CASH_MONEY_ACCOUNT.isDefault,
-              status: 'active',
-              archivedAt: null,
-              deviceId: null,
-              operationId: randomUUID(),
-            })
-            .returning(cashSelection);
-          const row = rows[0];
-          if (!row) {
-            throw new Error('System Cash provisioning did not return a row.');
-          }
-          return row;
-        });
-        return requireSingleValidSystemCash([created]);
-      } catch (error) {
-        if (uniqueConstraint(error) === undefined) {
-          throw error;
-        }
-        const winner = await this.readCashRows(transaction, context.storeId);
-        if (winner.length === 0) {
-          throw new SystemCashInvariantError('cash_identity_conflict');
-        }
-        return requireSingleValidSystemCash(winner);
-      }
+      return this.ensureForStoreInTransaction(transaction, context.storeId);
     });
+  }
+
+  async ensureForStoreInTransaction(
+    transaction: DatabaseTransaction,
+    storeId: string,
+  ): Promise<SystemCashProvisioningResult> {
+    const existing = await this.readCashRows(transaction, storeId);
+    if (existing.length > 0) {
+      return requireSingleValidSystemCash(existing);
+    }
+
+    try {
+      const created = await transaction.transaction(async (savepoint) => {
+        const rows = await savepoint
+          .insert(moneyAccounts)
+          .values({
+            id: randomUUID(),
+            storeId,
+            name: SYSTEM_CASH_MONEY_ACCOUNT.name,
+            normalizedName: SYSTEM_CASH_NORMALIZED_NAME,
+            accountType: SYSTEM_CASH_MONEY_ACCOUNT.accountType,
+            availability: SYSTEM_CASH_MONEY_ACCOUNT.availability,
+            isDefault: SYSTEM_CASH_MONEY_ACCOUNT.isDefault,
+            status: 'active',
+            archivedAt: null,
+            deviceId: null,
+            operationId: randomUUID(),
+          })
+          .returning(cashSelection);
+        const row = rows[0];
+        if (!row) {
+          throw new Error('System Cash provisioning did not return a row.');
+        }
+        return row;
+      });
+      return requireSingleValidSystemCash([created]);
+    } catch (error) {
+      if (uniqueConstraint(error) === undefined) {
+        throw error;
+      }
+      const winner = await this.readCashRows(transaction, storeId);
+      if (winner.length === 0) {
+        throw new SystemCashInvariantError('cash_identity_conflict');
+      }
+      return requireSingleValidSystemCash(winner);
+    }
   }
 
   private readCashRows(

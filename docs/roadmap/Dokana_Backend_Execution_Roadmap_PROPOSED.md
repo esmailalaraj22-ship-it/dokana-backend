@@ -7,8 +7,8 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S18.3 starting checkpoint | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
-| Closed execution history  | Stations S0-S17 and S18.1-S18.3            |
+| S18.4 starting checkpoint | `a4cae2a3ec1eb9bb04dea4672cb5ceb746c78fe2` |
+| Closed execution history  | Stations S0-S17 and S18.1-S18.4            |
 | Current Station           | S18 - Subscription, Licensing, and SaaS    |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S18.3 starting HEAD             | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
-| Starting `origin/main`          | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
+| S18.4 starting HEAD             | `a4cae2a3ec1eb9bb04dea4672cb5ceb746c78fe2` |
+| Starting `origin/main`          | `a4cae2a3ec1eb9bb04dea4672cb5ceb746c78fe2` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
-| Migrations                      | 17 applied, 0 pending                      |
+| Migrations                      | 19 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S17                                        |
-| Current task                    | S18.3 physical/security foundation closed  |
+| Current task                    | S18.4 closed; S18.5 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -834,7 +834,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** OPEN; S18.1-S18.3 CLOSED; S18.4 NEXT / NOT STARTED.
+- **Status:** OPEN; S18.1-S18.4 CLOSED; S18.5 NEXT / NOT STARTED.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -862,20 +862,22 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   controls, and the S8 deterministic Cash provisioner. It does not own shop accounting,
   payment-provider processing, mobile license storage, or business-data synchronization;
   S19 owns sync/bootstrap and consumes the approved entitlement handoff.
-- **Physical readiness:** The historical baseline at
+- **S18.1 physical-readiness finding:** The historical baseline at
   `database/reference/backend_database_reference/shop_ledger_postgresql_v1_all_in_one.sql`
   and the live database contain `platform.subscription_plans`,
   `platform.subscriptions`, `platform.license_issuances`, `platform.admin_actions`, Store
   and device identities, server-time fields, and forced tenant RLS on Subscription and
-  License rows. All 15 migrations are applied with zero pending and preserve those
-  objects. Current Drizzle does not map the S18 platform tables.
-- **Database verdict:** **S18 PHYSICAL FOUNDATION INSUFFICIENT - DATABASE CHANGE
-  REQUIRED, BACKEND-OWNER AUTHORIZATION REQUIRED.** No durable platform-administrator
+  License rows. At that checkpoint all 15 migrations were applied with zero pending and
+  preserved those objects, and Drizzle did not yet map the S18 platform tables.
+- **S18.1 database verdict (resolved by authorized forward migrations):** The initial
+  physical foundation was insufficient because no durable platform-administrator
   authorization identity exists, and no least-privileged transaction-safe database path
   connects entitlement truth to authentication, business-write enforcement, cross-Store
   administration, or append-only administrative audit. Runtime and authentication roles
   correctly have no direct access to the platform subscription tables; broad grants or
-  an administrative runtime connection are prohibited substitutes.
+  an administrative runtime connection remain prohibited substitutes. Authorized
+  migrations 0016-0019 now provide the approved narrow foundation and S18.4 lifecycle
+  authority without broad runtime grants.
 - **Store/Subscription relationship:** Store lifecycle and Subscription lifecycle remain
   separate authorities. `active`, `read_only`, `suspended`, and `archived` Store states
   already drive authenticated access and business-write behavior; S18 must compose those
@@ -1004,19 +1006,38 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18.4 - Central Entitlement and Store Provisioning
 
-- **Status:** NEXT / NOT STARTED.
-- **Function:** Implement plans/subscriptions, activation/extension/cancellation/history,
-  Store/owner provisioning, and S8 Cash provisioning through the approved authority.
-- **Database expectation:** 0 after S18.3.
-- **Closure condition:** Server-time, idempotent, audited lifecycle and provisioning paths
-  pass focused rollback, concurrency, and authorization tests.
+- **Status:** CLOSED.
+- **Delivered:** One-plan MVP Subscription activation, extension, cancellation, expired
+  reactivation, internal lifecycle/history reads, and atomic Store provisioning with the
+  intended initial Owner, required Settings, and reused S8 System Cash authority.
+- **Lifecycle:** PostgreSQL server time controls the half-open entitlement interval. There is
+  no commercial grace, no Store-lifecycle rewrite, and no retroactive entitlement
+  fabrication. Material changes preserve reason, actor, previous/current values, version,
+  and immutable administrative history.
+- **Safety:** Stable operation identity provides exact replay and conflicting-reuse
+  rejection. Store and Subscription remain separate, provisioning is atomic, and real
+  PostgreSQL rollback, duplicate, cross-Store, least-privilege, and concurrency behavior is
+  verified.
+- **Database:** 19 applied / 0 pending. Authorized migration 0018 added five narrow,
+  runtime-executable `SECURITY DEFINER` functions; immutable corrective migration 0019
+  replaced unsupported UUID aggregation with deterministic Owner selection. Applied
+  migrations were not edited. PostgreSQL historical reference delta 0; SQLite delta 0.
+- **Verification:** Focused S18.4 PostgreSQL coverage passed 11/11. Full unit passed
+  1,060/1,060 across 112 suites; broad integration passed 782/782 across 61 suites with no
+  skips. Typecheck, lint, build, changed-file formatting, migration checksum, role,
+  residue, and idle-transaction gates passed.
+- **Deferred:** Public Platform Admin APIs and online session/business-write entitlement
+  integration remain S18.5. The signed seven-day Offline License remains S18.6.
+- **Exit:** Central Subscription lifecycle and Store provisioning are complete. S18.5 is
+  next and not started; S18 remains open. Database, PostgreSQL-reference, and SQLite deltas
+  return to zero by default.
 
 ### S18.5 - Online Entitlement Enforcement and SaaS Administration
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Function:** Enforce effective entitlement centrally at login/refresh/session and
   business-write boundaries; provide least-privileged operational admin reads/actions.
-- **Database expectation:** 0 after S18.3.
+- **Database expectation:** 0 after S18.4.
 - **Closure condition:** Expired entitlement is read-only, suspended/archived access fails
   as approved, and no Platform Admin path can modify tenant accounting.
 
@@ -1025,7 +1046,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 - **Status:** PROPOSED - NOT STARTED.
 - **Function:** Issue and validate bounded signed Store/device licenses, implement
   key/version and renewal/revocation semantics, and freeze the S19 entitlement handoff.
-- **Database expectation:** 0 after S18.3 unless S18.2 approves otherwise.
+- **Database expectation:** 0 after S18.4 unless separately authorized.
 - **Closure condition:** Forgery, copy, expiry, rollback, stale-license, and key-rotation
   cases are covered without implementing mobile storage or synchronization.
 
@@ -1240,7 +1261,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-structure or S18 policy decision is open. S17.1-S17.7 remain closed after
-integrated Customer and Supplier Return verification. S18.1-S18.3 are closed; S18 remains
+integrated Customer and Supplier Return verification. S18.1-S18.4 are closed; S18 remains
 open. The first-Platform-Admin mechanism remains a precise S18.5 implementation requirement:
 controlled deployment/operational bootstrap only, with no public self-promotion or
 Store-role-derived authority.
@@ -1267,14 +1288,15 @@ Store-role-derived authority.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
-| S18.3 starting checkpoint           | `f89741e1366490f3254ad6ee38253c77ac7ec1da` |
-| Safe completed capabilities         | S0-S17 plus S18.1-S18.3                    |
+| S18.4 starting checkpoint           | `a4cae2a3ec1eb9bb04dea4672cb5ceb746c78fe2` |
+| Safe completed capabilities         | S0-S17 plus S18.1-S18.4                    |
 | First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
 | Current Station                     | S18 - OPEN                                 |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
 | S18.3 current status                | CLOSED                                     |
-| S18.4 current status                | NEXT / NOT STARTED                         |
+| S18.4 current status                | CLOSED                                     |
+| S18.5 current status                | NEXT / NOT STARTED                         |
 
-Do not start S18.4 from this document. It requires a separate execution prompt and retains
-database delta 0 by default; S18.3 authorization does not carry forward.
+Do not start S18.5 from this document. It requires a separate execution prompt and retains
+database delta 0 by default; S18.4 authorization does not carry forward.

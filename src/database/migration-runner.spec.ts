@@ -41,6 +41,8 @@ describe('controlled migration runner', () => {
       '0015_sale_customer_credit_tender.sql',
       '0016_platform_admin_entitlement_foundation.sql',
       '0017_platform_entitlement_null_safety.sql',
+      '0018_subscription_lifecycle_store_provisioning.sql',
+      '0019_store_provisioning_owner_selection.sql',
     ]);
   });
 

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '../database/database.service';
 import { appSettings } from '../database/schema';
-import type { TenantTransactionContext } from '../database/database.types';
+import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
 import type { AppSettingsInitializationValues } from './app-settings.types';
 import { MVP_TIMEZONE_NAME } from './app-settings.types';
 
@@ -24,27 +24,37 @@ export class AppSettingsInitializationService {
     this.validate(values);
 
     await this.database.withBusinessWriteTransaction(context, async (transaction) => {
-      await transaction
-        .insert(appSettings)
-        .values({
-          storeId: context.storeId,
-          dailyReportTimeMinutes: values.dailyReportTimeMinutes,
-          defaultCreditPolicy: values.defaultCreditPolicy,
-          defaultCreditLimitMinor: values.defaultCreditLimitMinor,
-          allowNegativeStock: values.allowNegativeStock,
-          lowStockAlertEnabled: values.lowStockAlertEnabled,
-          debtAgeAlertDays: values.debtAgeAlertDays,
-          backupEnabled: values.backupEnabled,
-          backupIntervalHours: values.backupIntervalHours,
-          exportDirectoryUri: null,
-          attachmentsDirectoryUri: null,
-          timezoneName: MVP_TIMEZONE_NAME,
-          businessDayStartMinutes: preparatoryBusinessDayMinutes,
-          businessDayEndMinutes: preparatoryBusinessDayMinutes,
-          businessDayMode: 'fixed_24h',
-        })
-        .onConflictDoNothing({ target: appSettings.storeId });
+      await this.ensureForStoreInTransaction(transaction, context.storeId, values);
     });
+  }
+
+  async ensureForStoreInTransaction(
+    transaction: DatabaseTransaction,
+    storeId: string,
+    values: AppSettingsInitializationValues,
+  ): Promise<void> {
+    this.validate(values);
+
+    await transaction
+      .insert(appSettings)
+      .values({
+        storeId,
+        dailyReportTimeMinutes: values.dailyReportTimeMinutes,
+        defaultCreditPolicy: values.defaultCreditPolicy,
+        defaultCreditLimitMinor: values.defaultCreditLimitMinor,
+        allowNegativeStock: values.allowNegativeStock,
+        lowStockAlertEnabled: values.lowStockAlertEnabled,
+        debtAgeAlertDays: values.debtAgeAlertDays,
+        backupEnabled: values.backupEnabled,
+        backupIntervalHours: values.backupIntervalHours,
+        exportDirectoryUri: null,
+        attachmentsDirectoryUri: null,
+        timezoneName: MVP_TIMEZONE_NAME,
+        businessDayStartMinutes: preparatoryBusinessDayMinutes,
+        businessDayEndMinutes: preparatoryBusinessDayMinutes,
+        businessDayMode: 'fixed_24h',
+      })
+      .onConflictDoNothing({ target: appSettings.storeId });
   }
 
   private validate(input: unknown): asserts input is AppSettingsInitializationValues {

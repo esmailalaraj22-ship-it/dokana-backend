@@ -134,3 +134,11 @@ export const platformAuthorityFoundationRoutines = [
   'ledger.current_actor_is_platform_admin()',
   'ledger.lock_effective_entitlement(p_store_id uuid)',
 ] as const;
+
+export const subscriptionLifecycleProvisioningRoutines = [
+  'ledger.manage_subscription_lifecycle(p_store_id uuid, p_action text, p_operation_id uuid, p_request_hash text, p_reason text)',
+  'ledger.provision_store_identity(p_store_id uuid, p_owner_user_id uuid, p_store_name text, p_store_phone text, p_operation_id uuid, p_request_hash text, p_reason text, p_activate_subscription boolean)',
+  'ledger.read_store_provisioning_state(p_store_id uuid)',
+  'ledger.read_subscription_history(p_store_id uuid)',
+  'ledger.read_subscription_lifecycle(p_store_id uuid)',
+] as const;
