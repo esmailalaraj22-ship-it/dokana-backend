@@ -29,6 +29,7 @@ import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -375,6 +376,9 @@ describe('S12.4 Supplier Invoice lifecycle corrections on isolated PostgreSQL', 
       ],
     );
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set([ownerA.storeId, ownerB.storeId, manager.storeId, readOnlyOwner.storeId]),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)

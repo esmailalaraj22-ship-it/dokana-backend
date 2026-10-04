@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
+import { DatabaseService } from '../database/database.service';
 import { accountingPeriods, stores } from '../database/schema';
 import type { DatabaseTransaction } from '../database/database.types';
 import type { AccountingPeriodRow } from './accounting-period.types';
@@ -23,6 +24,8 @@ const accountingPeriodSelection = {
 
 @Injectable()
 export class AccountingPeriodPostingContextRepository {
+  constructor(private readonly database: DatabaseService) {}
+
   async assertActiveStoreForPosting(
     transaction: DatabaseTransaction,
     storeId: string,
@@ -40,6 +43,7 @@ export class AccountingPeriodPostingContextRepository {
         message: 'Business writes are not allowed.',
       });
     }
+    await this.database.assertBusinessWriteAllowed(transaction, storeId);
   }
 
   async lockCanonicalPeriod(

@@ -22,7 +22,13 @@ import { postgresqlErrorCode } from '../src/money-movements/money-movement-datab
 import { MoneyTransferPostingRepository } from '../src/money-transfers/money-transfer-posting.repository';
 import { MoneyTransferWriteService } from '../src/money-transfers/money-transfer-write.service';
 import type { MoneyTransferMutationResponse } from '../src/money-transfers/money-transfer.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -107,6 +113,7 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
   let writes: MoneyTransferWriteService;
   let repository: MoneyTransferPostingRepository;
   let poolInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   let basicTransfer: MoneyTransferMutationResponse;
 
   function context(key: StoreKey): TenantTransactionContext {
@@ -253,6 +260,8 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       'delete from sync.processed_operations where store_id = any($1::uuid[])',
       [storeIds],
@@ -429,6 +438,7 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
       'rollback destination',
     );
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

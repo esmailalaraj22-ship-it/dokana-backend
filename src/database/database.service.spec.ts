@@ -17,14 +17,9 @@ describe('DatabaseService tenant transactions', () => {
     requestId: '9f97bb10-b68a-4474-888e-7244fc581bcb',
   };
 
-  const execute = jest.fn().mockResolvedValue(undefined);
-  const lockStore = jest.fn().mockResolvedValue([{ status: 'active' }]);
-  const where = jest.fn(() => ({ for: lockStore }));
-  const from = jest.fn(() => ({ where }));
-  const select = jest.fn(() => ({ from }));
+  const execute = jest.fn().mockResolvedValue({ rows: [{ writeEligible: true }] });
   const transaction = {
     execute,
-    select,
   } as unknown as DatabaseTransaction;
   const database = {
     transaction: jest.fn(async (work: (value: DatabaseTransaction) => Promise<unknown>) =>
@@ -42,8 +37,7 @@ describe('DatabaseService tenant transactions', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    execute.mockResolvedValue(undefined);
-    lockStore.mockResolvedValue([{ status: 'active' }]);
+    execute.mockResolvedValue({ rows: [{ writeEligible: true }] });
   });
 
   it('sets every required transaction-local tenant value before work runs', async () => {
@@ -73,23 +67,26 @@ describe('DatabaseService tenant transactions', () => {
 
     await expect(service.withBusinessWriteTransaction(context, work)).resolves.toBe('written');
 
-    expect(execute).toHaveBeenCalledTimes(4);
-    expect(lockStore).toHaveBeenCalledWith('share');
+    expect(execute).toHaveBeenCalledTimes(5);
     expect(work).toHaveBeenCalledTimes(1);
     expect(work).toHaveBeenCalledWith(transaction);
-    const lockCallOrder = lockStore.mock.invocationCallOrder[0];
+    const entitlementCallOrder = execute.mock.invocationCallOrder[4];
     const workCallOrder = work.mock.invocationCallOrder[0];
-    if (lockCallOrder === undefined || workCallOrder === undefined) {
-      throw new Error('Expected the store lock and protected work to be invoked.');
+    if (entitlementCallOrder === undefined || workCallOrder === undefined) {
+      throw new Error('Expected the entitlement check and protected work to be invoked.');
     }
-    expect(lockCallOrder).toBeLessThan(workCallOrder);
+    expect(entitlementCallOrder).toBeLessThan(workCallOrder);
     expect(database.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['read_only', 'suspended', 'archived'])(
-    'denies a %s store before invoking protected work',
-    async (status) => {
-      lockStore.mockResolvedValueOnce([{ status }]);
+  it.each(['read_only', 'suspended', 'archived', 'expired', 'cancelled', 'missing', 'future'])(
+    'denies a %s entitlement before invoking protected work',
+    async () => {
+      execute.mockResolvedValueOnce({ rows: [] });
+      execute.mockResolvedValueOnce({ rows: [] });
+      execute.mockResolvedValueOnce({ rows: [] });
+      execute.mockResolvedValueOnce({ rows: [] });
+      execute.mockResolvedValueOnce({ rows: [{ writeEligible: false }] });
       const work = jest.fn();
 
       await expect(service.withBusinessWriteTransaction(context, work)).rejects.toMatchObject({
@@ -104,12 +101,40 @@ describe('DatabaseService tenant transactions', () => {
   );
 
   it('fails closed when the authoritative store is missing', async () => {
-    lockStore.mockResolvedValueOnce([]);
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
     const work = jest.fn();
 
     await expect(service.withBusinessWriteTransaction(context, work)).rejects.toMatchObject({
       status: 403,
       response: { code: 'BUSINESS_WRITE_NOT_ALLOWED' },
+    });
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it('translates a PostgreSQL tenant-authorization rejection without exposing database details', async () => {
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockRejectedValueOnce(
+      Object.assign(new Error('Failed query'), {
+        cause: Object.assign(new Error('Effective entitlement requires an authorized Store'), {
+          code: '42501',
+        }),
+      }),
+    );
+    const work = jest.fn();
+
+    await expect(service.withBusinessWriteTransaction(context, work)).rejects.toMatchObject({
+      status: 403,
+      response: {
+        code: 'BUSINESS_WRITE_NOT_ALLOWED',
+        message: 'Business writes are not allowed.',
+      },
     });
     expect(work).not.toHaveBeenCalled();
   });
@@ -124,7 +149,7 @@ describe('DatabaseService tenant transactions', () => {
     expect(work).not.toHaveBeenCalled();
   });
 
-  it('does not invoke protected work when tenant setup or store locking fails', async () => {
+  it('does not invoke protected work when tenant setup or entitlement locking fails', async () => {
     const setupWork = jest.fn();
     execute.mockRejectedValueOnce(new Error('context setup failed'));
     await expect(service.withBusinessWriteTransaction(context, setupWork)).rejects.toThrow(
@@ -132,12 +157,16 @@ describe('DatabaseService tenant transactions', () => {
     );
     expect(setupWork).not.toHaveBeenCalled();
 
-    const lockWork = jest.fn();
-    lockStore.mockRejectedValueOnce(new Error('store lock failed'));
-    await expect(service.withBusinessWriteTransaction(context, lockWork)).rejects.toThrow(
-      'store lock failed',
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    execute.mockResolvedValueOnce({ rows: [] });
+    const entitlementWork = jest.fn();
+    execute.mockRejectedValueOnce(new Error('entitlement lock failed'));
+    await expect(service.withBusinessWriteTransaction(context, entitlementWork)).rejects.toThrow(
+      'entitlement lock failed',
     );
-    expect(lockWork).not.toHaveBeenCalled();
+    expect(entitlementWork).not.toHaveBeenCalled();
   });
 });
 

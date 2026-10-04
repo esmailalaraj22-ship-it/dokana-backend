@@ -28,7 +28,13 @@ import {
   SystemCashInvariantError,
 } from '../src/money-accounts/system-cash-invariants';
 import { SystemCashProvisioningService } from '../src/money-accounts/system-cash-provisioning.service';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -222,9 +228,12 @@ describe('Money Account write API and Cash invariants with real PostgreSQL', () 
   let repository: MoneyAccountWriteRepository;
   let moneyAccountWrites: MoneyAccountWriteService;
   let poolsInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   const access = {} as Record<AccessKey, AccessIdentity>;
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       `delete from platform.refresh_tokens where session_id in (
          select id from platform.auth_sessions where user_id = any($1::uuid[])
@@ -577,6 +586,7 @@ describe('Money Account write API and Cash invariants with real PostgreSQL', () 
       );
     }
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

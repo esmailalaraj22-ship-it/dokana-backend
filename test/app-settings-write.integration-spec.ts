@@ -21,7 +21,13 @@ import {
   AppSettingsWriteService,
 } from '../src/settings/app-settings-write.service';
 import type { AppSettingsInitializationValues } from '../src/settings/app-settings.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -175,9 +181,12 @@ describe('App settings write API with real PostgreSQL', () => {
   let settingsRepository: AppSettingsWriteRepository;
   let initializer: AppSettingsInitializationService;
   let poolsInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   const access = {} as Record<AccessKey, AccessIdentity>;
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       `delete from platform.refresh_tokens where session_id in (
          select id from platform.auth_sessions where user_id = any($1::uuid[])
@@ -446,6 +455,7 @@ describe('App settings write API with real PostgreSQL', () => {
       );
     }
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

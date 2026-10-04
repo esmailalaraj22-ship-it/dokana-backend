@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
+import { DatabaseService } from '../database/database.service';
 import { accountingPeriods, stores } from '../database/schema';
 import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
 import { accountingPeriodConflictConstraint } from './accounting-period-database-error';
@@ -40,6 +41,8 @@ export class AccountingPeriodProvisioningConflictError extends Error {
 
 @Injectable()
 export class AccountingPeriodProvisioningRepository {
+  constructor(private readonly database: DatabaseService) {}
+
   async ensure(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
@@ -135,5 +138,6 @@ export class AccountingPeriodProvisioningRepository {
         message: 'Business writes are not allowed.',
       });
     }
+    await this.database.assertBusinessWriteAllowed(transaction, storeId);
   }
 }

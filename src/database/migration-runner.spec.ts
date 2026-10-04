@@ -43,6 +43,7 @@ describe('controlled migration runner', () => {
       '0017_platform_entitlement_null_safety.sql',
       '0018_subscription_lifecycle_store_provisioning.sql',
       '0019_store_provisioning_owner_selection.sql',
+      '0020_platform_admin_store_lifecycle.sql',
     ]);
   });
 

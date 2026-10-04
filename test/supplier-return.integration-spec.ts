@@ -22,6 +22,7 @@ import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -450,6 +451,9 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       authPool = createTestPool(databaseUrl(environment.authUrl), 'dokana-s176-auth', 4);
 
       setupStage = 'compile Nest application';
+      await upgradeInventoryTestDatabaseToCurrent(db(), [
+        ...new Set(identities.map((identity) => identity.storeId)),
+      ]);
       const { AppModule } = await import('../src/app.module');
       const module = await Test.createTestingModule({ imports: [AppModule] })
         .overrideProvider(DATABASE_POOL)

@@ -9,6 +9,7 @@ import {
   applicationTables,
   applicationViews,
   ownershipFoundationAdditions,
+  platformAdminStoreLifecycleRoutines,
   platformAuthorityFoundationRoutines,
   platformAuthorityFoundationTables,
   station2ContextFunctions,
@@ -60,6 +61,7 @@ export async function verifyApplicationInventory(
   let saleCustomerCreditTenderApplied = false;
   let platformAuthorityFoundationApplied = false;
   let subscriptionLifecycleProvisioningApplied = false;
+  let platformAdminStoreLifecycleApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -133,6 +135,18 @@ export async function verifyApplicationInventory(
         );
       }
       subscriptionLifecycleProvisioningApplied = true;
+    }
+
+    const platformAdminStoreLifecycle = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0020_platform_admin_store_lifecycle.sql'`,
+    );
+    if (platformAdminStoreLifecycle.rows[0]) {
+      const file = await readMigrationFile('0020_platform_admin_store_lifecycle.sql');
+      if (platformAdminStoreLifecycle.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Platform Admin Store lifecycle migration checksum mismatch.');
+      }
+      platformAdminStoreLifecycleApplied = true;
     }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
@@ -236,6 +250,7 @@ export async function verifyApplicationInventory(
       ...(subscriptionLifecycleProvisioningApplied
         ? subscriptionLifecycleProvisioningRoutines
         : []),
+      ...(platformAdminStoreLifecycleApplied ? platformAdminStoreLifecycleRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

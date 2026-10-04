@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Pool } from 'pg';
 
 export interface LocalPostgresTestEnvironment {
@@ -7,6 +9,11 @@ export interface LocalPostgresTestEnvironment {
   migrationUrl: string;
   ssl: false | { rejectUnauthorized: true };
   databaseName: string;
+}
+
+export interface ActiveTestEntitlementFixture {
+  subscriptionIds: string[];
+  ownedPlanId: string | null;
 }
 
 const localHostnames = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
@@ -79,4 +86,68 @@ export function createTestPool(
     idle_in_transaction_session_timeout: 15_000,
     allowExitOnIdle: true,
   });
+}
+
+export async function provisionActiveTestEntitlements(
+  pool: Pool,
+  storeIds: readonly string[],
+): Promise<ActiveTestEntitlementFixture> {
+  const plans = await pool.query<{ id: string }>(
+    `select id from platform.subscription_plans where status = 'active' order by id`,
+  );
+  let planId: string;
+  let ownedPlanId: string | null = null;
+  if (plans.rowCount === 0) {
+    planId = randomUUID();
+    ownedPlanId = planId;
+    await pool.query(
+      `insert into platform.subscription_plans (
+         id, code, name, duration_days, price_minor, offline_grace_days, status
+       ) values ($1, $2, 'Integration Test Entitlement', 365, 0, 0, 'active')`,
+      [planId, `integration-${planId}`],
+    );
+  } else if (plans.rowCount === 1 && plans.rows[0]) {
+    planId = plans.rows[0].id;
+  } else {
+    throw new Error('Integration fixtures require exactly one active Subscription plan.');
+  }
+
+  const subscriptionIds: string[] = [];
+  for (const storeId of [...new Set(storeIds)]) {
+    const existing = await pool.query<{ id: string }>(
+      `select id from platform.subscriptions
+       where store_id = $1 and status in ('trial', 'active', 'past_due', 'suspended')`,
+      [storeId],
+    );
+    if (existing.rowCount !== 0) continue;
+    const subscriptionId = randomUUID();
+    await pool.query(
+      `insert into platform.subscriptions (
+         id, store_id, plan_id, status, starts_at, expires_at
+       ) values (
+         $1, $2, $3, 'active', clock_timestamp() - interval '1 day',
+         clock_timestamp() + interval '365 days'
+       )`,
+      [subscriptionId, storeId, planId],
+    );
+    subscriptionIds.push(subscriptionId);
+  }
+  return { subscriptionIds, ownedPlanId };
+}
+
+export async function removeActiveTestEntitlements(
+  pool: Pool,
+  fixture: ActiveTestEntitlementFixture | undefined,
+): Promise<void> {
+  if (!fixture) return;
+  if (fixture.subscriptionIds.length > 0) {
+    await pool.query(`delete from platform.subscriptions where id = any($1::uuid[])`, [
+      fixture.subscriptionIds,
+    ]);
+  }
+  if (fixture.ownedPlanId) {
+    await pool.query(`delete from platform.subscription_plans where id = $1`, [
+      fixture.ownedPlanId,
+    ]);
+  }
 }

@@ -21,7 +21,13 @@ import {
 import { postgresqlErrorCode } from '../src/money-movements/money-movement-database-error';
 import { OwnerLedgerWriteService } from '../src/owner-ledger/owner-ledger-write.service';
 import { OwnerPositionReadService } from '../src/owner-ledger/owner-position-read.service';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -91,6 +97,7 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
   let writes: OwnerLedgerWriteService;
   let positionReads: OwnerPositionReadService;
   let poolInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
 
   function context(key: StoreKey): TenantTransactionContext {
     return {
@@ -233,6 +240,8 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       'delete from sync.processed_operations where store_id = any($1::uuid[])',
       [storeIds],
@@ -376,6 +385,7 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     );
     await insertAccount(fixture.stores.rollback, fixture.accounts.rollback, 'rollback', 'cash');
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

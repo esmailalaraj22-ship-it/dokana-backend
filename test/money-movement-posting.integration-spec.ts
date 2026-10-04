@@ -14,7 +14,13 @@ import type { TenantTransactionContext } from '../src/database/database.types';
 import { MoneyAccountBalanceReadRepository } from '../src/money-movements/money-account-balance-read.repository';
 import { MoneyMovementPostingService } from '../src/money-movements/money-movement-posting.service';
 import type { MoneyMovementEffectInput } from '../src/money-movements/money-movement.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -72,6 +78,7 @@ describe('Money Movement Authority with real PostgreSQL', () => {
   let posting: MoneyMovementPostingService;
   let balances: MoneyAccountBalanceReadRepository;
   let poolInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
 
   function context(key: FixtureKey): TenantTransactionContext {
     return {
@@ -133,6 +140,8 @@ describe('Money Movement Authority with real PostgreSQL', () => {
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       'delete from sync.processed_operations where store_id = any($1::uuid[])',
       [storeIds],
@@ -324,6 +333,7 @@ describe('Money Movement Authority with real PostgreSQL', () => {
       'active',
     );
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

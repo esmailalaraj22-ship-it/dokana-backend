@@ -22,6 +22,7 @@ import {
   setInventoryContext,
   stockCountMigrationFilename,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -175,6 +176,9 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
         [randomUUID(), id.storeId, id.userId, id.role],
       );
     }
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set(identities.map((identity) => identity.storeId)),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)

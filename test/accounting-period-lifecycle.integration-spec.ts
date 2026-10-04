@@ -28,7 +28,13 @@ import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
 import { DatabaseService } from '../src/database/database.service';
 import type { TenantTransactionContext } from '../src/database/database.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 const fixture = {
@@ -310,6 +316,7 @@ describe('Accounting Period provisioning and lifecycle with real PostgreSQL', ()
   let provisioning: AccountingPeriodProvisioningService;
   let periodWrites: AccountingPeriodWriteService;
   let poolsInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   let successfulCloseOperationId: string;
   let successfulCloseResponse: AccountingPeriodMutationResponse;
 
@@ -350,6 +357,8 @@ describe('Accounting Period provisioning and lifecycle with real PostgreSQL', ()
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       'delete from ledger.inventory_movements where store_id = any($1::uuid[])',
       [storeIds],
@@ -538,6 +547,7 @@ describe('Accounting Period provisioning and lifecycle with real PostgreSQL', ()
       await insertPeriod(record);
     }
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

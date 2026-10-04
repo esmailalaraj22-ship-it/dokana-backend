@@ -142,3 +142,9 @@ export const subscriptionLifecycleProvisioningRoutines = [
   'ledger.read_subscription_history(p_store_id uuid)',
   'ledger.read_subscription_lifecycle(p_store_id uuid)',
 ] as const;
+
+export const platformAdminStoreLifecycleRoutines = [
+  'ledger.list_platform_stores(p_after_created_at timestamp with time zone, p_after_store_id uuid, p_limit integer)',
+  'ledger.manage_store_lifecycle(p_store_id uuid, p_action text, p_expected_version bigint, p_operation_id uuid, p_request_hash text, p_reason text)',
+  'ledger.read_store_admin_history(p_store_id uuid, p_after_occurred_at timestamp with time zone, p_after_action_id uuid, p_limit integer)',
+] as const;

@@ -108,6 +108,7 @@ export class InventoryPostingRepository {
           code: 'BUSINESS_WRITE_NOT_ALLOWED',
           message: 'Business writes are not allowed.',
         });
+      await this.database.assertBusinessWriteAllowed(tx, context.storeId);
       let claimed = false;
       try {
         const result = await tx.transaction((sp) =>

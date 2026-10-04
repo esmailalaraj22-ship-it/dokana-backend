@@ -6,7 +6,11 @@ import type { Pool, PoolClient } from 'pg';
 
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import { readMigrationFiles, type MigrationFile } from '../scripts/migrations/migration-files';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+} from './postgresql-test-environment';
 
 export const inventoryMigrationFilename = '0007_inventory_physical_foundation.sql';
 export const stockCountMigrationFilename = '0008_stock_count_zero_establishment.sql';
@@ -142,4 +146,31 @@ export async function setInventoryContext(
     set_config('app.user_id', $3, true), set_config('app.request_id', $4, true)`,
     [storeId, deviceId, userId, randomUUID()],
   );
+}
+
+export async function upgradeInventoryTestDatabaseToCurrent(
+  database: InventoryTestDatabase,
+  storeIds: readonly string[],
+): Promise<void> {
+  const files = await readMigrationFiles();
+  const applied = await database.admin.query<{ filename: string }>(
+    `select filename from platform.schema_migrations order by filename`,
+  );
+  const appliedNames = new Set(applied.rows.map((row) => row.filename));
+
+  for (const migrationFile of files.filter((file) => !appliedNames.has(file.filename))) {
+    if (Number(migrationFile.filename.slice(0, 4)) <= 3) {
+      throw new Error(`Disposable database bootstrap is incomplete: ${migrationFile.filename}.`);
+    }
+    const client = await database.migration.connect();
+    try {
+      await verifyMigrationSession(client);
+      await applyMigration(client, migrationFile);
+    } finally {
+      await client.query('reset role');
+      client.release();
+    }
+  }
+
+  await provisionActiveTestEntitlements(database.admin, storeIds);
 }

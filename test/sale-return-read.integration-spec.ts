@@ -26,6 +26,7 @@ import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -375,6 +376,9 @@ describe('S17.4 tenant-safe Return reads on isolated PostgreSQL', () => {
     runtimePool = createTestPool(databaseUrl(environment.runtimeUrl), 'dokana-s174-runtime', 8);
     authPool = createTestPool(databaseUrl(environment.authUrl), 'dokana-s174-auth', 3);
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set(identities.map((identity) => identity.storeId)),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)

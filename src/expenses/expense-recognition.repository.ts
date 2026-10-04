@@ -447,6 +447,7 @@ export class ExpenseRecognitionRepository {
         message: 'Business writes are not allowed.',
       });
     }
+    await this.database.assertBusinessWriteAllowed(transaction, storeId);
   }
 
   private async readProcessedOperation(

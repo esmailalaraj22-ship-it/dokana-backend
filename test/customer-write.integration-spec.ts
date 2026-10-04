@@ -17,7 +17,13 @@ import { normalizeCustomerName } from '../src/customers/customer-normalization';
 import { decodeCustomerCursor } from '../src/customers/customer-read-cursor';
 import type { CustomerListResponse } from '../src/customers/customer-read.types';
 import type { CustomerMutationResponse } from '../src/customers/customer-write.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 const fixture = {
@@ -177,6 +183,7 @@ describe('Customer mutation API with real PostgreSQL', () => {
   let adminPool: Pool;
   let runtimeInspectionPool: Pool;
   let poolsInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   let access: Record<'a' | 'b' | 'readOnly', AccessIdentity>;
 
   const storeIds = Object.values(fixture.stores);
@@ -273,6 +280,8 @@ describe('Customer mutation API with real PostgreSQL', () => {
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await clearStoreBusinessData();
     await adminPool.query(`delete from platform.auth_sessions where user_id = any($1::uuid[])`, [
       userIds,
@@ -546,6 +555,7 @@ describe('Customer mutation API with real PostgreSQL', () => {
       ],
     );
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     const nestApp = module.createNestApplication<NestExpressApplication>({ bodyParser: false });

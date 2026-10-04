@@ -22,6 +22,7 @@ import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -478,6 +479,9 @@ describe('S17.5 immutable Sale Return corrections on isolated PostgreSQL', () =>
     runtimePool = createTestPool(databaseUrl(environment.runtimeUrl), 'dokana-s175-runtime', 10);
     authPool = createTestPool(databaseUrl(environment.authUrl), 'dokana-s175-auth', 3);
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set(identities.map((identity) => identity.storeId)),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)

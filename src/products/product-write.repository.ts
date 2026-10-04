@@ -914,6 +914,7 @@ export class ProductWriteRepository {
         message: 'Business writes are not allowed.',
       });
     }
+    await this.database.assertBusinessWriteAllowed(transaction, context.storeId);
   }
 
   private async readProcessedOperation(

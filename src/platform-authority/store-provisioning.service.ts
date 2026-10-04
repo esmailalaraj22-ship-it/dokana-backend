@@ -7,6 +7,7 @@ import { isUuid } from '../common/logging/request-id';
 import { DatabaseService } from '../database/database.service';
 import { SystemCashProvisioningService } from '../money-accounts/system-cash-provisioning.service';
 import { AppSettingsInitializationService } from '../settings/app-settings-initialization.service';
+import type { PlatformActorContext } from './platform-authority.types';
 import { SubscriptionLifecycleRepository } from './subscription-lifecycle.repository';
 import type {
   PlatformProvisioningActorContext,
@@ -63,6 +64,12 @@ export class StoreProvisioningService {
         state,
       };
     });
+  }
+
+  readState(context: PlatformActorContext) {
+    return this.database.withTenantTransaction(context, (transaction) =>
+      this.repository.readProvisioningState(transaction, context.storeId),
+    );
   }
 
   private prepare(command: StoreProvisioningCommand): PreparedStoreProvisioning {

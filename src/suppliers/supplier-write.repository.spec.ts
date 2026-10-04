@@ -45,7 +45,7 @@ const createInput: PreparedSupplierCreate = {
 
 interface RepositoryHarness {
   repository: SupplierWriteRepository;
-  database: { withTenantTransaction: jest.Mock };
+  database: { withTenantTransaction: jest.Mock; assertBusinessWriteAllowed: jest.Mock };
   execute: jest.Mock;
   insert: jest.Mock;
   insertValues: jest.Mock;
@@ -95,6 +95,7 @@ function createHarness(current: SupplierMutationRow = row): RepositoryHarness {
         work: (value: DatabaseTransaction) => Promise<unknown>,
       ) => work(transaction),
     ),
+    assertBusinessWriteAllowed: jest.fn().mockResolvedValue(undefined),
   };
 
   return {

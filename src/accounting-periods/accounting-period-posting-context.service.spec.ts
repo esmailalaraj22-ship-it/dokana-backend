@@ -62,7 +62,7 @@ describe('AccountingPeriodPostingContextService', () => {
     >
   >;
   const service = new AccountingPeriodPostingContextService(
-    repository,
+    repository as unknown as AccountingPeriodPostingContextRepository,
     provisioning as unknown as AccountingPeriodProvisioningService,
   );
 

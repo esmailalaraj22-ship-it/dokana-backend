@@ -12,7 +12,13 @@ import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
 import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -122,9 +128,12 @@ describe('Product write API with real PostgreSQL', () => {
   let app: NestExpressApplication | undefined;
   let server: Server;
   let poolsInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   const access = {} as AccessMap;
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       `delete from sync.processed_operations where store_id = any($1::uuid[])`,
       [storeIdList],
@@ -280,6 +289,7 @@ describe('Product write API with real PostgreSQL', () => {
       ],
     );
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIdList);
     const { AppModule } = await import('../src/app.module');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

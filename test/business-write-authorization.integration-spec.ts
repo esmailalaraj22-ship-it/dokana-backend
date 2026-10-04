@@ -14,7 +14,13 @@ import type {
   DatabaseTransaction,
   TenantTransactionContext,
 } from '../src/database/database.types';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -54,6 +60,7 @@ describe('Store-level business-write authorization', () => {
   let adminPool: Pool;
   let runtimePool: Pool;
   let databaseService: DatabaseService;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
   let poolsInitialized = false;
 
   async function removeFixtureEffects(): Promise<void> {
@@ -143,6 +150,10 @@ describe('Store-level business-write authorization', () => {
       `,
       [storeIds.primary, storeIds.other],
     );
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, [
+      storeIds.primary,
+      storeIds.other,
+    ]);
 
     const database = drizzle(runtimePool, {
       casing: 'snake_case',
@@ -170,6 +181,7 @@ describe('Store-level business-write authorization', () => {
       return;
     }
     await removeFixtureEffects();
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
     await adminPool.query(`delete from ledger.stores where id = any($1::uuid[])`, [
       [storeIds.primary, storeIds.other],
     ]);

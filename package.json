@@ -24,6 +24,7 @@
     "test:cov": "jest --config test/jest.unit.config.cjs --runInBand --coverage",
     "db:provision:station3": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/provision-station3-roles.ps1",
     "auth:configure:local": "tsx scripts/configure-local-auth.ts",
+    "platform:bootstrap-admin": "tsx scripts/bootstrap-platform-admin.ts",
     "db:migrate:bootstrap:check": "tsx scripts/bootstrap-migration-foundation.ts verify",
     "db:migrate:bootstrap": "tsx scripts/bootstrap-migration-foundation.ts",
     "db:migrate:bootstrap:auth-schema:check": "tsx scripts/bootstrap-authentication-schema.ts verify",

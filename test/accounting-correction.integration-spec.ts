@@ -24,7 +24,13 @@ import { deriveMoneyFactId } from '../src/money-movements/money-movement-identit
 import { MoneyTransferWriteService } from '../src/money-transfers/money-transfer-write.service';
 import { OwnerLedgerPostingRepository } from '../src/owner-ledger/owner-ledger-posting.repository';
 import { OwnerLedgerWriteService } from '../src/owner-ledger/owner-ledger-write.service';
-import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import {
+  createTestPool,
+  provisionActiveTestEntitlements,
+  readLocalPostgresTestEnvironment,
+  removeActiveTestEntitlements,
+  type ActiveTestEntitlementFixture,
+} from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
 
@@ -128,6 +134,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
   let correctionRepository: AccountingCorrectionPostingRepository;
   let ownerPosting: OwnerLedgerPostingRepository;
   let poolInitialized = false;
+  let entitlementFixture: ActiveTestEntitlementFixture | undefined;
 
   function context(key: StoreKey): TenantTransactionContext {
     return {
@@ -246,6 +253,8 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
   }
 
   async function removeFixtures(): Promise<void> {
+    await removeActiveTestEntitlements(adminPool, entitlementFixture);
+    entitlementFixture = undefined;
     await adminPool.query(
       'delete from sync.processed_operations where store_id = any($1::uuid[])',
       [storeIds],
@@ -437,6 +446,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       'liability concurrent bank',
     );
 
+    entitlementFixture = await provisionActiveTestEntitlements(adminPool, storeIds);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PARAMS_PROVIDER_TOKEN)

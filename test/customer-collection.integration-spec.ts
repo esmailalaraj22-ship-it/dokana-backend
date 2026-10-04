@@ -40,6 +40,7 @@ import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -442,6 +443,9 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
       );
     }
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set(identities.map((identity) => identity.storeId)),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)

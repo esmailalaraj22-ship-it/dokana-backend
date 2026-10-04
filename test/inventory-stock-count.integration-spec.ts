@@ -23,6 +23,7 @@ import {
   setInventoryContext,
   stockCountMigrationFilename,
   type InventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
@@ -79,6 +80,7 @@ describe('S11.5 Stock Counts on isolated real PostgreSQL', () => {
   let runtimePool: Pool | undefined;
   let authPool: Pool | undefined;
   let migrationEvidence: Record<string, unknown> | undefined;
+  let migrationRegistration: { count: number; migration: string | null } | undefined;
 
   function db(): InventoryTestDatabase {
     if (!database) throw new Error('Isolated Stock Count database is unavailable.');
@@ -271,6 +273,13 @@ describe('S11.5 Stock Counts on isolated real PostgreSQL', () => {
       );
       await applyMigration(migrator, db().file);
       migrationEvidence = { inside: inside.rows[0], rolledBack: rolledBack.rows[0] };
+      migrationRegistration = (
+        await migrator.query<{ count: number; migration: string | null }>(
+          `select count(*)::int as count,
+             min(filename) filter (where filename like '0008%') as migration
+           from platform.schema_migrations`,
+        )
+      ).rows[0];
     } finally {
       await migrator.query('rollback');
       await migrator.query('reset role');
@@ -305,6 +314,9 @@ describe('S11.5 Stock Counts on isolated real PostgreSQL', () => {
       );
     }
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [
+      ...new Set(identities.map((identity) => identity.storeId)),
+    ]);
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_POOL)
@@ -366,14 +378,7 @@ describe('S11.5 Stock Counts on isolated real PostgreSQL', () => {
 
   it('applies 0008 transactionally and preserves forced RLS and least privilege', async () => {
     expect(migrationEvidence).toEqual({ inside: { present: true }, rolledBack: { absent: true } });
-    expect(
-      (
-        await db().admin.query(
-          `select count(*)::int as count, min(filename) filter (where filename like '0008%') as migration
-           from platform.schema_migrations`,
-        )
-      ).rows[0],
-    ).toEqual({ count: 8, migration: stockCountMigrationFilename });
+    expect(migrationRegistration).toEqual({ count: 8, migration: stockCountMigrationFilename });
     expect(
       (
         await db().admin.query(

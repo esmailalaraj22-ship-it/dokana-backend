@@ -5,14 +5,13 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import type { Pool, QueryConfig } from 'pg';
 
 import { AppConfigService } from '../config/app-config.service';
 import { isUuid } from '../common/logging/request-id';
 import { DATABASE_POOL, DRIZZLE_DATABASE } from './database.constants';
-import { stores } from './schema';
 import type {
   DatabaseClient,
   DatabaseReadiness,
@@ -38,6 +37,13 @@ interface RuntimeRoleInspection {
   hasAuthenticationSchemaAccess: boolean;
   hasGlobalIdentityTableAccess: boolean;
   ownsProtectedTables: boolean;
+}
+
+function postgresqlErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  if ('code' in error && typeof error.code === 'string') return error.code;
+  if ('cause' in error && error.cause !== error) return postgresqlErrorCode(error.cause);
+  return undefined;
 }
 
 class UnsafeRuntimeDatabaseRoleError extends Error {
@@ -144,21 +150,37 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     work: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
     return this.withTenantTransaction(context, async (transaction) => {
-      // FOR SHARE is the weakest row lock that conflicts with a normal status UPDATE.
-      const storeState = await transaction
-        .select({ status: stores.status })
-        .from(stores)
-        .where(eq(stores.id, context.storeId))
-        .for('share');
-
-      if (storeState[0]?.status !== 'active') {
-        throw new ForbiddenException({
-          code: 'BUSINESS_WRITE_NOT_ALLOWED',
-          message: 'Business writes are not allowed.',
-        });
-      }
+      await this.assertBusinessWriteAllowed(transaction, context.storeId);
 
       return work(transaction);
+    });
+  }
+
+  async assertBusinessWriteAllowed(
+    transaction: DatabaseTransaction,
+    storeId: string,
+  ): Promise<void> {
+    let result;
+    try {
+      result = await transaction.execute(sql`
+        select write_eligible as "writeEligible"
+        from ledger.lock_effective_entitlement(${storeId}::uuid)
+      `);
+    } catch (error) {
+      if (postgresqlErrorCode(error) !== '42501') throw error;
+      this.throwBusinessWriteNotAllowed();
+    }
+    const authority = result.rows[0] as { writeEligible?: unknown } | undefined;
+
+    if (authority?.writeEligible !== true) {
+      this.throwBusinessWriteNotAllowed();
+    }
+  }
+
+  private throwBusinessWriteNotAllowed(): never {
+    throw new ForbiddenException({
+      code: 'BUSINESS_WRITE_NOT_ALLOWED',
+      message: 'Business writes are not allowed.',
     });
   }
 
