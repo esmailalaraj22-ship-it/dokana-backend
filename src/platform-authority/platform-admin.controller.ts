@@ -11,6 +11,13 @@ import {
 } from '@nestjs/common';
 
 import { AuthenticationGuard, type AuthenticatedRequest } from '../auth/authentication.guard';
+import {
+  OfflineLicenseAdminListQueryDto,
+  OfflineLicenseAdminParamDto,
+  OfflineLicenseAdminStoreParamDto,
+  RevokeOfflineLicenseDto,
+} from '../offline-licenses/dto/offline-license-admin.dto';
+import { OfflineLicenseAdminService } from '../offline-licenses/offline-license-admin.service';
 import { PlatformAdminListQueryDto } from './dto/platform-admin-list-query.dto';
 import { PlatformAdminProvisionStoreDto } from './dto/platform-admin-provision-store.dto';
 import {
@@ -28,7 +35,10 @@ import { PlatformAdminService } from './platform-admin.service';
 @Controller('admin/stores')
 @UseGuards(AuthenticationGuard, PlatformAdminGuard)
 export class PlatformAdminController {
-  constructor(private readonly administration: PlatformAdminService) {}
+  constructor(
+    private readonly administration: PlatformAdminService,
+    private readonly licenses: OfflineLicenseAdminService,
+  ) {}
 
   @Get()
   listStores(
@@ -107,5 +117,24 @@ export class PlatformAdminController {
       params.action,
       body,
     );
+  }
+
+  @Get(':storeId/licenses')
+  listLicenses(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: OfflineLicenseAdminStoreParamDto,
+    @Query() query: OfflineLicenseAdminListQueryDto,
+  ): Promise<unknown> {
+    return this.licenses.list(request.tenantContext, params.storeId, query);
+  }
+
+  @Post(':storeId/licenses/:licenseId/revoke')
+  @HttpCode(200)
+  revokeLicense(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: OfflineLicenseAdminParamDto,
+    @Body() body: RevokeOfflineLicenseDto,
+  ): Promise<unknown> {
+    return this.licenses.revoke(request.tenantContext, params.storeId, params.licenseId, body);
   }
 }

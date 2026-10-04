@@ -29,6 +29,12 @@ export interface AuthenticationTokenConfig {
   sessionTtlSeconds: number;
 }
 
+export interface OfflineLicenseSigningConfig {
+  activeKeyId: string;
+  activePrivateKeyPkcs8: string;
+  publicKeys: Readonly<Record<string, string>>;
+}
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly config: ConfigService<Environment, true>) {}
@@ -118,6 +124,20 @@ export class AppConfigService {
         infer: true,
       }),
       sessionTtlSeconds: this.config.get('AUTH_SESSION_TTL_SECONDS', { infer: true }),
+    };
+  }
+
+  get offlineLicenseSigning(): OfflineLicenseSigningConfig {
+    const publicKeys: unknown = JSON.parse(
+      this.config.get('OFFLINE_LICENSE_PUBLIC_KEYS', { infer: true }),
+    );
+
+    return {
+      activeKeyId: this.config.get('OFFLINE_LICENSE_ACTIVE_KEY_ID', { infer: true }),
+      activePrivateKeyPkcs8: this.config.get('OFFLINE_LICENSE_ACTIVE_PRIVATE_KEY_PKCS8', {
+        infer: true,
+      }),
+      publicKeys: publicKeys as Readonly<Record<string, string>>,
     };
   }
 }

@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S18.5 starting HEAD             | `50cc6cfa76f204a232ff03262f722efc8a5399fd` |
-| Starting `origin/main`          | `50cc6cfa76f204a232ff03262f722efc8a5399fd` |
+| S18.6 starting HEAD             | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
+| Starting `origin/main`          | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
-| Migrations                      | 20 applied, 0 pending                      |
+| Migrations                      | 21 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S17                                        |
-| Current task                    | S18.5 closed; S18.6 next / not started     |
+| Current task                    | S18.6 closed; S18.7 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -834,7 +834,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** OPEN; S18.1-S18.5 CLOSED; S18.6 NEXT / NOT STARTED.
+- **Status:** OPEN; S18.1-S18.6 CLOSED; S18.7 NEXT / NOT STARTED.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -952,10 +952,10 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   administrative-audit objects are mapped in Drizzle; administrative audit is immutable.
   Migration 0016 introduced the authorized foundation and migration 0017 corrected its
   demonstrated missing-Subscription NULL result to fail closed without altering 0016.
-  PostgreSQL historical references and SQLite remain unchanged. The seven-day Offline
-  License remains S18.6 work. S18.5 provides a controlled deployment/operational bootstrap
-  for the first Platform Admin without public registration, email inference, Store-role
-  promotion, or a migration-seeded person.
+  PostgreSQL historical references and SQLite remain unchanged. S18.6 now provides the
+  signed seven-day Offline License and exact S19 entitlement handoff. S18.5 provides a
+  controlled deployment/operational bootstrap for the first Platform Admin without public
+  registration, email inference, Store-role promotion, or a migration-seeded person.
 
 ### S18.1 - Orientation, Database Readiness, and Stage Decomposition
 
@@ -1066,16 +1066,38 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18.6 - Signed Offline License and S19 Handoff
 
-- **Status:** NEXT / NOT STARTED.
-- **Function:** Issue and validate bounded signed Store/device licenses, implement
-  key/version and renewal/revocation semantics, and freeze the S19 entitlement handoff.
-- **Database expectation:** 0 after S18.5 unless separately authorized.
-- **Closure condition:** Forgery, copy, expiry, rollback, stale-license, and key-rotation
-  cases are covered without implementing mobile storage or synchronization.
+- **Status:** CLOSED.
+- **Delivered:** Dokana remains Offline-First and does not require continuous Internet.
+  Successful central verification issues a deterministic, versioned Ed25519 License bound
+  to the active Store, registered device, Subscription identity/version, and signing-key
+  version. The backend-only private key is secret-configured; retained public keys support
+  safe verification across rotation.
+- **Entitlement:** Authoritative server timestamps cap each License at the earlier of seven
+  actual days or the central Subscription end. Renewal always revalidates current Store,
+  Subscription, and device state. The exclusive expiry boundary and clock-rollback contract
+  require future clients to become read-only and revalidate online; a local clock cannot
+  extend entitlement.
+- **Revocation and S19:** Central revocation prevents future trust/renewal but cannot claim
+  instant delivery to a disconnected device. The S19 handoff distinguishes validly licensed
+  in-window operations, which remain entitlement-eligible after later License or Subscription
+  expiry, from post-expiry, mismatched, unknown, invalid, or revoked evidence that must be
+  rejected or quarantined. SQLite storage and business synchronization remain S19 scope.
+- **Database:** 21 applied / 0 pending. Backend-owner-authorized migration 0021 adds only five
+  narrow, non-PUBLIC `SECURITY DEFINER` functions over the existing License foundation. It
+  preserves forced RLS, direct platform-table/sequence denial, runtime least privilege, and
+  the Platform Admin accounting firewall. PostgreSQL reference and SQLite deltas are 0.
+- **Verification:** Focused signature/time/handoff unit coverage passed 21/21; focused real
+  PostgreSQL licensing coverage passed 8/8; targeted S18 regression passed 46/46; security
+  passed 15/15. Full unit passed 1,102/1,102 across 118 suites and broad integration passed
+  797/797 across 63 suites, with no skips. Typecheck, lint, build, changed-file formatting,
+  migration checksum, role, residue, and idle-transaction gates passed.
+- **Exit:** Signed Offline Licensing and the S19 entitlement handoff are complete. S18.7 is
+  next and not started; S18 remains open. Database, PostgreSQL-reference, and SQLite deltas
+  return to zero by default.
 
 ### S18.7 - Final Platform Security Verification and Closure
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Function:** Perform integrated migration, RLS, role, session/write, license, audit,
   concurrency, and accounting-firewall verification and close S18.
 - **Database expectation:** 0.
@@ -1284,7 +1306,7 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-structure or S18 policy decision is open. S17.1-S17.7 remain closed after
-integrated Customer and Supplier Return verification. S18.1-S18.5 are closed; S18 remains
+integrated Customer and Supplier Return verification. S18.1-S18.6 are closed; S18 remains
 open. The first Platform Admin is created only through the controlled, non-public S18.5
 operational bootstrap, with no public self-promotion or Store-role-derived authority.
 
@@ -1310,8 +1332,8 @@ operational bootstrap, with no public self-promotion or Store-role-derived autho
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
-| S18.5 starting checkpoint           | `50cc6cfa76f204a232ff03262f722efc8a5399fd` |
-| Safe completed capabilities         | S0-S17 plus S18.1-S18.5                    |
+| S18.6 starting checkpoint           | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
+| Safe completed capabilities         | S0-S17 plus S18.1-S18.6                    |
 | First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
 | Current Station                     | S18 - OPEN                                 |
 | S18.1 current status                | CLOSED                                     |
@@ -1319,7 +1341,8 @@ operational bootstrap, with no public self-promotion or Store-role-derived autho
 | S18.3 current status                | CLOSED                                     |
 | S18.4 current status                | CLOSED                                     |
 | S18.5 current status                | CLOSED                                     |
-| S18.6 current status                | NEXT / NOT STARTED                         |
+| S18.6 current status                | CLOSED                                     |
+| S18.7 current status                | NEXT / NOT STARTED                         |
 
-Do not start S18.6 from this document. It requires a separate execution prompt and retains
-database delta 0 by default; S18.5 authorization does not carry forward.
+Do not start S18.7 from this document. It requires a separate execution prompt and retains
+database delta 0 by default; S18.6 authorization does not carry forward.

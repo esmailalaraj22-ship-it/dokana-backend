@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { AuthenticationModule } from '../auth/auth.module';
 import { MoneyAccountsModule } from '../money-accounts/money-accounts.module';
+import { OfflineLicensesModule } from '../offline-licenses/offline-licenses.module';
 import { SettingsModule } from '../settings/settings.module';
 import { PlatformAuthorityService } from './platform-authority.service';
 import { PlatformAdminController } from './platform-admin.controller';
@@ -14,7 +15,13 @@ import { SubscriptionLifecycleRepository } from './subscription-lifecycle.reposi
 import { SubscriptionLifecycleService } from './subscription-lifecycle.service';
 
 @Module({
-  imports: [AuthenticationModule, DatabaseModule, MoneyAccountsModule, SettingsModule],
+  imports: [
+    AuthenticationModule,
+    DatabaseModule,
+    MoneyAccountsModule,
+    OfflineLicensesModule,
+    SettingsModule,
+  ],
   controllers: [PlatformAdminController],
   providers: [
     PlatformAuthorityService,

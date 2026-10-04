@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { MoneyAccountsModule } from './money-accounts/money-accounts.module';
 import { MoneyMovementsModule } from './money-movements/money-movements.module';
 import { MoneyTransfersModule } from './money-transfers/money-transfers.module';
+import { OfflineLicensesModule } from './offline-licenses/offline-licenses.module';
 import { OwnerLedgerModule } from './owner-ledger/owner-ledger.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { ProductsModule } from './products/products.module';
@@ -34,6 +35,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     MoneyAccountsModule,
     MoneyMovementsModule,
     MoneyTransfersModule,
+    OfflineLicensesModule,
     OwnerLedgerModule,
     PlatformAuthorityModule,
     CustomersModule,

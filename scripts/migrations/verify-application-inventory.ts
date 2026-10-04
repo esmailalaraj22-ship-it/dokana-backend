@@ -8,6 +8,7 @@ import {
   applicationSequences,
   applicationTables,
   applicationViews,
+  offlineLicenseAuthorityRoutines,
   ownershipFoundationAdditions,
   platformAdminStoreLifecycleRoutines,
   platformAuthorityFoundationRoutines,
@@ -62,6 +63,7 @@ export async function verifyApplicationInventory(
   let platformAuthorityFoundationApplied = false;
   let subscriptionLifecycleProvisioningApplied = false;
   let platformAdminStoreLifecycleApplied = false;
+  let offlineLicenseAuthorityApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -147,6 +149,18 @@ export async function verifyApplicationInventory(
         throw new Error('Platform Admin Store lifecycle migration checksum mismatch.');
       }
       platformAdminStoreLifecycleApplied = true;
+    }
+
+    const offlineLicenseAuthority = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0021_offline_license_authority.sql'`,
+    );
+    if (offlineLicenseAuthority.rows[0]) {
+      const file = await readMigrationFile('0021_offline_license_authority.sql');
+      if (offlineLicenseAuthority.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Offline License authority migration checksum mismatch.');
+      }
+      offlineLicenseAuthorityApplied = true;
     }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
@@ -251,6 +265,7 @@ export async function verifyApplicationInventory(
         ? subscriptionLifecycleProvisioningRoutines
         : []),
       ...(platformAdminStoreLifecycleApplied ? platformAdminStoreLifecycleRoutines : []),
+      ...(offlineLicenseAuthorityApplied ? offlineLicenseAuthorityRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

@@ -148,3 +148,11 @@ export const platformAdminStoreLifecycleRoutines = [
   'ledger.manage_store_lifecycle(p_store_id uuid, p_action text, p_expected_version bigint, p_operation_id uuid, p_request_hash text, p_reason text)',
   'ledger.read_store_admin_history(p_store_id uuid, p_after_occurred_at timestamp with time zone, p_after_action_id uuid, p_limit integer)',
 ] as const;
+
+export const offlineLicenseAuthorityRoutines = [
+  'ledger.complete_offline_license(p_store_id uuid, p_license_id uuid, p_operation_id uuid, p_request_hash text, p_signature text)',
+  'ledger.list_offline_licenses(p_store_id uuid, p_limit integer)',
+  'ledger.prepare_offline_license(p_store_id uuid, p_device_id uuid, p_license_id uuid, p_operation_id uuid, p_request_hash text, p_key_id text)',
+  'ledger.read_offline_license_for_validation(p_store_id uuid, p_device_id uuid, p_license_id uuid)',
+  'ledger.revoke_offline_license(p_store_id uuid, p_license_id uuid, p_operation_id uuid, p_request_hash text, p_reason text)',
+] as const;

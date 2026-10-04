@@ -1,4 +1,14 @@
+import { generateKeyPairSync } from 'node:crypto';
+
 import { validateEnvironment } from './environment';
+
+const offlineLicenseKeys = generateKeyPairSync('ed25519');
+const offlineLicensePrivateKey = offlineLicenseKeys.privateKey
+  .export({ format: 'der', type: 'pkcs8' })
+  .toString('base64url');
+const offlineLicensePublicKey = offlineLicenseKeys.publicKey
+  .export({ format: 'der', type: 'spki' })
+  .toString('base64url');
 
 const minimumEnvironment = {
   DATABASE_URL: 'postgresql://runtime:password@localhost:5432/dokana',
@@ -6,6 +16,11 @@ const minimumEnvironment = {
   DATABASE_SSL_MODE: 'disable',
   AUTH_ACCESS_TOKEN_ACTIVE_KID: 'test-v1',
   AUTH_ACCESS_TOKEN_ACTIVE_SECRET: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  OFFLINE_LICENSE_ACTIVE_KEY_ID: 'offline-test-v1',
+  OFFLINE_LICENSE_ACTIVE_PRIVATE_KEY_PKCS8: offlineLicensePrivateKey,
+  OFFLINE_LICENSE_PUBLIC_KEYS: JSON.stringify({
+    'offline-test-v1': offlineLicensePublicKey,
+  }),
 };
 
 describe('validateEnvironment', () => {
@@ -88,5 +103,14 @@ describe('validateEnvironment', () => {
         }),
       }),
     ).toThrow('must not contain the active key ID');
+  });
+
+  it('requires the active Offline License key in the public verification set', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        OFFLINE_LICENSE_PUBLIC_KEYS: JSON.stringify({ historical: offlineLicensePublicKey }),
+      }),
+    ).toThrow('must contain the active Offline License key ID');
   });
 });

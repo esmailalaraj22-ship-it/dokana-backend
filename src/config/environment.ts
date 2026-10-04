@@ -68,6 +68,54 @@ const previousSigningKeysSchema = z
     }
   });
 
+const offlineLicensePrivateKeySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]+$/, 'must be unpadded base64url PKCS8 DER')
+  .refine((value) => Buffer.from(value, 'base64url').byteLength >= 48, {
+    message: 'must contain an Ed25519 PKCS8 private key',
+  });
+
+function parseOfflineLicensePublicKeys(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+const offlineLicensePublicKeysSchema = z.string().superRefine((value, context) => {
+  const parsed = parseOfflineLicensePublicKeys(value);
+  if (!parsed || Object.keys(parsed).length === 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'must be a non-empty JSON object of key IDs to base64url SPKI public keys',
+    });
+    return;
+  }
+
+  for (const [keyId, publicKey] of Object.entries(parsed)) {
+    if (!signingKeyIdSchema.safeParse(keyId).success) {
+      context.addIssue({ code: 'custom', message: 'contains an invalid key ID' });
+      return;
+    }
+    if (
+      typeof publicKey !== 'string' ||
+      !/^[A-Za-z0-9_-]+$/.test(publicKey) ||
+      Buffer.from(publicKey, 'base64url').byteLength < 32
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'contains an invalid base64url SPKI public key',
+      });
+      return;
+    }
+  }
+});
+
 const booleanStringSchema = z.enum(['true', 'false']).transform((value) => value === 'true');
 
 const corsOriginsSchema = z
@@ -147,6 +195,9 @@ export const environmentSchema = z
       .max(2_678_400)
       .default(2_592_000),
     AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().min(3_600).max(2_678_400).default(2_592_000),
+    OFFLINE_LICENSE_ACTIVE_KEY_ID: signingKeyIdSchema,
+    OFFLINE_LICENSE_ACTIVE_PRIVATE_KEY_PKCS8: offlineLicensePrivateKeySchema,
+    OFFLINE_LICENSE_PUBLIC_KEYS: offlineLicensePublicKeysSchema,
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(2_000),
   })
   .superRefine((environment, context) => {
@@ -174,6 +225,15 @@ export const environmentSchema = z
         code: 'custom',
         path: ['AUTH_REFRESH_TOKEN_TTL_SECONDS'],
         message: 'must not exceed AUTH_SESSION_TTL_SECONDS',
+      });
+    }
+
+    const publicKeys = parseOfflineLicensePublicKeys(environment.OFFLINE_LICENSE_PUBLIC_KEYS);
+    if (publicKeys?.[environment.OFFLINE_LICENSE_ACTIVE_KEY_ID] === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['OFFLINE_LICENSE_PUBLIC_KEYS'],
+        message: 'must contain the active Offline License key ID',
       });
     }
   });
