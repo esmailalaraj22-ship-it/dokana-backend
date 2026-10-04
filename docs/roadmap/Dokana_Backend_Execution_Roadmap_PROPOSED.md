@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S18.5 starting checkpoint | `50cc6cfa76f204a232ff03262f722efc8a5399fd` |
-| Closed execution history  | Stations S0-S17 and S18.1-S18.5            |
-| Current Station           | S18 - Subscription, Licensing, and SaaS    |
+| S18.7 starting checkpoint | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
+| Closed execution history  | Stations S0-S18                            |
+| Current Station           | S19 - Offline Sync and Data Bootstrap      |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,22 +61,22 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S18.6 starting HEAD             | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
-| Starting `origin/main`          | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
+| S18.7 starting HEAD             | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
+| Starting `origin/main`          | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 21 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S17                                        |
-| Current task                    | S18.6 closed; S18.7 next / not started     |
+| Last fully closed Station       | S18                                        |
+| Current task                    | S18 closed; S19 next / not started         |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S17
+## 5. Completed Stations S0-S18
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -101,9 +101,10 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S15 - Customer Collections, Credits, and Settlement     | CLOSED | Customer collections, Sale/Opening allocation, overpayment/advance Credit, refunds, non-cash settlement, Sale Credit tender, and immutable active-leaf correction chains                | Historical customer collection, credit, and settlement authority   | Current Customer financial implementation, tests, and migrations `0014`-`0015`                                                                                                                                                                                        |
 | S16 - Expenses and Expense Payments                     | CLOSED | Expense Category lifecycle; DUE, immediate Money-paid, and Owner-funded recognition; later settlement; derived outstanding; immutable Expense/Payment corrections and operational reads | Historical expense recognition and settlement authority            | Current Expense implementation, tests, and S9/S10 posting authorities                                                                                                                                                                                                 |
 | S17 - Returns and Cross-Domain Corrections              | CLOSED | Customer Sale Returns, Supplier financial Returns, settlement/inventory orchestration, tenant-safe reads, replay, dependency protection, and immutable correction chains                | Historical returns and cross-domain correction orchestration       | Current Return implementation and S17.1-S17.7 verification                                                                                                                                                                                                            |
+| S18 - Subscription, Offline Licensing, and SaaS Admin   | CLOSED | Platform Admin, Store and Subscription lifecycle, central online entitlement, signed Offline Licenses, revocation, immutable admin audit, and the S19 entitlement handoff               | Historical subscriptions, licenses, and SaaS administration        | Current S18 implementation, migrations `0016`-`0021`, and S18.3-S18.7 verification                                                                                                                                                                                    |
 
-The safe completed boundary does not include subscription lifecycle, generic
-synchronization, reporting, or recovery.
+The safe completed boundary does not include generic synchronization, reporting, or
+recovery.
 
 ## 6. Historical Roadmap Reconciliation
 
@@ -112,9 +113,9 @@ synchronization, reporting, or recovery.
 | Repository/reference assessment         | DONE                    | S0                                                                      | None                                                   | None                  |
 | PostgreSQL runtime validation           | DONE                    | S1                                                                      | Final release revalidation                             | S23                   |
 | NestJS infrastructure                   | DONE                    | S2                                                                      | Domain-specific extensions                             | Respective Stations   |
-| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S17                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
-| Identity/platform core                  | PARTIAL, SPLIT          | S3-S4                                                                   | Subscription, licensing, store/device administration   | S18                   |
-| Subscriptions/licenses                  | PARTIAL, STILL REQUIRED | Auth and store-status enforcement                                       | Full subscription and offline-license lifecycle        | S18                   |
+| Drizzle schema and migration foundation | PARTIAL, ABSORBED       | S3-S18                                                                  | Incremental domain mappings and versioned migrations   | Respective Stations   |
+| Identity/platform core                  | SPLIT, COMPLETE         | S3-S4 and S18                                                           | None                                                   | None                  |
+| Subscriptions/licenses                  | DONE                    | S18                                                                     | None                                                   | None                  |
 | Master data                             | SPLIT, COMPLETE         | Customers S4, Products S5, Suppliers S6, Settings S7, Money Accounts S8 | None                                                   | None                  |
 | Sales/receivables                       | SPLIT, COMPLETE         | Sale/receivable origination S14; collections and settlement S15         | None                                                   | None                  |
 | Supplier invoices/payables              | SPLIT, COMPLETE         | Supplier invoice/payable recognition S12; settlement S13                | None                                                   | None                  |
@@ -123,7 +124,7 @@ synchronization, reporting, or recovery.
 | Returns/corrections/periods             | SPLIT, COMPLETE         | Period controls S9, same-domain corrections S10-S16, Returns S17        | None                                                   | None                  |
 | Sync engine                             | PARTIAL, STILL REQUIRED | UUID, operation, replay, and change-event foundations                   | Generic push/pull/conflicts/bootstrap                  | S19                   |
 | Backup/bootstrap/restore                | SPLIT, STILL REQUIRED   | Auth/device bootstrap only                                              | Business-data bootstrap with sync, recovery separately | S19, S22              |
-| Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure                                            | SaaS admin, reports, audit access, notifications       | S18, S20-S21          |
+| Reports/audit/admin                     | PARTIAL, SPLIT          | Central audit infrastructure and SaaS administration S18                | Reports, audit access, notifications                   | S20-S21               |
 | Final validation                        | STILL REQUIRED          | Per-Station verification                                                | Cross-domain release gate                              | S23                   |
 
 Historical numbering is discovery evidence, not a dependency constraint. The current
@@ -834,7 +835,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18 - Subscription, Offline Licensing, and SaaS Administration
 
-- **Status:** OPEN; S18.1-S18.6 CLOSED; S18.7 NEXT / NOT STARTED.
+- **Status:** CLOSED; S18.1-S18.7 CLOSED.
 - **Purpose:** Complete central subscription, signed offline license, and platform
   administration lifecycle.
 - **Distinct boundary:** Platform administration uses server-only identity and licensing
@@ -1097,16 +1098,38 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S18.7 - Final Platform Security Verification and Closure
 
-- **Status:** NEXT / NOT STARTED.
-- **Function:** Perform integrated migration, RLS, role, session/write, license, audit,
-  concurrency, and accounting-firewall verification and close S18.
-- **Database expectation:** 0.
-- **Closure condition:** Independent high-risk review is approved, S19 handoff is frozen,
-  and S18 is formally closed by the backend owner.
+- **Status:** CLOSED.
+- **Integrated access:** Central Subscription remains the ultimate entitlement authority
+  while Store lifecycle remains separate. An otherwise active Store with invalid
+  entitlement retains permitted reads but cannot perform online business writes or obtain
+  a new Offline License. `read_only`, `suspended`, and `archived` restrictions remain
+  stronger, and restoration does not activate or extend a Subscription.
+- **Security:** Platform Admin authority remains durable, active-assignment based, audited,
+  idempotent, and separate from Store roles and accounting authority. The controlled first
+  Platform Admin bootstrap remains non-public. Runtime has no broad platform-table or
+  sequence access; S18 `SECURITY DEFINER` functions retain pinned `search_path`, narrow
+  execution grants, forced RLS, tenant isolation, and the accounting firewall.
+- **Offline entitlement:** Dokana remains Offline-First and requires no continuous Internet.
+  Ed25519 Licenses remain Store/device/Subscription-version bound, capped at the earlier of
+  seven actual days or Subscription end, based on authoritative server time. Backend-only
+  private-key custody, key rotation, exact expiry, rollback-safe read-only behavior, durable
+  central revocation, and the limits of disconnected revocation were verified.
+- **S19 handoff:** In-window licensed operations remain entitlement-eligible for later S19
+  evaluation after subsequent License or Subscription expiry. Post-expiry, mismatched,
+  unknown, invalid, or revoked evidence remains distinguishable for rejection or quarantine;
+  tenant, idempotency, stale-write, accounting, and conflict decisions remain S19 scope.
+- **Verification:** Focused S18 unit coverage passed 36/36 across six suites; focused real
+  PostgreSQL integration passed 62/62 across six suites; security passed 15/15. Full unit
+  passed 1,102/1,102 across 118 suites and broad integration passed 797/797 across 63 suites,
+  with zero skips or failures. Typecheck, lint, build, role connections, migration checksum,
+  11/11 reference verification, residue, idle transactions, and repository hygiene passed.
+- **Database:** 21 applied / 0 pending. S18.7 added no migration or database change;
+  PostgreSQL-reference and SQLite deltas are 0.
+- **Exit:** S18 is closed. S19 is next and not started.
 
 ### S19 - Offline Sync and Consistent Data Bootstrap
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT / NOT STARTED.
 - **Purpose:** Provide deterministic convergence between SQLite clients and PostgreSQL.
 - **Distinct boundary:** Generic push/pull, conflict, cursor, and snapshot consistency are
   cross-domain infrastructure built after mutation contracts stabilize.
@@ -1227,26 +1250,26 @@ S19 + stable schema/contracts -> S22
 S7..S22 -> S23
 ```
 
-S18 is an independent platform branch after S3/S4 but must close before generic sync and
-release. S7 and S8 closed as independent foundations in dependency-correct order. The
+S18 closed as an independent platform branch after S3/S4 and now permits generic sync to
+begin after separate approval. S7 and S8 closed as independent foundations in
+dependency-correct order. The
 remaining graph has no dependency cycle and places no consumer before its required
 foundation.
 
 ## 13. Deferred and Future-Owned Work
 
-| Deferred capability                      | Reason                                    | Future owner |
-| ---------------------------------------- | ----------------------------------------- | ------------ |
-| Period controls                          | Required before posting                   | S9           |
-| Money/owner ledger/opening balances      | Requires accounts and periods             | S10          |
-| Inventory/costing/opening stock          | Requires Products, settings, and periods  | S11          |
-| Sales/receivables/collections            | Requires inventory, money, and periods    | S14-S15      |
-| Expenses                                 | Requires money/owner authority            | S16          |
-| Subscription/license/SaaS administration | Store-status enforcement is only partial  | S18          |
-| Generic sync/business-data bootstrap     | Mutation contracts must stabilize         | S19          |
-| Reports/search/export/OpenAPI debt       | Requires authoritative domain data        | S20          |
-| Notifications/attachments/audit access   | Requires stable causes and permissions    | S21          |
-| Backup/restore/recovery                  | Requires sync/bootstrap and stable schema | S22          |
-| Final release validation                 | Requires all capabilities                 | S23          |
+| Deferred capability                    | Reason                                    | Future owner |
+| -------------------------------------- | ----------------------------------------- | ------------ |
+| Period controls                        | Required before posting                   | S9           |
+| Money/owner ledger/opening balances    | Requires accounts and periods             | S10          |
+| Inventory/costing/opening stock        | Requires Products, settings, and periods  | S11          |
+| Sales/receivables/collections          | Requires inventory, money, and periods    | S14-S15      |
+| Expenses                               | Requires money/owner authority            | S16          |
+| Generic sync/business-data bootstrap   | Mutation contracts must stabilize         | S19          |
+| Reports/search/export/OpenAPI debt     | Requires authoritative domain data        | S20          |
+| Notifications/attachments/audit access | Requires stable causes and permissions    | S21          |
+| Backup/restore/recovery                | Requires sync/bootstrap and stable schema | S22          |
+| Final release validation               | Requires all capabilities                 | S23          |
 
 The Station 3 sync observation remains owned by S19. Existing non-blocking
 machine-readable Customer/OpenAPI documentation debt is assigned to S20 with final
@@ -1306,15 +1329,15 @@ authorize editing or replaying the baseline or changing the read-only reference 
 ## 16. Open Roadmap-Level Owner Decisions
 
 No roadmap-structure or S18 policy decision is open. S17.1-S17.7 remain closed after
-integrated Customer and Supplier Return verification. S18.1-S18.6 are closed; S18 remains
-open. The first Platform Admin is created only through the controlled, non-public S18.5
-operational bootstrap, with no public self-promotion or Store-role-derived authority.
+integrated Customer and Supplier Return verification. S18.1-S18.7 and S18 are closed. The
+first Platform Admin is created only through the controlled, non-public S18.5 operational
+bootstrap, with no public self-promotion or Store-role-derived authority.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S17 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S18 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S18-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S19-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -1331,18 +1354,20 @@ operational bootstrap, with no public self-promotion or Store-role-derived autho
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S17 - Returns and Cross-Domain Corrections |
-| S18.6 starting checkpoint           | `6597c9d8a5bc3630c503ab9e6917f82de9f329d4` |
-| Safe completed capabilities         | S0-S17 plus S18.1-S18.6                    |
-| First incomplete release dependency | S18 - Subscription, Licensing, and SaaS    |
-| Current Station                     | S18 - OPEN                                 |
+| Last fully closed Station           | S18 - Subscription, Licensing, and SaaS    |
+| S18.7 starting checkpoint           | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
+| Safe completed capabilities         | S0-S18                                     |
+| First incomplete release dependency | S19 - Offline Sync and Data Bootstrap      |
+| Current Station                     | S19 - NEXT / NOT STARTED                   |
+| S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
 | S18.3 current status                | CLOSED                                     |
 | S18.4 current status                | CLOSED                                     |
 | S18.5 current status                | CLOSED                                     |
 | S18.6 current status                | CLOSED                                     |
-| S18.7 current status                | NEXT / NOT STARTED                         |
+| S18.7 current status                | CLOSED                                     |
+| S19 current status                  | NEXT / NOT STARTED                         |
 
-Do not start S18.7 from this document. It requires a separate execution prompt and retains
-database delta 0 by default; S18.6 authorization does not carry forward.
+Do not start S19 from this document. It requires a separate orientation and execution
+prompt and retains database, PostgreSQL-reference, and SQLite deltas at 0 by default.
