@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S18.7 starting checkpoint | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
-| Closed execution history  | Stations S0-S18                            |
-| Current Station           | S19 - Offline Sync and Data Bootstrap      |
+| S19.1 starting checkpoint | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
+| Closed execution history  | Stations S0-S18; S19.1 orientation         |
+| Current Station           | S19 - OPEN; S19.2 next / not started       |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S18.7 starting HEAD             | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
-| Starting `origin/main`          | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
+| S19.1 starting HEAD             | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
+| Starting `origin/main`          | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 21 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S18                                        |
-| Current task                    | S18 closed; S19 next / not started         |
+| Current task                    | S19.1 closed; S19.2 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -1129,7 +1129,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S19 - Offline Sync and Consistent Data Bootstrap
 
-- **Status:** NEXT / NOT STARTED.
+- **Status:** OPEN; S19.1 CLOSED; S19.2 NEXT / NOT STARTED.
 - **Purpose:** Provide deterministic convergence between SQLite clients and PostgreSQL.
 - **Distinct boundary:** Generic push/pull, conflict, cursor, and snapshot consistency are
   cross-domain infrastructure built after mutation contracts stabilize.
@@ -1141,11 +1141,126 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 - **Explicit non-scope:** Mobile sync implementation, backup file storage, silent
   last-write-wins, and rewriting domain business rules.
 - **Coverage:** PRD offline synchronization and new-device data bootstrap.
-- **Known risks/migrations:** Generic events may use `update` while processed operations
-  retain business actions such as `restore`; sync must not assume they are equal.
-- **Start condition:** S4-S18 mutation contracts are stable and sync protocol approved.
+- **S19.1 readiness finding:** Current sync implementation is partial. PostgreSQL has
+  forced-RLS operation, change-event, cursor, conflict, dead-letter, and bootstrap metadata
+  tables, and domain mutations already provide substantial idempotency, deterministic fact
+  identity, stale-write protection, and reversal/correction authority. No generic sync API,
+  operation dispatcher, bootstrap service, pull service, conflict service, or sync Drizzle
+  mapping exists.
+- **Sync unit:** Use a hybrid protocol. Push typed, versioned domain operations through the
+  existing server business authorities; pull/bootstrap versioned and allow-listed
+  authoritative aggregate or read-model representations referenced by a durable change
+  feed. Raw rows, balances, totals, costs, signs, subscription state, audit, and projections
+  are never accepted as client authority.
+- **PostgreSQL/SQLite parity:** Required offline parity includes Store/settings and the
+  permitted local identity subset, catalogs, periods needed for validation, inventory,
+  Supplier financial workflows, Customer financial workflows, Expenses, Returns, and the
+  Offline License representation. Auth/session internals, central Subscription and Platform
+  Admin authority, RLS, security-definer functions, central audit, and sync ledgers remain
+  server-only. SQLite outbox, inbox receipts, cursor/checkpoint state, trusted-time cache,
+  and local file state remain client-only.
+- **Deferred SQLite findings:** Migration `0012` tracked versus untracked Sale-line support
+  is sufficient. Migration `0013` historical inventory reversal support is partial.
+  Migration `0014` Opening Receivable allocation targets and migration `0015` Sale Customer
+  Credit tender support are missing. The S18 local-license shape is partial and requires a
+  versioned client contract for current key, Subscription, binding, and verification state.
+  The mobile repository owns Drift/SQLite implementation; this backend reference remains
+  read-only unless separately authorized.
+- **Identity and mutation readiness:** Direct client UUIDs are supported for mutable master
+  data; accounting periods use an approved deterministic UUIDv5 exception; most S10-S17
+  posted facts use deterministic UUIDv5 derivation from `operationId`. Manual Inventory and
+  Stock Count roots/effects still use server-random identities and need an approved offline
+  identity contract. Existing canonical request hashing, exact replay, changed-payload
+  rejection, expected versions, and immutable correction chains are reusable but require a
+  generic protocol registry.
+- **Offline operation envelope direction:** Freeze in S19.2 a bounded envelope containing
+  protocol and operation versions, `operationId`, allow-listed operation type, aggregate ID
+  where applicable, optional `expectedVersion`, client-recorded time, monotonic device
+  sequence, explicit dependencies only where needed, typed payload, and S18 License and
+  trusted-time evidence. Store and device assertions must match authenticated server context;
+  request hashes are calculated by the server, and business date remains domain payload.
+- **Offline eligibility direction:** Core financial and operational mutations may be
+  candidates for offline capture, including Sales, Customer settlement, Expenses and
+  payments, Manual Inventory, Supplier invoices and settlement, Returns, and approved money
+  operations. Settings, catalog lifecycle, and opening-state operations remain admin/setup
+  pending the S19.2 allow-list decision. Accounting-period close, Store/Subscription/License
+  administration, Platform Admin, authentication, and device bootstrap remain online-only.
+- **S18 handoff:** The signed License establishes Store/device/Subscription binding and a
+  bounded historical entitlement window. Late arrival after central expiry may remain
+  entitlement-eligible. The current validation service is reusable but does not yet compose
+  License validation, operation claim, and domain effects in one transaction, and
+  client-recorded creation time is not cryptographic proof. Revoked, unknown, mismatched,
+  outside-window, and clock-rollback cases remain rejected or quarantined according to the
+  frozen S18 classification. Later Store suspension requires an owner policy before push.
+- **Bootstrap direction:** Produce one dependency-ordered snapshot under a single
+  `REPEATABLE READ`, read-only PostgreSQL view and bind it to a safe base cursor. Stream or
+  chunk that same snapshot with schema/protocol/checksum metadata; the client builds staging
+  SQLite state and exposes it atomically only after complete verification, then pulls after
+  the base cursor. MVP restart may repeat the snapshot; durable multi-request resume requires
+  separate physical authorization if selected.
+- **Push direction:** Accept bounded batches but commit and acknowledge each operation
+  independently. Preserve device order and explicit dependencies; perform authentication,
+  License evidence, operation claim/replay, dependency/version checks, domain authority,
+  accounting effects, change capture, and audit atomically. Results distinguish apply,
+  exact replay, final rejection, dependency retry, quarantine, and user resolution.
+- **Pull/cursor direction:** Use an explicit store-scoped durable change feed rather than
+  `updated_at` scans. The current global identity cursor is not commit-order safe because a
+  later sequence value may commit before an earlier value. S19.6 must introduce a safe
+  per-Store committed order or equivalent watermark and versioned, sanitized domain change
+  coverage before pull is correct.
+- **Conflict and lifecycle direction:** Never use last-write-wins. Exact operation replay is
+  accepted; changed replay and invalid historical entitlement are rejected; missing
+  dependencies retry; stale versions, archived references, and conflicting correction chains
+  require rejection, quarantine, or explicit user resolution. Archive, restore, deactivate,
+  reverse, and replace are durable state transitions; no generic hard-delete or tombstone is
+  introduced while physical business deletion remains prohibited. A generic event action may
+  be `update` while `processed_operations` retains a business action such as `restore`.
+- **Accounting authority:** Sync transports commands and authoritative representations, not
+  client-calculated balances. Money and Inventory movements, receivable/payable histories,
+  immutable posted facts, and reversal/replacement chains remain authoritative; projections
+  are reconstructed or delivered only as server-approved read models.
+- **Database verdict:** S19 physical foundation is partially insufficient. S19.5 may require
+  a narrow transaction-locking entitlement authority so License/Store/device validation can
+  compose atomically with the domain write. S19.6 requires commit-ordered per-Store change
+  sequencing and complete versioned/sanitized domain change coverage. S19.7 may require a
+  targeted conflict/dead-letter contract change after S19.2 freezes dispositions. S19.4 may
+  require persistent snapshot support only if restartable multi-request bootstrap is chosen.
+  Each need requires separate evidence and authorization; S19.1 changes no database.
+- **Security direction:** Authenticate and bind Store/device server-side; verify signed
+  License evidence against central issuance; enforce forced RLS and cross-tenant references;
+  canonicalize operation identity; bound batches and payloads; allow-list protocol and
+  operation versions; preserve expected-version and correction rules; quarantine suspicious
+  clock, dependency, sequence, or local-state evidence.
+- **Start condition:** S4-S18 mutation contracts are stable. S19.1 orientation is complete;
+  S19.2 must freeze the protocol and operation allow-list before implementation.
 - **Closure intent:** Gap-free, duplicate-free, auditable server synchronization and
   consistent data bootstrap.
+
+#### S19.1 - Orientation, Sync Readiness, and Stage Decomposition
+
+- **Status:** CLOSED.
+- **Purpose:** Inventory existing foundations, parity gaps, accounting boundaries, security
+  risks, and physical needs, then define the executable S19 stages.
+- **Owned scope:** Read-only repository/database analysis and this Roadmap update.
+- **Explicit non-scope:** Sync code, migrations, SQLite changes, and protocol implementation.
+- **Expected DB impact:** None; verified 21 applied / 0 pending.
+- **Expected SQLite impact:** None.
+- **Entry dependencies:** S18 closed and S4-S18 mutation contracts stable.
+- **Exit criteria:** Readiness verdict, architecture direction, owner decisions, and S19.2-
+  S19.9 boundaries are recorded.
+
+#### S19.2-S19.9 - Approved Execution Decomposition
+
+| Stage                                                          | Status             | Purpose and owned scope                                                                                                                                                                           | Explicit non-scope                                                    | Expected DB impact                                                                                | Expected SQLite impact                                                                                          | Entry dependencies                                  | Exit criteria                                                                                      |
+| -------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| S19.2 - Sync Protocol and Offline Operation Contract Freeze    | NEXT / NOT STARTED | Freeze versions, operation allow-list, canonical envelope/hash, identity registry, acknowledgements, dependency and conflict dispositions, entitlement evidence, limits, and compatibility policy | Runtime endpoints and persistence changes                             | None                                                                                              | None; define mobile contract only                                                                               | S19.1 and owner decisions below                     | One reviewed protocol contract defines every supported operation and outcome                       |
+| S19.3 - SQLite/Drift Parity Contract and Mobile Handoff        | NOT STARTED        | Map every offline operation and representation, resolve `0013`-`0015` and S18 License gaps, and publish a versioned mobile migration/compatibility handoff                                        | Flutter/Drift implementation in this repository or reference rewrites | None expected                                                                                     | Mobile repository migrations required; backend SQLite/reference delta remains zero unless separately authorized | S19.2                                               | Lossless, dependency-correct parity and upgrade requirements are testable                          |
+| S19.4 - Consistent Initial Bootstrap                           | NOT STARTED        | Implement authenticated dependency-ordered `REPEATABLE READ` bootstrap, safe base cursor, streaming/checksum metadata, restart, and failure semantics                                             | Backup storage and incremental push/pull                              | None for restart-from-zero MVP; targeted support only if durable resumable snapshots are approved | Mobile staging, verification, and atomic swap belong to the mobile implementation                               | S19.2-S19.3 and cursor contract                     | A device can establish one internally consistent local state and continue from its cursor          |
+| S19.5 - Offline Operation Push and Server Application          | NOT STARTED        | Implement bounded push, per-operation transactions, S18 evidence, claim/replay, dependency/version checks, typed domain dispatch, and deterministic acknowledgements                              | Pull, broad conflict UI, or accounting redesign                       | Targeted least-privilege entitlement/locking support may be required after proof                  | Mobile outbox/envelope upgrade belongs to the mobile implementation                                             | S19.2-S19.4 and approved DB authorization if needed | Supported operations apply once, replay exactly, fail atomically, and preserve domain authority    |
+| S19.6 - Commit-Ordered Incremental Pull and Change Propagation | NOT STARTED        | Implement safe Store ordering/watermark, typed sanitized change coverage, pagination, resume, and archive/correction propagation                                                                  | `updated_at` polling or raw internal-row exposure                     | Targeted migration required for commit-safe ordering and change coverage                          | Mobile inbox/cursor application belongs to the mobile implementation                                            | S19.2-S19.5                                         | Pull is gap-free, duplicate-safe, bounded, resumable, and dependency-correct                       |
+| S19.7 - Conflict, Retry, Recovery, and Quarantine              | NOT STARTED        | Implement durable retry/dead-letter/conflict outcomes, dependency release, clock/sequence quarantine, user-resolution records, and recovery APIs                                                  | Silent last-write-wins or destructive repair                          | Possible narrow conflict/dead-letter change after contract proof                                  | Mobile retry/quarantine state belongs to the mobile implementation                                              | S19.5-S19.6                                         | Every non-success outcome is deterministic, auditable, and recoverable or final                    |
+| S19.8 - Cross-Domain Offline Accounting Verification           | NOT STARTED        | Verify Sales, Customer and Supplier settlement, Expenses, Inventory, Returns, Money, periods, corrections, and projections across disconnect/retry/concurrency                                    | New accounting behavior                                               | None expected; defects require separate authorization                                             | Actual SQLite-backed end-to-end fixtures required outside production data                                       | S19.3-S19.7                                         | Offline convergence preserves every authoritative movement, ledger, period, and reversal invariant |
+| S19.9 - Integrated Offline Sync Verification and S19 Closure   | NOT STARTED        | Run final protocol, security, RLS, concurrency, failure, bootstrap, push/pull, parity, regression, documentation, and repository-hygiene gates                                                    | S20 reporting, S21 support features, or S22 backup                    | None expected                                                                                     | No new mobile scope; verify agreed compatibility evidence                                                       | S19.2-S19.8 complete and independently reviewed     | S19 closes with gap-free, duplicate-free, tenant-safe, auditable convergence evidence              |
 
 ### S20 - Dashboard, Reports, Search, Documents, and Export
 
@@ -1328,16 +1443,33 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure or S18 policy decision is open. S17.1-S17.7 remain closed after
-integrated Customer and Supplier Return verification. S18.1-S18.7 and S18 are closed. The
-first Platform Admin is created only through the controlled, non-public S18.5 operational
-bootstrap, with no public self-promotion or Store-role-derived authority.
+No roadmap-structure or S18 policy decision is open. S17 and S18 remain closed. S19.1 found
+three product/security decisions that must be frozen in S19.2 before implementation:
+
+1. **Offline creation-time trust.** A signed License proves the allowed interval but cannot
+   cryptographically prove that a mutable local timestamp was recorded honestly. Safe
+   options are bounded MVP trust with monotonic device sequence and last-ack anchoring,
+   tamper-evident chain/attestation, or quarantine of all delayed writes. The recommended
+   MVP default is bounded trust with sequence/checkpoint validation and quarantine for gaps,
+   rollback, or inconsistent trusted-time evidence, with the residual local-tampering risk
+   stated explicitly.
+2. **Later Store suspension.** A legitimately created operation remains entitlement-eligible
+   after License expiry, but S18 did not authorize applying it after later Store suspension.
+   Safe options are reject, apply, or quarantine pending restoration/administrative
+   resolution. The recommended default is quarantine: preserve the operation without
+   bypassing the central suspension.
+3. **Offline admin/setup scope.** Core operational postings are offline candidates, while
+   accounting-period close and Store/Subscription/License/Platform administration stay
+   online-only. The owner must decide whether settings/catalog lifecycle and opening-state
+   operations enter the initial offline allow-list. The recommended default is to exclude
+   them from the first release and add each only after domain-specific parity and conflict
+   proof.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
 - Completed Stations S0-S18 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S19-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S19.2-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -1355,10 +1487,10 @@ bootstrap, with no public self-promotion or Store-role-derived authority.
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S18 - Subscription, Licensing, and SaaS    |
-| S18.7 starting checkpoint           | `2dd6cef742cf286cbe2de47ef8957d7a11911ee0` |
+| S19.1 starting checkpoint           | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
 | Safe completed capabilities         | S0-S18                                     |
 | First incomplete release dependency | S19 - Offline Sync and Data Bootstrap      |
-| Current Station                     | S19 - NEXT / NOT STARTED                   |
+| Current Station                     | S19 - OPEN                                 |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -1367,7 +1499,10 @@ bootstrap, with no public self-promotion or Store-role-derived authority.
 | S18.5 current status                | CLOSED                                     |
 | S18.6 current status                | CLOSED                                     |
 | S18.7 current status                | CLOSED                                     |
-| S19 current status                  | NEXT / NOT STARTED                         |
+| S19 current status                  | OPEN                                       |
+| S19.1 current status                | CLOSED                                     |
+| S19.2 current status                | NEXT / NOT STARTED                         |
+| S19.3-S19.9 current status          | NOT STARTED                                |
 
-Do not start S19 from this document. It requires a separate orientation and execution
-prompt and retains database, PostgreSQL-reference, and SQLite deltas at 0 by default.
+Do not start S19.2 from this document. It requires a separate execution prompt and retains
+database, PostgreSQL-reference, and SQLite deltas at 0 by default.
