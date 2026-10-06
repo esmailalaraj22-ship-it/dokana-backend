@@ -7,9 +7,9 @@
 | Status                    | **APPROVED - ACTIVE EXECUTION ROADMAP**    |
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
-| S19.1 starting checkpoint | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
-| Closed execution history  | Stations S0-S18; S19.1 orientation         |
-| Current Station           | S19 - OPEN; S19.2 next / not started       |
+| S19.2 starting checkpoint | `094e28bde7150b1df2a9321c7d7a63b0254af365` |
+| Closed execution history  | Stations S0-S18; S19.1-S19.2               |
+| Current Station           | S19 - OPEN; S19.3 next / not started       |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -61,15 +61,15 @@ The roadmap was reconstructed against this verified state:
 | Check                           | Verified state                             |
 | ------------------------------- | ------------------------------------------ |
 | Branch                          | `main`                                     |
-| S19.1 starting HEAD             | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
-| Starting `origin/main`          | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
+| S19.2 starting HEAD             | `094e28bde7150b1df2a9321c7d7a63b0254af365` |
+| Starting `origin/main`          | `094e28bde7150b1df2a9321c7d7a63b0254af365` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree                    | Clean                                      |
 | Migrations                      | 21 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S18                                        |
-| Current task                    | S19.1 closed; S19.2 next / not started     |
+| Current task                    | S19.2 closed; S19.3 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -1129,7 +1129,7 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 
 ### S19 - Offline Sync and Consistent Data Bootstrap
 
-- **Status:** OPEN; S19.1 CLOSED; S19.2 NEXT / NOT STARTED.
+- **Status:** OPEN; S19.1-S19.2 CLOSED; S19.3 NEXT / NOT STARTED.
 - **Purpose:** Provide deterministic convergence between SQLite clients and PostgreSQL.
 - **Distinct boundary:** Generic push/pull, conflict, cursor, and snapshot consistency are
   cross-domain infrastructure built after mutation contracts stabilize.
@@ -1186,12 +1186,13 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   pending the S19.2 allow-list decision. Accounting-period close, Store/Subscription/License
   administration, Platform Admin, authentication, and device bootstrap remain online-only.
 - **S18 handoff:** The signed License establishes Store/device/Subscription binding and a
-  bounded historical entitlement window. Late arrival after central expiry may remain
-  entitlement-eligible. The current validation service is reusable but does not yet compose
-  License validation, operation claim, and domain effects in one transaction, and
-  client-recorded creation time is not cryptographic proof. Revoked, unknown, mismatched,
-  outside-window, and clock-rollback cases remain rejected or quarantined according to the
-  frozen S18 classification. Later Store suspension requires an owner policy before push.
+  bounded historical entitlement window. Late arrival after central expiry or later Store
+  suspension remains entitlement-eligible when evidence proves valid offline creation before
+  the device learned of suspension; it still must pass every domain and accounting rule. The
+  current validation service is reusable but does not yet compose License validation,
+  operation claim, local-order evidence, and domain effects in one transaction. Revoked,
+  unknown, mismatched, definitely outside-window, and rollback cases are rejected or
+  quarantined according to the frozen S19.2 policy.
 - **Bootstrap direction:** Produce one dependency-ordered snapshot under a single
   `REPEATABLE READ`, read-only PostgreSQL view and bind it to a safe base cursor. Stream or
   chunk that same snapshot with schema/protocol/checksum metadata; the client builds staging
@@ -1231,8 +1232,9 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
   canonicalize operation identity; bound batches and payloads; allow-list protocol and
   operation versions; preserve expected-version and correction rules; quarantine suspicious
   clock, dependency, sequence, or local-state evidence.
-- **Start condition:** S4-S18 mutation contracts are stable. S19.1 orientation is complete;
-  S19.2 must freeze the protocol and operation allow-list before implementation.
+- **Start condition:** S4-S18 mutation contracts are stable. S19.1 orientation and S19.2
+  protocol freeze are complete; S19.3 must freeze the mobile parity handoff before sync
+  implementation.
 - **Closure intent:** Gap-free, duplicate-free, auditable server synchronization and
   consistent data bootstrap.
 
@@ -1249,18 +1251,242 @@ businessDate(occurredAt)` compatibility with the existing `occurred_at` period t
 - **Exit criteria:** Readiness verdict, architecture direction, owner decisions, and S19.2-
   S19.9 boundaries are recorded.
 
+#### S19.2 - Sync Protocol and Offline Operation Contract Freeze
+
+- **Status:** CLOSED. Contract and Roadmap only; no production code, migration, SQLite, or
+  reference-package change.
+- **Model:** The protocol is hybrid. Push transports typed, versioned domain commands through
+  existing business authorities. Pull transports authoritative, versioned server
+  representations through a durable Store-scoped change feed. Bootstrap is one consistent
+  authoritative snapshot plus a safe base cursor from the same consistency boundary. Raw
+  table mutation and client-authored balances, totals, costs, signs, projections,
+  Subscription state, Store state, tenant authority, and audit facts are prohibited.
+- **Protocol and registry:** `protocolVersion` starts at integer `1`. Each `operationType` is
+  a lowercase, dot-delimited, allow-listed identifier ending in its command schema version,
+  for example `sales.post.v1`. Every concrete identifier maps to exactly one existing domain
+  parser/use case, authorization policy, canonicalizer, and response mapper. Patterns are
+  documentation shorthand only; runtime registration is concrete. Unknown versions,
+  operations, or required semantics never execute, and no table/action/method name is
+  accepted for generic dispatch.
+
+The version-1 push envelope is frozen as follows:
+
+| Field                                                 | Presence                     | Created by | Validated by | Authority and semantics                                                                                                                 |
+| ----------------------------------------------------- | ---------------------------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocolVersion`                                     | REQUIRED                     | Client     | Both         | SERVER AUTHORITY; must equal a supported protocol version                                                                               |
+| `operationId`                                         | REQUIRED                     | Client     | Both         | CLIENT FACT; canonical UUID and immutable command identity within the Store                                                             |
+| `operationType`                                       | REQUIRED                     | Client     | Server       | SERVER AUTHORITY; exact allow-list key including command schema version                                                                 |
+| `storeId`                                             | REQUIRED                     | Client     | Server       | SERVER AUTHORITY; assertion only and must equal authenticated Store context                                                             |
+| `deviceId`                                            | REQUIRED                     | Client     | Server       | SERVER AUTHORITY; assertion only and must equal the authenticated registered device                                                     |
+| `aggregateId`                                         | CONDITIONAL                  | Client     | Both         | CLIENT FACT only for commands with approved client-created root identity; otherwise omitted and deterministically derived by the server |
+| `expectedVersion`                                     | CONDITIONAL                  | Client     | Server       | HISTORICAL EVIDENCE of the client-observed version; server state remains authoritative                                                  |
+| `clientRecordedAt`                                    | REQUIRED                     | Client     | Server       | HISTORICAL EVIDENCE for entitlement classification; never sufficient alone                                                              |
+| Domain `occurredAt`, business date, and references    | CONDITIONAL inside `payload` | Client     | Both         | CLIENT FACT where the existing domain permits it; server resolves posting eligibility                                                   |
+| `payload`                                             | REQUIRED                     | Client     | Both         | CLIENT FACT expressing typed business intent under the registered command schema                                                        |
+| `offlineLicenseId`                                    | REQUIRED                     | Client     | Server       | HISTORICAL EVIDENCE; must bind to the signed and centrally recorded License                                                             |
+| Signed License plus License/key/Subscription versions | REQUIRED                     | Client     | Server       | HISTORICAL EVIDENCE verified through S18 signature, central issuance, and exact bindings                                                |
+| `trustedTimeEvidence`                                 | REQUIRED                     | Client     | Server       | HISTORICAL EVIDENCE containing versioned S18 trusted-time state, trusted server anchor, last-seen device time, and rollback state       |
+| `localSequence`                                       | REQUIRED                     | Client     | Server       | HISTORICAL EVIDENCE; positive lossless integer ordered within Store plus device                                                         |
+| `dependsOnOperationIds`                               | CONDITIONAL                  | Client     | Server       | CLIENT FACT; canonical UUIDs for unsynchronized prerequisite operations only                                                            |
+
+Arbitrary metadata and any client-selected total, balance, cost authority, posting authority,
+Store lifecycle, Subscription state, or License expiry are not included. The client creates
+business intent; the server owns tenant, role, entitlement classification, period and posting
+eligibility, accounting effects, projections, audit, server timestamps, and the canonical
+execution result.
+
+- **Canonical idempotency:** The registry reuses each existing domain canonicalizer and
+  `sync.processed_operations`; it does not create another idempotency ledger. The material
+  request identity covers command schema version/type and every semantic aggregate,
+  expected-version, date, reference, amount, quantity, reason, and payload field consumed by
+  the command. JSON key order, transport formatting, batch position, retry counters, License
+  signature/document, trusted-time evidence, and dependency scheduling hints are not business
+  intent. They are validated and audited separately. Same Store plus `operationId` plus the
+  same canonical material request returns exact replay; any changed material request is a
+  deterministic conflict. Reusing a sequence or provenance binding inconsistently is a
+  security conflict or quarantine, never a new business effect.
+- **Trusted time:** A valid signed License, S18 trusted-time state, and local-order evidence
+  jointly bound risk; the device wall clock never grants entitlement. The client captures
+  `clientRecordedAt`, trusted server anchor, last-seen device time, rollback state, and
+  `localSequence` atomically with the local business operation/outbox row. Creation reliably
+  within `[issuedAt, offlineValidUntil)` is entitlement-eligible even when received after
+  expiry. Creation definitely outside the interval is rejected. Missing, inconsistent,
+  rollback, or tamper-suspect evidence is quarantined for explicit recovery. This bounded
+  model does not claim a compromised device clock is tamper-proof.
+- **Local ordering:** `localSequence` is required for every offline operation, scoped to one
+  Store plus registered device, monotonically allocated, positive, never reused, and encoded
+  losslessly. Gaps are legal and do not prove data loss; exact contiguity is not required.
+  Request processing normally follows ascending sequence, but explicit dependencies and
+  domain locks govern correctness. Sequence is evidence and scheduling input, never
+  accounting authority. Exact replay retains the original sequence. Reinstall/reset requires
+  a new registered device identity; a sequence must not restart under the old `deviceId`.
+- **Dependencies:** Durable aggregate UUIDs remain the primary relationship. The optional
+  dependency list names client operations whose aggregates are not yet durable centrally,
+  such as Customer before Sale or Supplier before Invoice. Missing unresolved prerequisites
+  return `DEPENDENCY_PENDING`; a finally rejected prerequisite causes explicit dependent
+  rejection, not infinite retry. Dependency IDs never substitute for payload references and
+  cannot bypass same-Store validation.
+- **Manual Inventory and Stock Count identity:** Future offline Manual Inventory commands
+  must accept a client-created `entryId`; Stock Count commands must accept a client-created
+  `stockCountId`. Internal movement, item, and projection-effect UUIDs remain server-derived
+  deterministically from `operationId` plus a frozen role/canonical item identity. Clients do
+  not author accounting or inventory-effect IDs. Current repositories use random UUIDs for
+  these roots/effects, so S19.3 owns the SQLite contract and S19.5 owns the backend command and
+  derivation change. Existing UUID columns require no schema change for this identity rule.
+
+The MVP operation eligibility registry is frozen at the following policy boundary:
+
+| Command family                                                                                                    | Eligibility                  | Identity, conflict, dependencies, and authority                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store settings mutation                                                                                           | ONLINE_ONLY                  | Current version and owner authority; not accepted by offline push                                                                            |
+| Customer, Supplier, Product, and Product Unit create/update                                                       | OFFLINE_ALLOWED              | Accepted client UUIDs; operation replay; expected version for updates; dependency ordering; server normalization and constraints             |
+| Customer, Supplier, Product, and Product Unit archive/restore                                                     | ONLINE_ONLY                  | Sensitive catalog lifecycle remains outside the initial offline allow-list                                                                   |
+| Money Account and Expense Category catalog lifecycle                                                              | ONLINE_ONLY                  | Sensitive financial/setup catalog authority                                                                                                  |
+| Accounting Period provision/close/lifecycle                                                                       | ONLINE_ONLY                  | Provisioning remains server-internal; close remains explicit owner authority                                                                 |
+| Money, Customer Receivable, and Supplier Payable opening state                                                    | ONLINE_ONLY                  | Initial setup operations are excluded from the offline allow-list                                                                            |
+| Owner contribution, owner loan, reimbursement, and approved withdrawals                                           | OFFLINE_ALLOWED              | Deterministic operation/fact identity; immutable correction; Money Account and period dependencies; server signs effects                     |
+| Internal Money Transfer and same-domain Money correction                                                          | OFFLINE_ALLOWED              | Deterministic identities; account locks; period authority; immutable reversal/replacement                                                    |
+| Manual Inventory opening/increase/decrease and correction                                                         | OFFLINE_ALLOWED              | Client root UUID required by S19.5; deterministic effects; Product/Unit, policy, stock lock, and period validation                           |
+| Stock Count                                                                                                       | OFFLINE_ALLOWED              | Client root UUID required by S19.5; deterministic item/effect identities; Product/Unit and stock-lock validation                             |
+| Supplier Invoice and immutable correction                                                                         | OFFLINE_ALLOWED              | Deterministic IDs and payable-only authority; Supplier/Product references and period validation; no inventory side effect                    |
+| Opening Payable                                                                                                   | ONLINE_ONLY                  | Initial setup operation                                                                                                                      |
+| Supplier Payment, allocation, credit/refund, and immutable correction                                             | OFFLINE_ALLOWED              | Deterministic IDs; Invoice/payable and Money Account dependencies; server allocation and signs                                               |
+| Sale and immutable correction                                                                                     | OFFLINE_ALLOWED              | Deterministic IDs; Product/Unit, Customer when required, Inventory, Money Account, and period authority                                      |
+| Opening Receivable                                                                                                | ONLINE_ONLY                  | Initial setup operation                                                                                                                      |
+| Customer Collection, allocation, Credit application/refund/settlement, and correction                             | OFFLINE_ALLOWED              | Deterministic IDs; Customer/Sale/receivable/Money Account dependencies; server allocation and signs                                          |
+| Expense, Expense Payment, and immutable correction                                                                | OFFLINE_ALLOWED              | Accepted Expense root UUID or deterministic effect IDs; Category/Money Account/period dependencies; server recognition and payment authority |
+| Customer Return and immutable correction                                                                          | OFFLINE_ALLOWED              | Deterministic IDs; original Sale, settlement, historical Inventory, Money, Customer, and period authority                                    |
+| Supplier Return, Credit application/refund, and immutable correction                                              | OFFLINE_ALLOWED              | Deterministic IDs; Supplier Invoice/payable/Money Account and period authority; no automatic inventory coupling                              |
+| Platform Admin, Store lifecycle, Subscription, License issuance/revocation, authentication, and device activation | NOT_APPLICABLE / ONLINE_ONLY | Central server authority; never dispatched through offline business push                                                                     |
+
+Every offline-allowed command must present S18 License evidence and pass the existing domain
+parser, idempotency, dependency, stale-state or immutable-correction, locking, period,
+accounting, RLS, and audit authority. The table is an allow-list ceiling, not proof that the
+current code already exposes sync dispatch.
+
+- **Push batch:** Requests are bounded by server-configured item, body, and execution limits
+  finalized in S19.5; S19.2 invents no arbitrary number. Structurally valid items are processed
+  independently, normally in ascending device sequence with dependency-aware deferral. Each
+  operation owns one authoritative PostgreSQL transaction and deterministic result; one item
+  failure does not roll back unrelated committed items. An unparseable request envelope may
+  reject the request; an identifiable malformed item is rejected without executing it.
+  Retries reuse the same operation, sequence, material payload, and dependencies.
+- **Validation order:** Authenticate the restricted sync request/device; derive Store context;
+  validate protocol and concrete operation type; verify License identity/signature/binding;
+  classify creation-time entitlement; claim or resolve `operationId`; resolve dependencies;
+  validate expected version or immutable correction authority; resolve current S9 posting and
+  domain rules; execute the existing domain authority; atomically persist business effects,
+  authoritative result, change exposure, and audit; then return the stored per-operation
+  result. Concrete lock order remains owned by each domain and future database design.
+- **Result vocabulary:** `APPLIED` means the operation committed once. `EXACT_REPLAY` returns
+  the stored result with no new effects. `REJECTED` is a final security, validation, period,
+  or business-rule failure. `DEPENDENCY_PENDING` is retriable only after named prerequisites.
+  `CONFLICT` means changed replay, stale version, competing immutable chain, or another state
+  collision requiring a new operation or user resolution. `QUARANTINED` means the operation
+  was received but no accounting effect was accepted because trust or compatibility evidence
+  is insufficient; it is preserved for explicit recovery, not discarded or retried forever.
+  Domain error codes remain subordinate to these six outcomes.
+- **Conflict policy:** There is no last-write-wins. Changed replay and stale version are
+  `CONFLICT`; missing prerequisite is `DEPENDENCY_PENDING`; closed/closing period is
+  `REJECTED`; archived or otherwise ineligible references are explicit domain
+  rejection/conflict; invalid correction lineage is rejection/conflict; creation definitely
+  outside entitlement is `REJECTED`; uncertain entitlement or local tampering is
+  `QUARANTINED`; cross-tenant identity is a non-disclosing security `REJECTED` result.
+- **Temporal policy:** Subscription state at arrival does not replace the signed historical
+  License window. An operation proven created under a valid License remains entitlement-
+  eligible after License or Subscription expiry. Later Store suspension also does not erase
+  eligibility when the device had not yet received a trusted suspension state; after such a
+  state is acknowledged, later local operations are ineligible, and no new License may be
+  issued while suspended. Central License revocation remains a rejection under S18. None of
+  these entitlement decisions bypasses tenant, dependency, version, accounting, or domain
+  rules.
+- **Delayed accounting periods:** S9 has no historical offline exception. A delayed unseen
+  posting resolves its existing posting context at server application time. If its derived
+  period is `closed` or `closing`, the operation is `REJECTED`; the client must use the
+  approved correction/replacement workflow in an eligible open period where applicable.
+  Exact replay of an already completed matching operation remains replay and creates no new
+  period or accounting effect.
+- **Immutable facts:** Sync never replaces posted Money, Inventory, receivable, payable,
+  Expense, Sale, Return, allocation, or correction rows. Offline corrections invoke existing
+  reversal/replacement/correction-chain commands and preserve originals and lineage.
+- **Bootstrap and pull boundary:** Bootstrap exposes one dependency-ordered `REPEATABLE READ`
+  snapshot, integrity metadata, and a safe base cursor from the same consistency boundary;
+  partial data stays in local staging and never becomes the active accounting database.
+  Incremental pull returns Store-scoped authoritative changes with no committed gaps, safe
+  replay, deterministic cursor advancement, resumable pagination, and visible archive,
+  restore, reversal, replacement, and deactivation transitions. `updatedAt` scanning is not
+  approved. S19.6 must implement the safe cursor/change-feed foundation before S19.4 can close
+  a bootstrap implementation against it.
+- **S19.3 SQLite handoff:** The mobile contract must add the frozen envelope, local sequence,
+  dependencies, trusted-time evidence, six result states, inbox receipt and cursor/bootstrap
+  metadata, accepted Manual Inventory/Stock Count root IDs, deterministic child/effect IDs,
+  historical Inventory reversal parity, Opening Receivable allocation targets, Sale Customer
+  Credit tender, and S18 License/key/Subscription/device/version binding. The backend
+  reference and SQLite files remain unchanged in S19.2.
+- **Authority boundary:** The client may author only typed business intent: approved client
+  UUIDs, quantities, selected Product/Customer/Supplier references, permitted entered prices
+  and amounts, notes/references, and domain-approved occurrence time. The server remains
+  authoritative for tenant and role, effective entitlement, Store and Subscription state,
+  posting and period eligibility, signs and derived totals, balances, Inventory projection,
+  cost, receivable/payable effects, audit, server timestamps, and the canonical execution
+  result.
+- **Security ownership:** Existing authentication, registered-device binding, signed License
+  verification, central issuance lookup, forced RLS, composite Store references, domain
+  validation, canonical hash, operation claim, expected versions, deterministic fact IDs,
+  append-only guards, and audit are reused. S19.5 owns restricted sync-only handling for
+  historically eligible suspended-Store operations, atomic entitlement/domain composition,
+  device-sequence provenance, strict allow-list dispatch, DTO limits, malformed-batch
+  isolation, and clock/local-tamper quarantine. S19.6 owns sanitized change exposure and
+  cursor safety. S19.7 owns durable recovery and quarantine access. No client assertion grants
+  tenant, device, Subscription, Store, period, or accounting authority.
+
+| Threat                             | Existing control                                                                 | Future S19 owner                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Forged `storeId`                   | Authenticated membership, server-derived Store context, forced RLS               | S19.5 rejects any envelope assertion mismatch                                                      |
+| Forged `deviceId`                  | Registered-device authentication and S18 License device binding                  | S19.5 composes device validation in the operation transaction                                      |
+| Forged License or client expiry    | S18 signature/key verification and central issuance lookup                       | S19.5 performs atomic historical-entitlement classification                                        |
+| Cross-tenant entity reference      | Forced RLS and composite Store references                                        | S19.5 preserves non-disclosing domain rejection                                                    |
+| Client-selected Subscription/Store | Central platform authority; neither value is business intent                     | S19.5 ignores assertions as authority and validates protected state                                |
+| Changed replay or duplicate effect | Canonical request hash, `sync.processed_operations`, deterministic fact identity | S19.5 returns conflict or exact replay without a second effect                                     |
+| Fabricated wall-clock entitlement  | Signed License window plus S18 trusted-time state                                | S19.5 quarantines insufficient/inconsistent evidence; S19.7 owns recovery                          |
+| Stale overwrite                    | Expected versions and immutable correction chains                                | S19.5 dispatches only through existing domain authority                                            |
+| Unsupported operation/version      | No generic dispatch                                                              | S19.5 uses a concrete allow-list and rejects or quarantines unsupported semantics                  |
+| Malformed batch smuggling          | DTO/runtime validation and request-size infrastructure                           | S19.5 bounds batches and isolates identifiable malformed items without executing them              |
+| Gap or cursor manipulation on pull | Store-scoped tenant authority                                                    | S19.6 owns commit-safe sequence, sanitized representations, cursor validation, and resumable pages |
+
+- **Future physical needs:** S19.4 is `CONDITIONAL`: restart-from-zero streaming needs no
+  snapshot table change, while durable multi-request resume would require targeted snapshot
+  persistence. S19.5 is `REQUIRED`: current runtime authority cannot atomically lock/validate
+  protected License/Store/device state, preserve the historical suspension boundary, bind
+  device sequence provenance, and compose those checks with one domain transaction. S19.6 is
+  `REQUIRED`: the current identity cursor is not commit-ordered and current change coverage is
+  neither complete nor a versioned sanitized domain contract. S19.7 is `LIKELY`: existing
+  conflict/dead-letter rows may be reusable, but they do not cleanly freeze quarantine state,
+  disposition, and recovery semantics. Every migration requires separate Station evidence
+  and backend-owner authorization.
+- **Future tests:** S19.3 owns SQLite migration/parity and atomic outbox evidence. S19.4 owns
+  snapshot consistency, restart, failure, and atomic activation. S19.5 owns real PostgreSQL
+  License, sequence, idempotency, dependency, rollback, RLS, suspended-Store, batch, and
+  accounting tests. S19.6 owns commit-order, pagination, cursor, concurrent commit, archive,
+  and correction propagation. S19.7 owns retry/quarantine/recovery. S19.8 owns cross-domain
+  offline accounting scenarios. S19.9 runs the full unit and broad integration closure gates.
+- **Exit:** The hybrid model, envelope, registry, eligibility, identity, trusted-time,
+  ordering, dependency, batch, result, conflict, quarantine, temporal, authority,
+  bootstrap/pull, SQLite handoff, security, test, and future-database contracts are frozen.
+  No S19.2 owner decision remains. S19.3 is next and not started.
+
 #### S19.2-S19.9 - Approved Execution Decomposition
 
-| Stage                                                          | Status             | Purpose and owned scope                                                                                                                                                                           | Explicit non-scope                                                    | Expected DB impact                                                                                | Expected SQLite impact                                                                                          | Entry dependencies                                  | Exit criteria                                                                                      |
-| -------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| S19.2 - Sync Protocol and Offline Operation Contract Freeze    | NEXT / NOT STARTED | Freeze versions, operation allow-list, canonical envelope/hash, identity registry, acknowledgements, dependency and conflict dispositions, entitlement evidence, limits, and compatibility policy | Runtime endpoints and persistence changes                             | None                                                                                              | None; define mobile contract only                                                                               | S19.1 and owner decisions below                     | One reviewed protocol contract defines every supported operation and outcome                       |
-| S19.3 - SQLite/Drift Parity Contract and Mobile Handoff        | NOT STARTED        | Map every offline operation and representation, resolve `0013`-`0015` and S18 License gaps, and publish a versioned mobile migration/compatibility handoff                                        | Flutter/Drift implementation in this repository or reference rewrites | None expected                                                                                     | Mobile repository migrations required; backend SQLite/reference delta remains zero unless separately authorized | S19.2                                               | Lossless, dependency-correct parity and upgrade requirements are testable                          |
-| S19.4 - Consistent Initial Bootstrap                           | NOT STARTED        | Implement authenticated dependency-ordered `REPEATABLE READ` bootstrap, safe base cursor, streaming/checksum metadata, restart, and failure semantics                                             | Backup storage and incremental push/pull                              | None for restart-from-zero MVP; targeted support only if durable resumable snapshots are approved | Mobile staging, verification, and atomic swap belong to the mobile implementation                               | S19.2-S19.3 and cursor contract                     | A device can establish one internally consistent local state and continue from its cursor          |
-| S19.5 - Offline Operation Push and Server Application          | NOT STARTED        | Implement bounded push, per-operation transactions, S18 evidence, claim/replay, dependency/version checks, typed domain dispatch, and deterministic acknowledgements                              | Pull, broad conflict UI, or accounting redesign                       | Targeted least-privilege entitlement/locking support may be required after proof                  | Mobile outbox/envelope upgrade belongs to the mobile implementation                                             | S19.2-S19.4 and approved DB authorization if needed | Supported operations apply once, replay exactly, fail atomically, and preserve domain authority    |
-| S19.6 - Commit-Ordered Incremental Pull and Change Propagation | NOT STARTED        | Implement safe Store ordering/watermark, typed sanitized change coverage, pagination, resume, and archive/correction propagation                                                                  | `updated_at` polling or raw internal-row exposure                     | Targeted migration required for commit-safe ordering and change coverage                          | Mobile inbox/cursor application belongs to the mobile implementation                                            | S19.2-S19.5                                         | Pull is gap-free, duplicate-safe, bounded, resumable, and dependency-correct                       |
-| S19.7 - Conflict, Retry, Recovery, and Quarantine              | NOT STARTED        | Implement durable retry/dead-letter/conflict outcomes, dependency release, clock/sequence quarantine, user-resolution records, and recovery APIs                                                  | Silent last-write-wins or destructive repair                          | Possible narrow conflict/dead-letter change after contract proof                                  | Mobile retry/quarantine state belongs to the mobile implementation                                              | S19.5-S19.6                                         | Every non-success outcome is deterministic, auditable, and recoverable or final                    |
-| S19.8 - Cross-Domain Offline Accounting Verification           | NOT STARTED        | Verify Sales, Customer and Supplier settlement, Expenses, Inventory, Returns, Money, periods, corrections, and projections across disconnect/retry/concurrency                                    | New accounting behavior                                               | None expected; defects require separate authorization                                             | Actual SQLite-backed end-to-end fixtures required outside production data                                       | S19.3-S19.7                                         | Offline convergence preserves every authoritative movement, ledger, period, and reversal invariant |
-| S19.9 - Integrated Offline Sync Verification and S19 Closure   | NOT STARTED        | Run final protocol, security, RLS, concurrency, failure, bootstrap, push/pull, parity, regression, documentation, and repository-hygiene gates                                                    | S20 reporting, S21 support features, or S22 backup                    | None expected                                                                                     | No new mobile scope; verify agreed compatibility evidence                                                       | S19.2-S19.8 complete and independently reviewed     | S19 closes with gap-free, duplicate-free, tenant-safe, auditable convergence evidence              |
+| Stage                                                          | Status             | Purpose and owned scope                                                                                                                                                                           | Explicit non-scope                                                    | Expected DB impact                                                               | Expected SQLite impact                                                                                          | Entry dependencies                                  | Exit criteria                                                                                      |
+| -------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| S19.2 - Sync Protocol and Offline Operation Contract Freeze    | CLOSED             | Freeze versions, operation allow-list, canonical envelope/hash, identity registry, acknowledgements, dependency and conflict dispositions, entitlement evidence, limits, and compatibility policy | Runtime endpoints and persistence changes                             | None                                                                             | None; mobile handoff frozen for S19.3                                                                           | S19.1 and owner decisions in the S19.2 prompt       | One reviewed protocol contract defines every supported operation and outcome                       |
+| S19.3 - SQLite/Drift Parity Contract and Mobile Handoff        | NEXT / NOT STARTED | Map every offline operation and representation, resolve `0013`-`0015` and S18 License gaps, and publish a versioned mobile migration/compatibility handoff                                        | Flutter/Drift implementation in this repository or reference rewrites | None expected                                                                    | Mobile repository migrations required; backend SQLite/reference delta remains zero unless separately authorized | S19.2                                               | Lossless, dependency-correct parity and upgrade requirements are testable                          |
+| S19.4 - Consistent Initial Bootstrap                           | NOT STARTED        | Implement authenticated dependency-ordered `REPEATABLE READ` bootstrap, safe base cursor, streaming/checksum metadata, restart, and failure semantics                                             | Backup storage and incremental push/pull                              | Conditional snapshot persistence only; requires the S19.6 safe cursor foundation | Mobile staging, verification, and atomic swap belong to the mobile implementation                               | S19.2-S19.3 and completed S19.6 cursor foundation   | A device can establish one internally consistent local state and continue from its cursor          |
+| S19.5 - Offline Operation Push and Server Application          | NOT STARTED        | Implement bounded push, per-operation transactions, S18 evidence, claim/replay, dependency/version checks, typed domain dispatch, and deterministic acknowledgements                              | Pull, broad conflict UI, or accounting redesign                       | Targeted least-privilege entitlement/locking support may be required after proof | Mobile outbox/envelope upgrade belongs to the mobile implementation                                             | S19.2-S19.4 and approved DB authorization if needed | Supported operations apply once, replay exactly, fail atomically, and preserve domain authority    |
+| S19.6 - Commit-Ordered Incremental Pull and Change Propagation | NOT STARTED        | Implement safe Store ordering/watermark, typed sanitized change coverage, pagination, resume, and archive/correction propagation                                                                  | `updated_at` polling or raw internal-row exposure                     | Targeted migration required for commit-safe ordering and change coverage         | Mobile inbox/cursor application belongs to the mobile implementation                                            | S19.2-S19.3 and separate DB authorization           | Pull is gap-free, duplicate-safe, bounded, resumable, and dependency-correct                       |
+| S19.7 - Conflict, Retry, Recovery, and Quarantine              | NOT STARTED        | Implement durable retry/dead-letter/conflict outcomes, dependency release, clock/sequence quarantine, user-resolution records, and recovery APIs                                                  | Silent last-write-wins or destructive repair                          | Possible narrow conflict/dead-letter change after contract proof                 | Mobile retry/quarantine state belongs to the mobile implementation                                              | S19.5-S19.6                                         | Every non-success outcome is deterministic, auditable, and recoverable or final                    |
+| S19.8 - Cross-Domain Offline Accounting Verification           | NOT STARTED        | Verify Sales, Customer and Supplier settlement, Expenses, Inventory, Returns, Money, periods, corrections, and projections across disconnect/retry/concurrency                                    | New accounting behavior                                               | None expected; defects require separate authorization                            | Actual SQLite-backed end-to-end fixtures required outside production data                                       | S19.3-S19.7                                         | Offline convergence preserves every authoritative movement, ledger, period, and reversal invariant |
+| S19.9 - Integrated Offline Sync Verification and S19 Closure   | NOT STARTED        | Run final protocol, security, RLS, concurrency, failure, bootstrap, push/pull, parity, regression, documentation, and repository-hygiene gates                                                    | S20 reporting, S21 support features, or S22 backup                    | None expected                                                                    | No new mobile scope; verify agreed compatibility evidence                                                       | S19.2-S19.8 complete and independently reviewed     | S19 closes with gap-free, duplicate-free, tenant-safe, auditable convergence evidence              |
 
 ### S20 - Dashboard, Reports, Search, Documents, and Export
 
@@ -1443,33 +1669,18 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure or S18 policy decision is open. S17 and S18 remain closed. S19.1 found
-three product/security decisions that must be frozen in S19.2 before implementation:
-
-1. **Offline creation-time trust.** A signed License proves the allowed interval but cannot
-   cryptographically prove that a mutable local timestamp was recorded honestly. Safe
-   options are bounded MVP trust with monotonic device sequence and last-ack anchoring,
-   tamper-evident chain/attestation, or quarantine of all delayed writes. The recommended
-   MVP default is bounded trust with sequence/checkpoint validation and quarantine for gaps,
-   rollback, or inconsistent trusted-time evidence, with the residual local-tampering risk
-   stated explicitly.
-2. **Later Store suspension.** A legitimately created operation remains entitlement-eligible
-   after License expiry, but S18 did not authorize applying it after later Store suspension.
-   Safe options are reject, apply, or quarantine pending restoration/administrative
-   resolution. The recommended default is quarantine: preserve the operation without
-   bypassing the central suspension.
-3. **Offline admin/setup scope.** Core operational postings are offline candidates, while
-   accounting-period close and Store/Subscription/License/Platform administration stay
-   online-only. The owner must decide whether settings/catalog lifecycle and opening-state
-   operations enter the initial offline allow-list. The recommended default is to exclude
-   them from the first release and add each only after domain-specific parity and conflict
-   proof.
+No roadmap-structure, S18 policy, or S19.2 contract decision is open. The S19.2 backend-owner
+decisions freeze bounded creation-time trust with quarantine for insufficient evidence,
+historical entitlement eligibility after later Store suspension before device knowledge, and
+an initial offline allow-list limited to proven daily operations while sensitive setup and
+administration remain online-only. Later Stations may not broaden those boundaries without a
+new explicit owner decision.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
 - Completed Stations S0-S18 remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Future Stations S19.2-S23 remain proposed until the backend owner approves each Station's
+- Future Stations S19.3-S23 remain proposed until the backend owner approves each Station's
   orientation and contract boundary.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
@@ -1487,7 +1698,7 @@ three product/security decisions that must be frozen in S19.2 before implementat
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S18 - Subscription, Licensing, and SaaS    |
-| S19.1 starting checkpoint           | `1ed034b240ec0b9d1cc56fbc0aacd350f8bc40c4` |
+| S19.2 starting checkpoint           | `094e28bde7150b1df2a9321c7d7a63b0254af365` |
 | Safe completed capabilities         | S0-S18                                     |
 | First incomplete release dependency | S19 - Offline Sync and Data Bootstrap      |
 | Current Station                     | S19 - OPEN                                 |
@@ -1501,8 +1712,9 @@ three product/security decisions that must be frozen in S19.2 before implementat
 | S18.7 current status                | CLOSED                                     |
 | S19 current status                  | OPEN                                       |
 | S19.1 current status                | CLOSED                                     |
-| S19.2 current status                | NEXT / NOT STARTED                         |
-| S19.3-S19.9 current status          | NOT STARTED                                |
+| S19.2 current status                | CLOSED                                     |
+| S19.3 current status                | NEXT / NOT STARTED                         |
+| S19.4-S19.9 current status          | NOT STARTED                                |
 
-Do not start S19.2 from this document. It requires a separate execution prompt and retains
+Do not start S19.3 from this document. It requires a separate execution prompt and retains
 database, PostgreSQL-reference, and SQLite deltas at 0 by default.
