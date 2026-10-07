@@ -555,6 +555,7 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
       'trg_money_transfers_change_event',
       'trg_money_transfers_finalized_guard',
       'trg_money_transfers_no_delete',
+      'trg_money_transfers_store_change_v1',
       'trg_money_transfers_touch',
     ]);
   });

@@ -680,6 +680,7 @@ describe('Product and Unit database contract', () => {
         `trg_${tableName}_central_audit`,
         `trg_${tableName}_change_event`,
         `trg_${tableName}_no_delete`,
+        `trg_${tableName}_store_change_v1`,
         `trg_${tableName}_touch`,
       ]);
       expect(tableTriggers.every((trigger) => trigger.enabled === 'O')).toBe(true);
@@ -687,6 +688,7 @@ describe('Product and Unit database contract', () => {
         'audit.capture_row_change',
         'sync.capture_change_event',
         'ledger.prevent_delete',
+        'sync.capture_store_change_v1',
         'ledger.touch_mutable_row',
       ]);
       expect(

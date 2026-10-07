@@ -407,6 +407,7 @@ describe('Supplier database contract', () => {
       { name: 'trg_suppliers_central_audit', functionName: 'audit.capture_row_change' },
       { name: 'trg_suppliers_change_event', functionName: 'sync.capture_change_event' },
       { name: 'trg_suppliers_no_delete', functionName: 'ledger.prevent_delete' },
+      { name: 'trg_suppliers_store_change_v1', functionName: 'sync.capture_store_change_v1' },
       { name: 'trg_suppliers_touch', functionName: 'ledger.touch_mutable_row' },
     ]);
     expect(incomingReferences.rows).toEqual([

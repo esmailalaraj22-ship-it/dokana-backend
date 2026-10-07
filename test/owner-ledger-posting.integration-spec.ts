@@ -510,6 +510,8 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     expect(triggers.rows).toEqual([
       { tableName: 'money_movements', name: 'trg_money_movements_no_mutation' },
       { tableName: 'money_movements', name: 'trg_money_movements_period' },
+      { tableName: 'money_movements', name: 'trg_money_movements_store_change_v1' },
+      { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_entries_store_change_v1' },
       { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_no_mutation' },
       { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_period' },
     ]);

@@ -156,3 +156,16 @@ export const offlineLicenseAuthorityRoutines = [
   'ledger.read_offline_license_for_validation(p_store_id uuid, p_device_id uuid, p_license_id uuid)',
   'ledger.revoke_offline_license(p_store_id uuid, p_license_id uuid, p_operation_id uuid, p_request_hash text, p_reason text)',
 ] as const;
+
+export const commitOrderedSyncFoundationTables = [
+  'sync.store_change_events_v1',
+  'sync.store_change_watermarks_v1',
+] as const;
+
+export const commitOrderedSyncFoundationRoutines = [
+  'sync.allocate_store_change_sequence_v1(p_store_id uuid)',
+  'sync.capture_store_change_v1()',
+  'sync.read_bootstrap_boundary_v1(p_store_id uuid, p_device_id uuid)',
+  'sync.read_store_change_page_v1(p_store_id uuid, p_after_sequence bigint, p_limit integer)',
+  'sync.sanitize_bootstrap_record_v1(p_value jsonb)',
+] as const;

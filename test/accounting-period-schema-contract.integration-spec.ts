@@ -396,6 +396,10 @@ describe('Accounting Period database contract', () => {
         functionName: 'sync.capture_change_event',
       },
       { name: 'trg_accounting_periods_no_delete', functionName: 'ledger.prevent_delete' },
+      {
+        name: 'trg_accounting_periods_store_change_v1',
+        functionName: 'sync.capture_store_change_v1',
+      },
       { name: 'trg_accounting_periods_touch', functionName: 'ledger.touch_mutable_row' },
     ]);
     expect(functions.rows).toEqual([

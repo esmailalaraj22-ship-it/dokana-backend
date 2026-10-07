@@ -45,6 +45,8 @@ describe('controlled migration runner', () => {
       '0019_store_provisioning_owner_selection.sql',
       '0020_platform_admin_store_lifecycle.sql',
       '0021_offline_license_authority.sql',
+      '0022_commit_ordered_sync_foundation.sql',
+      '0023_fix_bootstrap_boundary_hashing.sql',
     ]);
   });
 

@@ -145,6 +145,29 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     });
   }
 
+  async withTenantSnapshotTransaction<T>(
+    context: TenantTransactionContext,
+    work: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> {
+    this.assertTenantContext(context);
+
+    return this.database.transaction(
+      async (transaction) => {
+        await transaction.execute(sql`select set_config('app.store_id', ${context.storeId}, true)`);
+        await transaction.execute(sql`select set_config('app.user_id', ${context.userId}, true)`);
+        await transaction.execute(
+          sql`select set_config('app.device_id', ${context.deviceId}, true)`,
+        );
+        await transaction.execute(
+          sql`select set_config('app.request_id', ${context.requestId}, true)`,
+        );
+
+        return work(transaction);
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
   async withBusinessWriteTransaction<T>(
     context: TenantTransactionContext,
     work: (transaction: DatabaseTransaction) => Promise<T>,

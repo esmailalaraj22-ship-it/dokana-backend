@@ -21,6 +21,7 @@ import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { SyncModule } from './sync/sync.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
     ReturnsModule,
     SalesModule,
     SuppliersModule,
+    SyncModule,
     SettingsModule,
   ],
 })

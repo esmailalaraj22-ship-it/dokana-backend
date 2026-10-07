@@ -398,6 +398,10 @@ describe('Money Account database contract', () => {
       { name: 'trg_money_accounts_central_audit', functionName: 'audit.capture_row_change' },
       { name: 'trg_money_accounts_change_event', functionName: 'sync.capture_change_event' },
       { name: 'trg_money_accounts_no_delete', functionName: 'ledger.prevent_delete' },
+      {
+        name: 'trg_money_accounts_store_change_v1',
+        functionName: 'sync.capture_store_change_v1',
+      },
       { name: 'trg_money_accounts_touch', functionName: 'ledger.touch_mutable_row' },
     ]);
     expect(runtimePrivileges.rows).toEqual([

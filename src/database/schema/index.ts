@@ -5,3 +5,4 @@ export * from './supplier-finance';
 export * from './sales';
 export * from './expenses';
 export * from './returns';
+export * from './sync';

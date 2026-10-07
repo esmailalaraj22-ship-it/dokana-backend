@@ -8,6 +8,8 @@ import {
   applicationSequences,
   applicationTables,
   applicationViews,
+  commitOrderedSyncFoundationRoutines,
+  commitOrderedSyncFoundationTables,
   offlineLicenseAuthorityRoutines,
   ownershipFoundationAdditions,
   platformAdminStoreLifecycleRoutines,
@@ -64,6 +66,7 @@ export async function verifyApplicationInventory(
   let subscriptionLifecycleProvisioningApplied = false;
   let platformAdminStoreLifecycleApplied = false;
   let offlineLicenseAuthorityApplied = false;
+  let commitOrderedSyncFoundationApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -162,6 +165,18 @@ export async function verifyApplicationInventory(
       }
       offlineLicenseAuthorityApplied = true;
     }
+
+    const commitOrderedSyncFoundation = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0022_commit_ordered_sync_foundation.sql'`,
+    );
+    if (commitOrderedSyncFoundation.rows[0]) {
+      const file = await readMigrationFile('0022_commit_ordered_sync_foundation.sql');
+      if (commitOrderedSyncFoundation.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Commit-ordered synchronization foundation migration checksum mismatch.');
+      }
+      commitOrderedSyncFoundationApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -207,6 +222,7 @@ export async function verifyApplicationInventory(
     ...(inventoryFoundationApplied ? ['ledger.manual_inventory_entries'] : []),
     ...(saleCustomerCreditTenderApplied ? ['ledger.sale_customer_credit_applications'] : []),
     ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationTables : []),
+    ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -266,6 +282,7 @@ export async function verifyApplicationInventory(
         : []),
       ...(platformAdminStoreLifecycleApplied ? platformAdminStoreLifecycleRoutines : []),
       ...(offlineLicenseAuthorityApplied ? offlineLicenseAuthorityRoutines : []),
+      ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

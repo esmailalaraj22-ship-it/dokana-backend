@@ -392,6 +392,7 @@ describe('Customer database contract', () => {
       { name: 'trg_customers_central_audit', functionName: 'audit.capture_row_change' },
       { name: 'trg_customers_change_event', functionName: 'sync.capture_change_event' },
       { name: 'trg_customers_no_delete', functionName: 'ledger.prevent_delete' },
+      { name: 'trg_customers_store_change_v1', functionName: 'sync.capture_store_change_v1' },
       { name: 'trg_customers_touch', functionName: 'ledger.touch_mutable_row' },
     ]);
     expect(incomingReferences.rows).toEqual([

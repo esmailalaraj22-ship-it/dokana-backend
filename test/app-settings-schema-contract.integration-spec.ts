@@ -341,6 +341,10 @@ describe('Store settings database contract', () => {
     // application code (no delete path) and by forced RLS.
     expect(triggers.rows).toEqual([
       { name: 'trg_app_settings_change_event', functionName: 'sync.capture_change_event' },
+      {
+        name: 'trg_app_settings_store_change_v1',
+        functionName: 'sync.capture_store_change_v1',
+      },
       { name: 'trg_app_settings_touch', functionName: 'ledger.touch_mutable_row' },
     ]);
     expect(incomingReferences.rows).toEqual([]);
