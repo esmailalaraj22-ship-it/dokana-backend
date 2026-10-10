@@ -20,6 +20,10 @@ import {
   stores,
 } from '../database/schema';
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
+import {
+  deriveMoneyFactId,
+  deriveMoneyFactOperationId,
+} from '../money-movements/money-movement-identity';
 import { inventoryBaseQuantity, inventoryCostResponse } from './inventory-math';
 import type { StockCountCommand, StockCountCommandItem } from './stock-count-command';
 import { stockCountEffect } from './stock-count-math';
@@ -242,7 +246,7 @@ export class StockCountRepository {
       accepted.push({ input, unit, movementUnit });
     }
 
-    const countId = randomUUID();
+    const countId = command.stockCountId ?? randomUUID();
     await tx.insert(stockCounts).values({
       id: countId,
       storeId: context.storeId,
@@ -278,8 +282,12 @@ export class StockCountRepository {
       const previousProjectionState = balance ? 'established' : 'missing';
       const variance = balance ? effect.quantityDeltaMilli : null;
       const requiresMovement = !balance || effect.quantityDeltaMilli !== 0n;
-      const itemId = randomUUID();
-      const movementId = requiresMovement ? randomUUID() : null;
+      const itemDiscriminator = `stock_count:item:${input.productId}`;
+      const movementDiscriminator = `stock_count:movement:${input.productId}`;
+      const itemId = deriveMoneyFactId(command.operationId, itemDiscriminator);
+      const movementId = requiresMovement
+        ? deriveMoneyFactId(command.operationId, movementDiscriminator)
+        : null;
       const quantityFactKind =
         !balance && actual === 0n ? ('count_zero_establishment' as const) : ('movement' as const);
       await tx.insert(stockCountItems).values({
@@ -321,7 +329,7 @@ export class StockCountRepository {
           occurredAt: command.occurredAt,
           reason: null,
           deviceId: context.deviceId,
-          operationId: randomUUID(),
+          operationId: deriveMoneyFactOperationId(command.operationId, movementDiscriminator),
           productUnitId: movementSnapshotUnit.id,
           selectedQuantityMilli:
             quantityFactKind === 'count_zero_establishment'

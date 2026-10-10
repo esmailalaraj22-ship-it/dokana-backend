@@ -32,6 +32,10 @@ export interface AuthenticatedPrincipal {
   sessionExpiresAt: Date;
 }
 
+export interface SyncAuthenticatedPrincipal extends Omit<AuthenticatedPrincipal, 'storeStatus'> {
+  storeStatus: Extract<StoreStatus, 'active' | 'read_only' | 'suspended'>;
+}
+
 export interface SessionIssueInput {
   userId: string;
   storeId: string;
@@ -79,6 +83,21 @@ export interface VerifiedAccessToken {
   deviceId: string;
   tokenId: string;
   expiresAt: number;
+}
+
+export type VerifiedSyncPushToken = VerifiedAccessToken;
+
+export interface SyncAuthenticationResponse {
+  tokenType: 'Bearer';
+  syncToken: string;
+  syncTokenExpiresInSeconds: number;
+  sessionExpiresAt: string;
+  store: {
+    id: string;
+    status: SyncAuthenticatedPrincipal['storeStatus'];
+  };
+  deviceId: string;
+  sessionId: string;
 }
 
 export interface AuthenticationResponse {

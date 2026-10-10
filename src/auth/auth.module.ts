@@ -6,6 +6,8 @@ import { AuthenticationDatabaseService } from './auth-database.service';
 import { AuthenticationService } from './auth.service';
 import { AuthenticationGuard } from './authentication.guard';
 import { PasswordService } from './password.service';
+import { SyncAuthenticationGuard } from './sync-authentication.guard';
+import { SyncAuthenticationService } from './sync-authentication.service';
 import { TokenService } from './token.service';
 
 @Module({
@@ -16,8 +18,17 @@ import { TokenService } from './token.service';
     AuthenticationService,
     AuthenticationGuard,
     PasswordService,
+    SyncAuthenticationGuard,
+    SyncAuthenticationService,
     TokenService,
   ],
-  exports: [AuthenticationDatabaseService, AuthenticationGuard, PasswordService, TokenService],
+  exports: [
+    AuthenticationDatabaseService,
+    AuthenticationGuard,
+    PasswordService,
+    SyncAuthenticationGuard,
+    SyncAuthenticationService,
+    TokenService,
+  ],
 })
 export class AuthenticationModule {}

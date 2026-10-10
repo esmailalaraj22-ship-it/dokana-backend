@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import {
   ForbiddenException,
   Inject,
@@ -16,8 +18,15 @@ import type {
   DatabaseClient,
   DatabaseReadiness,
   DatabaseTransaction,
+  OfflineOperationTransactionIdentity,
   TenantTransactionContext,
 } from './database.types';
+
+interface OfflineOperationTransactionScope {
+  context: TenantTransactionContext;
+  identity: OfflineOperationTransactionIdentity;
+  transaction: DatabaseTransaction;
+}
 
 interface RuntimeRoleInspection {
   isSuperuser: boolean;
@@ -55,6 +64,9 @@ class UnsafeRuntimeDatabaseRoleError extends Error {
 
 @Injectable()
 export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly offlineOperationScope =
+    new AsyncLocalStorage<OfflineOperationTransactionScope>();
+
   constructor(
     @Inject(DRIZZLE_DATABASE)
     private readonly database: DatabaseClient,
@@ -133,15 +145,37 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   ): Promise<T> {
     this.assertTenantContext(context);
 
+    const scope = this.offlineOperationScope.getStore();
+    if (scope) {
+      this.assertMatchingTenantContext(scope.context, context);
+      return work(scope.transaction);
+    }
+
     return this.database.transaction(async (transaction) => {
-      await transaction.execute(sql`select set_config('app.store_id', ${context.storeId}, true)`);
-      await transaction.execute(sql`select set_config('app.user_id', ${context.userId}, true)`);
-      await transaction.execute(sql`select set_config('app.device_id', ${context.deviceId}, true)`);
-      await transaction.execute(
-        sql`select set_config('app.request_id', ${context.requestId}, true)`,
-      );
+      await this.setTenantContext(transaction, context);
 
       return work(transaction);
+    });
+  }
+
+  async withOfflineOperationTransaction<T>(
+    context: TenantTransactionContext,
+    identity: OfflineOperationTransactionIdentity,
+    work: (transaction: DatabaseTransaction) => Promise<T>,
+  ): Promise<T> {
+    this.assertTenantContext(context);
+    if (!isUuid(identity.operationId) || !/^[a-z][a-z0-9_.]{2,127}$/.test(identity.operationType)) {
+      throw new TypeError('Offline operation transaction identity is invalid.');
+    }
+    if (this.offlineOperationScope.getStore()) {
+      throw new TypeError('Offline operation transactions cannot be nested.');
+    }
+
+    return this.database.transaction(async (transaction) => {
+      await this.setTenantContext(transaction, context);
+      return this.offlineOperationScope.run({ context, identity, transaction }, () =>
+        work(transaction),
+      );
     });
   }
 
@@ -150,17 +184,13 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     work: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
     this.assertTenantContext(context);
+    if (this.offlineOperationScope.getStore()) {
+      throw new TypeError('A snapshot transaction cannot be nested in an offline operation.');
+    }
 
     return this.database.transaction(
       async (transaction) => {
-        await transaction.execute(sql`select set_config('app.store_id', ${context.storeId}, true)`);
-        await transaction.execute(sql`select set_config('app.user_id', ${context.userId}, true)`);
-        await transaction.execute(
-          sql`select set_config('app.device_id', ${context.deviceId}, true)`,
-        );
-        await transaction.execute(
-          sql`select set_config('app.request_id', ${context.requestId}, true)`,
-        );
+        await this.setTenantContext(transaction, context);
 
         return work(transaction);
       },
@@ -185,10 +215,24 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   ): Promise<void> {
     let result;
     try {
-      result = await transaction.execute(sql`
-        select write_eligible as "writeEligible"
-        from ledger.lock_effective_entitlement(${storeId}::uuid)
-      `);
+      const scope = this.offlineOperationScope.getStore();
+      if (scope) {
+        if (scope.context.storeId !== storeId) {
+          this.throwBusinessWriteNotAllowed();
+        }
+        result = await transaction.execute(sql`
+          select ledger.lock_business_write_authority_v1(
+            ${storeId}::uuid,
+            ${scope.identity.operationId}::uuid,
+            ${scope.identity.operationType}::text
+          ) as "writeEligible"
+        `);
+      } else {
+        result = await transaction.execute(sql`
+          select write_eligible as "writeEligible"
+          from ledger.lock_effective_entitlement(${storeId}::uuid)
+        `);
+      }
     } catch (error) {
       if (postgresqlErrorCode(error) !== '42501') throw error;
       this.throwBusinessWriteNotAllowed();
@@ -332,5 +376,29 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     if (!values.every(isUuid)) {
       throw new TypeError('Tenant transaction context values must be UUIDs.');
     }
+  }
+
+  private assertMatchingTenantContext(
+    expected: TenantTransactionContext,
+    actual: TenantTransactionContext,
+  ): void {
+    if (
+      expected.storeId !== actual.storeId ||
+      expected.userId !== actual.userId ||
+      expected.deviceId !== actual.deviceId ||
+      expected.requestId !== actual.requestId
+    ) {
+      throw new TypeError('Nested tenant transaction context does not match the active context.');
+    }
+  }
+
+  private async setTenantContext(
+    transaction: DatabaseTransaction,
+    context: TenantTransactionContext,
+  ): Promise<void> {
+    await transaction.execute(sql`select set_config('app.store_id', ${context.storeId}, true)`);
+    await transaction.execute(sql`select set_config('app.user_id', ${context.userId}, true)`);
+    await transaction.execute(sql`select set_config('app.device_id', ${context.deviceId}, true)`);
+    await transaction.execute(sql`select set_config('app.request_id', ${context.requestId}, true)`);
   }
 }

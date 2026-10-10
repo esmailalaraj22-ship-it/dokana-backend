@@ -33,6 +33,7 @@ const item = z
 const command = z
   .object({
     operationId: identifier,
+    stockCountId: identifier.optional(),
     countType: z.enum(['full', 'partial']),
     occurredAt: instant,
     items: z.array(item),
@@ -47,6 +48,7 @@ export interface StockCountCommandItem {
 
 export interface StockCountCommand {
   operationId: string;
+  stockCountId: string | null;
   countType: StockCountType;
   occurredAt: Date;
   items: StockCountCommandItem[];
@@ -67,6 +69,7 @@ export function parseStockCountCommand(body: unknown): StockCountCommand {
   const semantic = {
     v: 1,
     action: 'inventory.stock_count',
+    stockCountId: parsed.data.stockCountId ?? null,
     countType: parsed.data.countType,
     occurredAt: parsed.data.occurredAt,
     items: sorted.map((value) => ({
@@ -77,6 +80,7 @@ export function parseStockCountCommand(body: unknown): StockCountCommand {
   };
   return {
     operationId: parsed.data.operationId,
+    stockCountId: parsed.data.stockCountId ?? null,
     countType: parsed.data.countType,
     occurredAt: new Date(parsed.data.occurredAt),
     items: sorted.map((value) => ({

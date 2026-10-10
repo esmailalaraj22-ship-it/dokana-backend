@@ -24,5 +24,6 @@ import { OwnerAccountingCorrectionController } from './owner-accounting-correcti
   ],
   controllers: [OwnerAccountingCorrectionController, MoneyTransferCorrectionController],
   providers: [AccountingCorrectionPostingRepository, AccountingCorrectionWriteService],
+  exports: [AccountingCorrectionWriteService],
 })
 export class AccountingCorrectionsModule {}

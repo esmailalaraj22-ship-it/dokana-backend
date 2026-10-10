@@ -17,5 +17,6 @@ import { CustomersController } from './customers.controller';
     CustomerWriteRepository,
     CustomerWriteService,
   ],
+  exports: [CustomerWriteService],
 })
 export class CustomersModule {}

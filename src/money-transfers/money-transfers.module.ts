@@ -19,6 +19,6 @@ import { MoneyTransferWriteService } from './money-transfer-write.service';
   ],
   controllers: [MoneyTransferController],
   providers: [MoneyTransferPostingRepository, MoneyTransferWriteService],
-  exports: [MoneyTransferPostingRepository],
+  exports: [MoneyTransferPostingRepository, MoneyTransferWriteService],
 })
 export class MoneyTransfersModule {}

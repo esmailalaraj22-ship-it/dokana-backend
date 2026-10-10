@@ -1,6 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
 
 import {
   AccountingPeriodNotPostingEligibleError,
@@ -27,6 +26,10 @@ import {
   type StockCountItem,
 } from '../database/schema';
 import { postgresqlErrorCode } from '../money-movements/money-movement-database-error';
+import {
+  deriveMoneyFactId,
+  deriveMoneyFactOperationId,
+} from '../money-movements/money-movement-identity';
 import type {
   InventoryCorrectionCommand,
   InventoryCorrectionFamily,
@@ -295,7 +298,8 @@ export class InventoryCorrectionRepository {
     )) {
       const unit = baseUnits.get(movement.productId);
       if (!unit) reject('INVENTORY_UNIT_UNAVAILABLE');
-      const movementId = randomUUID();
+      const discriminator = `inventory_correction:reversal:${movement.id}`;
+      const movementId = deriveMoneyFactId(command.operationId, discriminator);
       const delta = -movement.quantityDeltaMilli;
       const selectedQuantity = delta < 0n ? -delta : delta;
       const averageAfter =
@@ -324,7 +328,7 @@ export class InventoryCorrectionRepository {
         reversalOfId: movement.id,
         reason: 'Inventory operation correction reversal',
         deviceId: context.deviceId,
-        operationId: randomUUID(),
+        operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
         productUnitId: unit.id,
         selectedQuantityMilli: selectedQuantity,
         factorNum: 1,

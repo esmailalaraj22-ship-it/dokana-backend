@@ -168,6 +168,72 @@ describe('DatabaseService tenant transactions', () => {
     );
     expect(entitlementWork).not.toHaveBeenCalled();
   });
+
+  it('reuses one transaction and the offline authority for nested domain writes', async () => {
+    const identity = {
+      operationId: 'd6339f6f-a043-4138-8f39-3de1c584073a',
+      operationType: 'customers.create.v1',
+    };
+    const work = jest.fn().mockResolvedValue('applied');
+
+    await expect(
+      service.withOfflineOperationTransaction(context, identity, () =>
+        service.withBusinessWriteTransaction(context, work),
+      ),
+    ).resolves.toBe('applied');
+
+    expect(database.transaction).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(5);
+    expect(work).toHaveBeenCalledWith(transaction);
+  });
+
+  it('accepts a savepoint transaction only through the PostgreSQL-bound offline authority', async () => {
+    const identity = {
+      operationId: 'd6339f6f-a043-4138-8f39-3de1c584073a',
+      operationType: 'supplier_invoices.post.v1',
+    };
+    const savepointExecute = jest.fn().mockResolvedValue({ rows: [{ writeEligible: true }] });
+    const savepoint = { execute: savepointExecute } as unknown as DatabaseTransaction;
+
+    await expect(
+      service.withOfflineOperationTransaction(context, identity, () =>
+        service.assertBusinessWriteAllowed(savepoint, context.storeId),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(savepointExecute).toHaveBeenCalledTimes(1);
+    expect(database.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a nested domain transaction with different trusted context', async () => {
+    const identity = {
+      operationId: 'd6339f6f-a043-4138-8f39-3de1c584073a',
+      operationType: 'customers.create.v1',
+    };
+
+    await expect(
+      service.withOfflineOperationTransaction(context, identity, () =>
+        service.withTenantTransaction(
+          { ...context, storeId: '3d840d9a-d42e-4bdf-b71f-e0d4d9f05441' },
+          jest.fn(),
+        ),
+      ),
+    ).rejects.toThrow('does not match');
+    expect(database.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects nested offline operation scopes', async () => {
+    const identity = {
+      operationId: 'd6339f6f-a043-4138-8f39-3de1c584073a',
+      operationType: 'customers.create.v1',
+    };
+
+    await expect(
+      service.withOfflineOperationTransaction(context, identity, () =>
+        service.withOfflineOperationTransaction(context, identity, jest.fn()),
+      ),
+    ).rejects.toThrow('cannot be nested');
+  });
 });
 
 describe('DatabaseService runtime role safety', () => {

@@ -36,5 +36,6 @@ import { SaleReturnReadService } from './sale-return-read.service';
     SaleReturnReadRepository,
     SaleReturnReadService,
   ],
+  exports: [SaleReturnCorrectionService, SaleReturnPostingService],
 })
 export class ReturnsModule {}

@@ -371,22 +371,32 @@ describeWithPostgres('Station 3 PostgreSQL security and migrations', () => {
       order by signature
     `);
 
-    expect(functions.rows).toHaveLength(7);
+    expect(functions.rows).toHaveLength(9);
     for (const functionState of functions.rows) {
       expect(functionState.owner).toBe('shop_app_auth_owner');
       expect(functionState.securityDefiner).toBe(true);
       expect(functionState.publicExecute).toBe(false);
       expect(functionState.runtimeExecute).toBe(false);
       expect(functionState.configuration).toHaveLength(1);
-      expect(functionState.configuration[0]).toMatch(
-        /^search_path=pg_catalog, auth_api,(?: platform,)?(?: ledger,)? pg_temp$/,
-      );
+      if (functionState.signature.startsWith('validate_sync_')) {
+        expect(functionState.configuration[0]).toBe('search_path=pg_catalog, pg_temp');
+      } else {
+        expect(functionState.configuration[0]).toMatch(
+          /^search_path=pg_catalog, auth_api,(?: platform,)?(?: ledger,)? pg_temp$/,
+        );
+      }
     }
 
     const executableSignatures = functions.rows
       .filter((functionState) => functionState.authExecute)
       .map((functionState) => functionState.signature);
-    expect(executableSignatures).toHaveLength(6);
+    expect(executableSignatures).toHaveLength(8);
+    expect(executableSignatures).toEqual(
+      expect.arrayContaining([
+        'validate_sync_refresh_token(p_token_hash text)',
+        'validate_sync_session(p_user_id uuid, p_session_id uuid, p_store_id uuid, p_device_id uuid)',
+      ]),
+    );
     expect(executableSignatures).not.toContain(
       'rotate_refresh_token(p_current_token_hash text, p_new_token_id uuid, p_new_token_hash text, p_new_access_token_jti uuid, p_new_refresh_expires_at timestamp with time zone)',
     );

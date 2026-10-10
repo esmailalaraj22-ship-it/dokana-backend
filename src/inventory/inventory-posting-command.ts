@@ -37,6 +37,7 @@ const reason = z
   .refine((value) => !value.includes('\0'));
 const fields = {
   operationId: identifier,
+  entryId: identifier.optional(),
   productId: identifier,
   productUnitId: identifier,
   selectedQuantityMilli: magnitude,
@@ -50,6 +51,7 @@ const decrease = z.object({ ...fields, reason }).strict();
 export interface InventoryPostingCommand {
   kind: InventoryCommandKind;
   operationId: string;
+  entryId: string | null;
   productId: string;
   productUnitId: string;
   selectedQuantityMilli: bigint;
@@ -74,6 +76,7 @@ export function parseInventoryPostingCommand(
   const semantic = {
     v: 1,
     action: `inventory.${kind}`,
+    entryId: data.entryId ?? null,
     productId: data.productId,
     productUnitId: data.productUnitId,
     selectedQuantityMilli: data.selectedQuantityMilli,
@@ -84,6 +87,7 @@ export function parseInventoryPostingCommand(
   return {
     ...data,
     kind,
+    entryId: data.entryId ?? null,
     selectedQuantityMilli: BigInt(data.selectedQuantityMilli),
     totalPurchaseCostMinor: total === null ? null : BigInt(total),
     occurredAt: new Date(data.occurredAt),

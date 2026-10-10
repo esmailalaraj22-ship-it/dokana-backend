@@ -13,6 +13,11 @@ export interface TenantTransactionContext {
   requestId: string;
 }
 
+export interface OfflineOperationTransactionIdentity {
+  operationId: string;
+  operationType: string;
+}
+
 export interface DatabaseReadiness {
   ready: boolean;
   latencyMs: number;

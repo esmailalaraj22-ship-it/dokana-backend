@@ -17,5 +17,6 @@ import { ProductWriteService } from './product-write.service';
     ProductWriteRepository,
     ProductWriteService,
   ],
+  exports: [ProductWriteService],
 })
 export class ProductsModule {}

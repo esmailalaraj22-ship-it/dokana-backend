@@ -16,6 +16,7 @@ import type {
   RefreshRotationInput,
   RefreshRotationResult,
   SessionIssueInput,
+  SyncAuthenticatedPrincipal,
 } from './auth.types';
 
 interface AuthenticationRoleInspection {
@@ -219,6 +220,57 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
         from auth_api.validate_session($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid)
       `,
       [userId, sessionId, storeId, deviceId, accessTokenJti],
+    );
+    return result.rows[0];
+  }
+
+  async validateSyncSession(
+    userId: string,
+    sessionId: string,
+    storeId: string,
+    deviceId: string,
+  ): Promise<SyncAuthenticatedPrincipal | undefined> {
+    const result = await this.pool.query<SyncAuthenticatedPrincipal>(
+      `
+        select
+          user_id as "userId",
+          email,
+          full_name as "fullName",
+          store_id as "storeId",
+          store_name as "storeName",
+          store_status as "storeStatus",
+          membership_role as "membershipRole",
+          membership_version as "membershipVersion",
+          device_id as "deviceId",
+          session_id as "sessionId",
+          session_expires_at as "sessionExpiresAt"
+        from auth_api.validate_sync_session($1::uuid, $2::uuid, $3::uuid, $4::uuid)
+      `,
+      [userId, sessionId, storeId, deviceId],
+    );
+    return result.rows[0];
+  }
+
+  async validateSyncRefreshToken(
+    tokenHash: string,
+  ): Promise<SyncAuthenticatedPrincipal | undefined> {
+    const result = await this.pool.query<SyncAuthenticatedPrincipal>(
+      `
+        select
+          user_id as "userId",
+          email,
+          full_name as "fullName",
+          store_id as "storeId",
+          store_name as "storeName",
+          store_status as "storeStatus",
+          membership_role as "membershipRole",
+          membership_version as "membershipVersion",
+          device_id as "deviceId",
+          session_id as "sessionId",
+          session_expires_at as "sessionExpiresAt"
+        from auth_api.validate_sync_refresh_token($1::text)
+      `,
+      [tokenHash],
     );
     return result.rows[0];
   }

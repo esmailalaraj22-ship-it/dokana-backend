@@ -572,8 +572,8 @@ export class InventoryPostingRepository {
       !(product.allowNegativeStockOverride ?? settings?.allow ?? false)
     )
       throw new InventoryPostingRejection('INVENTORY_NEGATIVE_NOT_ALLOWED');
-    const entryId = randomUUID(),
-      movementId = randomUUID();
+    const entryId = c.entryId ?? randomUUID();
+    const movementId = deriveMoneyFactId(c.operationId, 'manual_inventory:movement');
     const snapshot = {
       storeId: context.storeId,
       productId: c.productId,
@@ -602,7 +602,7 @@ export class InventoryPostingRepository {
       ...snapshot,
       ...effect,
       id: movementId,
-      operationId: randomUUID(),
+      operationId: deriveMoneyFactOperationId(c.operationId, 'manual_inventory:movement'),
       movementType: correctionReplacement
         ? 'correction'
         : c.kind === 'opening'

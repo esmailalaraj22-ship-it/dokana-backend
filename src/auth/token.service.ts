@@ -3,12 +3,24 @@ import { jwtVerify, SignJWT, type JWTVerifyGetKey } from 'jose';
 
 import { isUuid } from '../common/logging/request-id';
 import { AppConfigService } from '../config/app-config.service';
-import type { AuthenticatedPrincipal, VerifiedAccessToken } from './auth.types';
+import type {
+  AuthenticatedPrincipal,
+  SyncAuthenticatedPrincipal,
+  VerifiedAccessToken,
+  VerifiedSyncPushToken,
+} from './auth.types';
 
 export class InvalidAccessTokenError extends Error {
   constructor() {
     super('The access token is invalid.');
     this.name = 'InvalidAccessTokenError';
+  }
+}
+
+export class InvalidSyncPushTokenError extends Error {
+  constructor() {
+    super('The sync push token is invalid.');
+    this.name = 'InvalidSyncPushTokenError';
   }
 }
 
@@ -41,13 +53,36 @@ export class TokenService {
     principal: Pick<AuthenticatedPrincipal, 'userId' | 'sessionId' | 'storeId' | 'deviceId'>,
     tokenId: string,
   ): Promise<string> {
+    return this.issueToken(principal, tokenId, 'access');
+  }
+
+  async issueSyncPushToken(
+    principal: Pick<SyncAuthenticatedPrincipal, 'userId' | 'sessionId' | 'storeId' | 'deviceId'>,
+    tokenId: string,
+  ): Promise<string> {
+    return this.issueToken(principal, tokenId, 'sync_push');
+  }
+
+  async verifyAccessToken(token: string): Promise<VerifiedAccessToken> {
+    return this.verifyToken(token, 'access', () => new InvalidAccessTokenError());
+  }
+
+  async verifySyncPushToken(token: string): Promise<VerifiedSyncPushToken> {
+    return this.verifyToken(token, 'sync_push', () => new InvalidSyncPushTokenError());
+  }
+
+  private async issueToken(
+    principal: Pick<AuthenticatedPrincipal, 'userId' | 'sessionId' | 'storeId' | 'deviceId'>,
+    tokenId: string,
+    tokenType: 'access' | 'sync_push',
+  ): Promise<string> {
     const signingKey = this.signingKeys.get(this.activeKeyId);
     if (!signingKey) {
       throw new Error('The active access-token signing key is unavailable.');
     }
 
     return new SignJWT({
-      typ: 'access',
+      typ: tokenType,
       sid: principal.sessionId,
       store_id: principal.storeId,
       device_id: principal.deviceId,
@@ -66,9 +101,13 @@ export class TokenService {
       .sign(signingKey);
   }
 
-  async verifyAccessToken(token: string): Promise<VerifiedAccessToken> {
+  private async verifyToken(
+    token: string,
+    expectedType: 'access' | 'sync_push',
+    invalidToken: () => Error,
+  ): Promise<VerifiedAccessToken> {
     if (token.length < 64 || token.length > 4_096) {
-      throw new InvalidAccessTokenError();
+      throw invalidToken();
     }
 
     const resolveKey: JWTVerifyGetKey = (protectedHeader) => {
@@ -77,12 +116,12 @@ export class TokenService {
         protectedHeader.typ !== 'JWT' ||
         typeof protectedHeader.kid !== 'string'
       ) {
-        throw new InvalidAccessTokenError();
+        throw invalidToken();
       }
 
       const key = this.signingKeys.get(protectedHeader.kid);
       if (!key) {
-        throw new InvalidAccessTokenError();
+        throw invalidToken();
       }
       return key;
     };
@@ -98,7 +137,7 @@ export class TokenService {
       const { payload } = result;
 
       if (
-        payload.typ !== 'access' ||
+        payload.typ !== expectedType ||
         typeof payload.sub !== 'string' ||
         typeof payload.sid !== 'string' ||
         typeof payload.store_id !== 'string' ||
@@ -107,7 +146,7 @@ export class TokenService {
         typeof payload.exp !== 'number' ||
         ![payload.sub, payload.sid, payload.store_id, payload.device_id, payload.jti].every(isUuid)
       ) {
-        throw new InvalidAccessTokenError();
+        throw invalidToken();
       }
 
       return {
@@ -119,7 +158,7 @@ export class TokenService {
         expiresAt: payload.exp,
       };
     } catch {
-      throw new InvalidAccessTokenError();
+      throw invalidToken();
     }
   }
 }

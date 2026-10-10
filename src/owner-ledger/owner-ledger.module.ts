@@ -26,6 +26,6 @@ import { OwnerPositionReadService } from './owner-position-read.service';
     OwnerPositionReadRepository,
     OwnerPositionReadService,
   ],
-  exports: [OwnerLedgerPostingRepository],
+  exports: [OwnerLedgerPostingRepository, OwnerLedgerWriteService],
 })
 export class OwnerLedgerModule {}

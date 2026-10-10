@@ -47,6 +47,9 @@ describe('controlled migration runner', () => {
       '0021_offline_license_authority.sql',
       '0022_commit_ordered_sync_foundation.sql',
       '0023_fix_bootstrap_boundary_hashing.sql',
+      '0024_offline_operation_push_authority.sql',
+      '0025_fix_offline_operation_terminal_outcomes.sql',
+      '0026_durable_changed_replay_conflict.sql',
     ]);
   });
 
@@ -69,7 +72,7 @@ describe('controlled migration runner', () => {
 
     expect(() =>
       validateRoleSwitches({
-        filename: '0005_refresh_rotation_session_boundary.sql',
+        filename: '0024_offline_operation_push_authority.sql',
         absolutePath: 'ignored',
         contents: 'set local role shop_app_auth_owner;',
         checksumSha256: sha256('set local role shop_app_auth_owner;'),

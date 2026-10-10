@@ -10,6 +10,8 @@ import {
   applicationViews,
   commitOrderedSyncFoundationRoutines,
   commitOrderedSyncFoundationTables,
+  offlineOperationPushRoutines,
+  offlineOperationPushTables,
   offlineLicenseAuthorityRoutines,
   ownershipFoundationAdditions,
   platformAdminStoreLifecycleRoutines,
@@ -67,6 +69,7 @@ export async function verifyApplicationInventory(
   let platformAdminStoreLifecycleApplied = false;
   let offlineLicenseAuthorityApplied = false;
   let commitOrderedSyncFoundationApplied = false;
+  let offlineOperationPushApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -177,6 +180,18 @@ export async function verifyApplicationInventory(
       }
       commitOrderedSyncFoundationApplied = true;
     }
+
+    const offlineOperationPush = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0024_offline_operation_push_authority.sql'`,
+    );
+    if (offlineOperationPush.rows[0]) {
+      const file = await readMigrationFile('0024_offline_operation_push_authority.sql');
+      if (offlineOperationPush.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Offline operation push authority migration checksum mismatch.');
+      }
+      offlineOperationPushApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -223,6 +238,7 @@ export async function verifyApplicationInventory(
     ...(saleCustomerCreditTenderApplied ? ['ledger.sale_customer_credit_applications'] : []),
     ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationTables : []),
     ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationTables : []),
+    ...(offlineOperationPushApplied ? offlineOperationPushTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -283,6 +299,7 @@ export async function verifyApplicationInventory(
       ...(platformAdminStoreLifecycleApplied ? platformAdminStoreLifecycleRoutines : []),
       ...(offlineLicenseAuthorityApplied ? offlineLicenseAuthorityRoutines : []),
       ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationRoutines : []),
+      ...(offlineOperationPushApplied ? offlineOperationPushRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

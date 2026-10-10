@@ -54,6 +54,13 @@ import { SalesController } from './sales.controller';
     CustomerFinancialCorrectionReadRepository,
     CustomerFinancialCorrectionService,
   ],
-  exports: [CustomerCreditRepository],
+  exports: [
+    CustomerCreditRepository,
+    CustomerCreditService,
+    CustomerFinancialCorrectionService,
+    CustomerPaymentPostingService,
+    SaleCorrectionService,
+    SalePostingService,
+  ],
 })
 export class SalesModule {}

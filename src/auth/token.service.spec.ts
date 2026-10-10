@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 
 import type { AppConfigService } from '../config/app-config.service';
-import { InvalidAccessTokenError, TokenService } from './token.service';
+import { InvalidAccessTokenError, InvalidSyncPushTokenError, TokenService } from './token.service';
 
 const activeSecret = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const previousSecret = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
@@ -86,6 +86,24 @@ describe('TokenService', () => {
     });
 
     await expect(service.verifyAccessToken(token)).resolves.toMatchObject(principal);
+  });
+
+  it('cryptographically separates sync push tokens from ordinary access tokens', async () => {
+    const service = createService();
+    const tokenId = randomUUID();
+    const syncToken = await service.issueSyncPushToken(principal, tokenId);
+    const accessToken = await service.issueAccessToken(principal, randomUUID());
+
+    await expect(service.verifySyncPushToken(syncToken)).resolves.toMatchObject({
+      ...principal,
+      tokenId,
+    });
+    await expect(service.verifyAccessToken(syncToken)).rejects.toBeInstanceOf(
+      InvalidAccessTokenError,
+    );
+    await expect(service.verifySyncPushToken(accessToken)).rejects.toBeInstanceOf(
+      InvalidSyncPushTokenError,
+    );
   });
 
   it.each([

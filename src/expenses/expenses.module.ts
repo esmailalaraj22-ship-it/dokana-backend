@@ -40,5 +40,6 @@ import { ExpensesController } from './expenses.controller';
     ExpenseRecognitionRepository,
     ExpenseRecognitionService,
   ],
+  exports: [ExpenseCorrectionService, ExpensePaymentService, ExpenseRecognitionService],
 })
 export class ExpensesModule {}

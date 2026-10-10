@@ -27,6 +27,11 @@ import { StockCountService } from './stock-count.service';
     StockCountRepository,
     StockCountService,
   ],
-  exports: [InventoryPostingRepository],
+  exports: [
+    InventoryCorrectionService,
+    InventoryPostingRepository,
+    InventoryPostingService,
+    StockCountService,
+  ],
 })
 export class InventoryModule {}

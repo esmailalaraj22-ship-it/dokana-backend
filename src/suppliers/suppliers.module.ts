@@ -54,5 +54,13 @@ import { SupplierReturnService } from './supplier-return.service';
     SupplierReturnRepository,
     SupplierReturnService,
   ],
+  exports: [
+    SupplierInvoiceCorrectionService,
+    SupplierInvoicePostingService,
+    SupplierPaymentCorrectionService,
+    SupplierPaymentPostingService,
+    SupplierReturnService,
+    SupplierWriteService,
+  ],
 })
 export class SuppliersModule {}
