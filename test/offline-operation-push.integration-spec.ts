@@ -20,13 +20,14 @@ import {
   deriveTransactionGroupId,
 } from '../src/money-movements/money-movement-identity';
 import type { OfflineOperationPushResult } from '../src/sync/offline-operation.contract';
+import { SyncCursorService } from '../src/sync/sync-cursor.service';
 import {
   createInventoryTestDatabase,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0026_durable_changed_replay_conflict.sql';
+const migrationFilename = '0027_immutable_sync_change_representations.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
 
@@ -44,6 +45,19 @@ interface PushEnvelopeInput {
 
 interface PushResponse {
   results: OfflineOperationPushResult[];
+}
+
+interface PullResponse {
+  changeFeedVersion: number;
+  changes: {
+    sequence: string;
+    entityType: string;
+    operationId: string | null;
+    representationVersion: number;
+    representation: Record<string, unknown>;
+  }[];
+  nextCursor: string;
+  hasMore: boolean;
 }
 
 function databaseUrl(url: string, name: string): string {
@@ -154,6 +168,32 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       [deriveTransactionGroupId(operationId)],
     );
     return result.rows[0]?.count ?? -1;
+  }
+
+  async function streamHead(): Promise<string> {
+    const result = await db().admin.query<{ sequence: string }>(
+      `select last_sequence::text as sequence
+       from sync.store_change_watermarks_v1
+       where store_id = $1`,
+      [fixture.storeId],
+    );
+    const sequence = result.rows[0]?.sequence;
+    if (sequence === undefined) throw new Error('S19 Store change watermark is unavailable.');
+    return sequence;
+  }
+
+  function issueCursor(sequence: string): string {
+    if (!app) throw new Error('S19 application is unavailable.');
+    return app.get(SyncCursorService).issue(fixture.storeId, sequence);
+  }
+
+  async function pull(cursor: string, limit = 100): Promise<PullResponse> {
+    const response = await request(server)
+      .get('/v1/sync/pull')
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .query({ cursor, limit })
+      .expect(200);
+    return responseBody(response) as PullResponse;
   }
 
   beforeAll(async () => {
@@ -347,6 +387,13 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(pending.results[0]).toEqual(expect.objectContaining({ status: 'DEPENDENCY_PENDING' }));
     expect(await count('purchase_invoices', invoiceOperationId)).toBe(0);
     expect(await count('supplier_ledger_entries', invoiceOperationId)).toBe(0);
+    const pendingChanges = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count
+       from sync.store_change_events_v1
+       where store_id = $1 and operation_id = $2`,
+      [fixture.storeId, invoiceOperationId],
+    );
+    expect(pendingChanges.rows[0]?.count).toBe(0);
 
     const supplier = envelope({
       operationId: supplierOperationId,
@@ -370,6 +417,12 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       [fixture.storeId, invoiceOperationId],
     );
     expect((await push([invoice])).results[0]?.status).toBe('EXACT_REPLAY');
+    const appliedChangeCount = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count
+       from sync.store_change_events_v1
+       where store_id = $1 and operation_id = $2`,
+      [fixture.storeId, invoiceOperationId],
+    );
     const changed = structuredClone(invoice);
     (changed.payload as Record<string, unknown>).invoiceNumber = 'S19-5-INV-CHANGED';
     const [firstConflict, concurrentConflict] = await Promise.all([
@@ -383,6 +436,13 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     }
     expect(await count('purchase_invoices', invoiceOperationId)).toBe(1);
     expect(await countByTransactionGroup('supplier_ledger_entries', invoiceOperationId)).toBe(1);
+    const unchangedChangeCount = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count
+       from sync.store_change_events_v1
+       where store_id = $1 and operation_id = $2`,
+      [fixture.storeId, invoiceOperationId],
+    );
+    expect(unchangedChangeCount.rows[0]?.count).toBe(appliedChangeCount.rows[0]?.count);
     const canonicalAfter = await db().admin.query<{ hash: string; response: unknown }>(
       `select request_hash as hash, response_body as response
        from sync.processed_operations where store_id = $1 and operation_id = $2`,
@@ -670,6 +730,23 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       await countByTransactionGroup('supplier_ledger_entries', supplierReturnOperationId),
     ).toBe(1);
 
+    const propagatedOperationIds = [
+      ownerOperationId,
+      inventoryOperationId,
+      supplierPaymentOperationId,
+      creditSaleOperationId,
+      collectionOperationId,
+      expenseOperationId,
+      expensePaymentOperationId,
+      supplierReturnOperationId,
+      saleReturnOperationId,
+      stockCountOperationId,
+    ];
+    const changeCountBeforeReplay = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count from sync.store_change_events_v1
+       where store_id = $1 and operation_id = any($2::uuid[])`,
+      [fixture.storeId, propagatedOperationIds],
+    );
     const ownerFoundation = foundations[2];
     if (!ownerFoundation) throw new Error('S19.5 owner operation fixture is unavailable.');
     const replay = await push([ownerFoundation]);
@@ -687,23 +764,77 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     const changes = await db().admin.query<{ count: number }>(
       `select count(*)::integer as count from sync.store_change_events_v1
        where store_id = $1 and operation_id = any($2::uuid[])`,
-      [
-        fixture.storeId,
-        [
-          ownerOperationId,
-          inventoryOperationId,
-          supplierPaymentOperationId,
-          creditSaleOperationId,
-          collectionOperationId,
-          expenseOperationId,
-          expensePaymentOperationId,
-          supplierReturnOperationId,
-          saleReturnOperationId,
-          stockCountOperationId,
-        ],
-      ],
+      [fixture.storeId, propagatedOperationIds],
     );
+    expect(changes.rows[0]?.count).toBe(changeCountBeforeReplay.rows[0]?.count);
     expect(changes.rows[0]?.count).toBeGreaterThan(0);
+  });
+
+  it('delivers online and offline mutations through one retry-safe ordered stream', async () => {
+    const customerId = randomUUID();
+    const onlineCreateOperationId = randomUUID();
+    const offlineUpdateOperationId = randomUUID();
+    const onlineUpdateOperationId = randomUUID();
+    const baseline = await streamHead();
+
+    await request(server)
+      .post('/v1/customers')
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({
+        id: customerId,
+        operationId: onlineCreateOperationId,
+        name: 'S19.6 Unified Stream Customer',
+        phone: '0599000031',
+      })
+      .expect(201);
+
+    const offlineUpdate = envelope({
+      operationId: offlineUpdateOperationId,
+      operationType: 'customers.update.v1',
+      aggregateId: customerId,
+      expectedVersion: '1',
+      payload: { notes: 'offline update' },
+    });
+    expect((await push([offlineUpdate])).results[0]?.status).toBe('APPLIED');
+
+    await request(server)
+      .patch(`/v1/customers/${customerId}`)
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({
+        operationId: onlineUpdateOperationId,
+        expectedVersion: '2',
+        name: 'S19.6 Unified Stream Customer Updated',
+      })
+      .expect(200);
+
+    const cursor = issueCursor(baseline);
+    const firstPage = await pull(cursor, 2);
+    const retriedFirstPage = await pull(cursor, 2);
+    expect(retriedFirstPage).toEqual(firstPage);
+    expect(firstPage).toMatchObject({ changeFeedVersion: 1, hasMore: true });
+    expect(firstPage.changes).toHaveLength(2);
+
+    const secondPage = await pull(firstPage.nextCursor, 2);
+    expect(secondPage).toMatchObject({ changeFeedVersion: 1, hasMore: false });
+    expect(secondPage.changes).toHaveLength(1);
+    const changes = [...firstPage.changes, ...secondPage.changes];
+    expect(changes.map((change) => change.operationId)).toEqual([
+      onlineCreateOperationId,
+      offlineUpdateOperationId,
+      onlineUpdateOperationId,
+    ]);
+    expect(changes.map((change) => change.sequence)).toEqual([
+      (BigInt(baseline) + 1n).toString(),
+      (BigInt(baseline) + 2n).toString(),
+      (BigInt(baseline) + 3n).toString(),
+    ]);
+    expect(changes.every((change) => change.entityType === 'customer')).toBe(true);
+    expect(changes.every((change) => change.representationVersion === 1)).toBe(true);
+    expect(changes.map((change) => change.representation.version)).toEqual(['1', '2', '3']);
+
+    const headBeforeReplay = await streamHead();
+    expect((await push([offlineUpdate])).results[0]?.status).toBe('EXACT_REPLAY');
+    expect(await streamHead()).toBe(headBeforeReplay);
   });
 
   it('isolates applied, dependency-pending, and rejected items in one bounded batch', async () => {
@@ -746,6 +877,13 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(await count('customers', validOperationId)).toBe(1);
     expect(await count('suppliers', pendingOperationId)).toBe(0);
     expect(await count('customers', rejectedOperationId)).toBe(0);
+    const falseChanges = await db().admin.query<{ count: number }>(
+      `select count(*)::integer as count
+       from sync.store_change_events_v1
+       where store_id = $1 and operation_id = any($2::uuid[])`,
+      [fixture.storeId, [pendingOperationId, rejectedOperationId]],
+    );
+    expect(falseChanges.rows[0]?.count).toBe(0);
   });
 
   it('keeps identical and stale-version races deterministic', async () => {

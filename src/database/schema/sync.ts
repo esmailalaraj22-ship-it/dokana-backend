@@ -25,10 +25,17 @@ export const storeChangeWatermarksV1 = syncSchema.table(
       .primaryKey()
       .references(() => stores.id, { onDelete: 'cascade' }),
     lastSequence: bigint('last_sequence', { mode: 'bigint' }).notNull().default(0n),
+    minimumReplayableSequence: bigint('minimum_replayable_sequence', { mode: 'bigint' })
+      .notNull()
+      .default(0n),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
     check('store_change_watermarks_v1_last_sequence_check', sql`${table.lastSequence} >= 0`),
+    check(
+      'store_change_watermarks_v1_replayable_sequence_check',
+      sql`${table.minimumReplayableSequence} >= 0 and ${table.minimumReplayableSequence} <= ${table.lastSequence}`,
+    ),
   ],
 );
 
@@ -53,6 +60,8 @@ export const storeChangeEventsV1 = syncSchema.table(
     operationId: uuid('operation_id'),
     deviceId: uuid('device_id'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    representationVersion: smallint('representation_version'),
+    representation: jsonb('representation').$type<Record<string, unknown>>(),
     occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
     capturedAt: timestamp('captured_at', { withTimezone: true, mode: 'date' })
       .notNull()
@@ -69,6 +78,11 @@ export const storeChangeEventsV1 = syncSchema.table(
     check('store_change_events_v1_store_sequence_check', sql`${table.storeSequence} > 0`),
     check('store_change_events_v1_contract_version_check', sql`${table.contractVersion} = 1`),
     check('store_change_events_v1_entity_version_check', sql`${table.entityVersion} >= 1`),
+    check(
+      'store_change_events_v1_representation_pair_check',
+      sql`(${table.representationVersion} is null and ${table.representation} is null)
+          or (${table.representationVersion} = 1 and jsonb_typeof(${table.representation}) = 'object')`,
+    ),
     index('idx_store_change_events_v1_entity').on(
       table.storeId,
       table.entityType,

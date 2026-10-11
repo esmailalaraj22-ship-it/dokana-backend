@@ -29,6 +29,8 @@ import type {
   BootstrapPage,
   BootstrapRecord,
 } from '../src/sync/bootstrap.types';
+import type { ChangePullResponse } from '../src/sync/change-pull.types';
+import { SyncCursorService } from '../src/sync/sync-cursor.service';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
 const environment = readLocalPostgresTestEnvironment();
@@ -282,6 +284,7 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
   let app: INestApplication | undefined;
   let server: Server;
   let fixturePool: Pool;
+  let runtimePool: Pool;
   let artifactRoot: string;
   let activePlanId: string;
   let ownsPlan = false;
@@ -448,6 +451,7 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
       1,
       '-c session_replication_role=replica -c app.suppress_change_events=on',
     );
+    runtimePool = createTestPool(environment.runtimeUrl, 'dokana-s19-pull-runtime', 2);
     poolsInitialized = true;
     await removeFixtures();
 
@@ -596,7 +600,7 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
     if (app) await app.close();
     if (poolsInitialized) {
       await removeFixtures();
-      await fixturePool.end();
+      await Promise.all([runtimePool.end(), fixturePool.end()]);
     }
     if (artifactRoot) await rm(artifactRoot, { recursive: true, force: true });
   });
@@ -631,7 +635,7 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
     });
     expect(manifest.snapshotId).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.manifestChecksum).toMatch(/^[0-9a-f]{64}$/);
-    expect(manifest.baseCursor).toMatch(/^\d+$/);
+    expect(manifest.baseCursor).toMatch(/^sc1\./);
 
     const ids = manifest.datasets.map((dataset) => dataset.id);
     expect(ids).toEqual([
@@ -694,6 +698,86 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
     );
     const after = await fixturePool.query(sideEffectQuery, [fixture.stores.a]);
     expect(after.rows).toEqual(before.rows);
+  });
+
+  it('continues a bootstrap through the authenticated retry-safe incremental pull API', async () => {
+    const manifest = await startBootstrap(identityA);
+    const runtime = await runtimePool.connect();
+    try {
+      await runtime.query('begin');
+      await runtime.query(
+        `select
+           set_config('app.store_id', $1, true),
+           set_config('app.user_id', $2, true),
+           set_config('app.device_id', $3, true),
+           set_config('app.request_id', $4, true)`,
+        [fixture.stores.a, fixture.users.a, identityA.deviceId, randomUUID()],
+      );
+      await runtime.query(
+        `update ledger.customers
+         set notes = 'post-bootstrap authoritative change',
+             version = version + 1,
+             updated_at = clock_timestamp()
+         where id = $1`,
+        [customerAIds[0]],
+      );
+      await runtime.query('commit');
+    } finally {
+      await runtime.query('rollback').catch(() => undefined);
+      runtime.release();
+    }
+
+    const first = await authorized(
+      identityA,
+      'get',
+      `/v1/sync/pull?cursor=${encodeURIComponent(manifest.baseCursor)}&limit=1`,
+    ).expect(200);
+    const retry = await authorized(
+      identityA,
+      'get',
+      `/v1/sync/pull?cursor=${encodeURIComponent(manifest.baseCursor)}&limit=1`,
+    ).expect(200);
+    expect(retry.body).toEqual(first.body);
+
+    const body = bodyAsRecord(first) as unknown as ChangePullResponse;
+    const basePosition = app?.get(SyncCursorService).decode(manifest.baseCursor);
+    expect(basePosition).toBeDefined();
+    expect(BigInt(body.changes[0]?.sequence ?? '-1')).toBe((basePosition?.sequence ?? -2n) + 1n);
+    expect(body).toMatchObject({
+      changeFeedVersion: 1,
+      hasMore: false,
+      changes: [
+        {
+          changeContractVersion: 1,
+          representationVersion: 1,
+          entityType: 'customer',
+          entityId: customerAIds[0],
+          entityVersion: '9007199254740994',
+          representation: {
+            id: customerAIds[0],
+            store_id: fixture.stores.a,
+            notes: 'post-bootstrap authoritative change',
+            version: '9007199254740994',
+          },
+        },
+      ],
+    });
+    expect(body.nextCursor).toMatch(/^sc1\./);
+
+    const empty = await authorized(
+      identityA,
+      'get',
+      `/v1/sync/pull?cursor=${encodeURIComponent(body.nextCursor)}&limit=1`,
+    ).expect(200);
+    expect(empty.body).toMatchObject({ changes: [], nextCursor: body.nextCursor, hasMore: false });
+
+    await authorized(
+      identityB,
+      'get',
+      `/v1/sync/pull?cursor=${encodeURIComponent(body.nextCursor)}`,
+    ).expect(400);
+    await authorized(identityA, 'get', '/v1/sync/pull?cursor=not-a-cursor').expect(400);
+    await authorized(identityA, 'get', '/v1/sync/pull?cursor=0').expect(410);
   });
 
   it('stages verified pages in SQLite and activates the dataset with its base cursor atomically', async () => {

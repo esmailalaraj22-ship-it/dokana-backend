@@ -170,6 +170,12 @@ export const commitOrderedSyncFoundationRoutines = [
   'sync.sanitize_bootstrap_record_v1(p_value jsonb)',
 ] as const;
 
+export const immutableSyncChangeRepresentationRoutines = [
+  'sync.build_change_representation_v1(p_entity_type text, p_row jsonb)',
+  'sync.read_store_change_bounds_v1(p_store_id uuid)',
+  'sync.read_store_change_page_v2(p_store_id uuid, p_after_sequence bigint, p_limit integer)',
+] as const;
+
 export const offlineOperationPushTables = ['sync.offline_operation_provenance_v1'] as const;
 
 export const offlineOperationPushRoutines = [

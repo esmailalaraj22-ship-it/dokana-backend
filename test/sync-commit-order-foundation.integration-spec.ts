@@ -10,10 +10,11 @@ const describeWithPostgres = environment ? describe : describe.skip;
 interface ChangeEventRow {
   storeSequence: string;
   contractVersion: number;
+  representationVersion: number;
   entityType: string;
   entityKey: string;
   entityId: string | null;
-  payload: Record<string, unknown>;
+  representation: Record<string, unknown>;
 }
 
 describeWithPostgres('S19 commit-ordered Store change foundation', () => {
@@ -86,11 +87,12 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
         `select
            store_sequence::text as "storeSequence",
            contract_version as "contractVersion",
+           representation_version as "representationVersion",
            entity_type as "entityType",
            entity_key as "entityKey",
            entity_id as "entityId",
-           payload
-         from sync.read_store_change_page_v1($1, $2::bigint, $3)`,
+           representation
+         from sync.read_store_change_page_v2($1, $2::bigint, $3)`,
         [storeId, afterSequence, limit],
       );
       await client.query('commit');
@@ -203,6 +205,12 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
         fixture.devices.b,
       ],
     );
+    await adminPool.query(
+      `insert into sync.store_change_watermarks_v1(
+         store_id, last_sequence, minimum_replayable_sequence
+       ) values ($1, 0, 0), ($2, 0, 0)`,
+      storeIds,
+    );
   }, 30_000);
 
   afterAll(async () => {
@@ -298,12 +306,13 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
       expect(futureChanges[0]).toMatchObject({
         storeSequence: '2',
         contractVersion: 1,
+        representationVersion: 1,
         entityType: 'customer',
         entityKey: fixture.customers.a1,
         entityId: fixture.customers.a1,
-        payload: {
-          entityKey: fixture.customers.a1,
+        representation: {
           id: fixture.customers.a1,
+          name: 'T1 commits later',
           version: '2',
         },
       });
@@ -394,13 +403,14 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
     );
     for (const event of [...firstPage, ...secondPage]) {
       expect(event.contractVersion).toBe(1);
+      expect(event.representationVersion).toBe(1);
       expect(event.entityType).toBe('customer');
       expect([fixture.customers.a1, fixture.customers.a2]).toContain(event.entityId);
-      expect(Object.keys(event.payload).sort()).toEqual(
-        expect.arrayContaining(['entityKey', 'id', 'status', 'version']),
+      expect(Object.keys(event.representation).sort()).toEqual(
+        expect.arrayContaining(['id', 'name', 'normalized_name', 'status', 'version']),
       );
-      expect(JSON.stringify(event.payload)).not.toMatch(
-        /private-|name|phone|normalized|request_hash|password_hash|token_hash/i,
+      expect(JSON.stringify(event.representation)).not.toMatch(
+        /request_hash|password_hash|token_hash/i,
       );
     }
 
@@ -424,7 +434,7 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
         fixture.devices.a,
       );
       await expect(
-        mismatchedContext.query(`select * from sync.read_store_change_page_v1($1, 0, 100)`, [
+        mismatchedContext.query(`select * from sync.read_store_change_page_v2($1, 0, 100)`, [
           fixture.stores.b,
         ]),
       ).rejects.toMatchObject({ code: '22023' });
@@ -460,6 +470,8 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
       runtimeEventsSelect: boolean;
       runtimeWatermarkSelect: boolean;
       runtimeBoundaryExecute: boolean;
+      runtimeLegacyPageExecute: boolean;
+      runtimeBoundsExecute: boolean;
       runtimePageExecute: boolean;
       runtimeSanitizerExecute: boolean;
       runtimeAllocatorExecute: boolean;
@@ -476,6 +488,10 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
         has_function_privilege('shop_app_runtime', 'sync.read_bootstrap_boundary_v1(uuid,uuid)', 'EXECUTE')
           as "runtimeBoundaryExecute",
         has_function_privilege('shop_app_runtime', 'sync.read_store_change_page_v1(uuid,bigint,integer)', 'EXECUTE')
+          as "runtimeLegacyPageExecute",
+        has_function_privilege('shop_app_runtime', 'sync.read_store_change_bounds_v1(uuid)', 'EXECUTE')
+          as "runtimeBoundsExecute",
+        has_function_privilege('shop_app_runtime', 'sync.read_store_change_page_v2(uuid,bigint,integer)', 'EXECUTE')
           as "runtimePageExecute",
         has_function_privilege('shop_app_runtime', 'sync.sanitize_bootstrap_record_v1(jsonb)', 'EXECUTE')
           as "runtimeSanitizerExecute",
@@ -501,6 +517,8 @@ describeWithPostgres('S19 commit-ordered Store change foundation', () => {
       runtimeEventsSelect: false,
       runtimeWatermarkSelect: false,
       runtimeBoundaryExecute: true,
+      runtimeLegacyPageExecute: false,
+      runtimeBoundsExecute: true,
       runtimePageExecute: true,
       runtimeSanitizerExecute: true,
       runtimeAllocatorExecute: false,

@@ -20,10 +20,14 @@ import { BOOTSTRAP_ARTIFACT_ROOT, BootstrapArtifactStore } from './bootstrap-art
 import { BootstrapController } from './bootstrap.controller';
 import { BootstrapRepository } from './bootstrap.repository';
 import { BootstrapService } from './bootstrap.service';
+import { ChangePullController } from './change-pull.controller';
+import { ChangePullRepository } from './change-pull.repository';
+import { ChangePullService } from './change-pull.service';
 import { OfflineOperationController } from './offline-operation.controller';
 import { OfflineOperationRegistry } from './offline-operation.registry';
 import { OfflineOperationRepository } from './offline-operation.repository';
 import { OfflineOperationService } from './offline-operation.service';
+import { SyncCursorService } from './sync-cursor.service';
 
 @Module({
   imports: [
@@ -41,7 +45,7 @@ import { OfflineOperationService } from './offline-operation.service';
     SalesModule,
     SuppliersModule,
   ],
-  controllers: [BootstrapController, OfflineOperationController],
+  controllers: [BootstrapController, ChangePullController, OfflineOperationController],
   providers: [
     {
       provide: BOOTSTRAP_ARTIFACT_ROOT,
@@ -50,9 +54,12 @@ import { OfflineOperationService } from './offline-operation.service';
     BootstrapArtifactStore,
     BootstrapRepository,
     BootstrapService,
+    ChangePullRepository,
+    ChangePullService,
     OfflineOperationRegistry,
     OfflineOperationRepository,
     OfflineOperationService,
+    SyncCursorService,
   ],
 })
 export class SyncModule {}

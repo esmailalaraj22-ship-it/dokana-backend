@@ -10,6 +10,7 @@ import {
   applicationViews,
   commitOrderedSyncFoundationRoutines,
   commitOrderedSyncFoundationTables,
+  immutableSyncChangeRepresentationRoutines,
   offlineOperationPushRoutines,
   offlineOperationPushTables,
   offlineLicenseAuthorityRoutines,
@@ -70,6 +71,7 @@ export async function verifyApplicationInventory(
   let offlineLicenseAuthorityApplied = false;
   let commitOrderedSyncFoundationApplied = false;
   let offlineOperationPushApplied = false;
+  let immutableSyncChangeRepresentationApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -192,6 +194,18 @@ export async function verifyApplicationInventory(
       }
       offlineOperationPushApplied = true;
     }
+
+    const immutableSyncChangeRepresentation = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0027_immutable_sync_change_representations.sql'`,
+    );
+    if (immutableSyncChangeRepresentation.rows[0]) {
+      const file = await readMigrationFile('0027_immutable_sync_change_representations.sql');
+      if (immutableSyncChangeRepresentation.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Immutable synchronization representation migration checksum mismatch.');
+      }
+      immutableSyncChangeRepresentationApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -300,6 +314,9 @@ export async function verifyApplicationInventory(
       ...(offlineLicenseAuthorityApplied ? offlineLicenseAuthorityRoutines : []),
       ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationRoutines : []),
       ...(offlineOperationPushApplied ? offlineOperationPushRoutines : []),
+      ...(immutableSyncChangeRepresentationApplied
+        ? immutableSyncChangeRepresentationRoutines
+        : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

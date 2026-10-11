@@ -35,6 +35,7 @@ import {
   syncProtocolVersion,
 } from './bootstrap-datasets';
 import { BootstrapRepository } from './bootstrap.repository';
+import { SyncCursorService } from './sync-cursor.service';
 import type {
   BootstrapBoundary,
   BootstrapDatasetDefinition,
@@ -75,6 +76,7 @@ export class BootstrapService {
     private readonly licenses: OfflineLicenseRepository,
     private readonly licenseCrypto: OfflineLicenseCryptoService,
     private readonly config: AppConfigService,
+    private readonly cursors: SyncCursorService,
   ) {}
 
   async start(
@@ -219,7 +221,7 @@ export class BootstrapService {
       serverTime: boundary.serverTime.toISOString(),
       expiresAt: expiresAt.toISOString(),
       snapshotId: boundary.snapshotId,
-      baseCursor: boundary.baseWatermark,
+      baseCursor: this.cursors.issue(context.storeId, boundary.baseWatermark),
       pageSize: bootstrapPageSize,
       encoding: {
         bigInteger: 'decimal_string',
