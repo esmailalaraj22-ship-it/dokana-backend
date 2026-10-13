@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
 import type { Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -23,6 +26,8 @@ import {
   parseOfflineOperationEnvelope,
   type OfflineOperationPushResult,
 } from '../src/sync/offline-operation.contract';
+import { BOOTSTRAP_ARTIFACT_ROOT } from '../src/sync/bootstrap-artifact.store';
+import type { BootstrapManifest } from '../src/sync/bootstrap.types';
 import { SyncCursorService } from '../src/sync/sync-cursor.service';
 import {
   createInventoryTestDatabase,
@@ -55,7 +60,10 @@ interface PullResponse {
   changeFeedVersion: number;
   changes: {
     sequence: string;
+    changeContractVersion: number;
     entityType: string;
+    entityId: string | null;
+    entityVersion: string;
     operationId: string | null;
     representationVersion: number;
     representation: Record<string, unknown>;
@@ -106,6 +114,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
   let license: OfflineLicenseResponse;
   let occurredAt: string;
   let nextSequence = 1n;
+  let artifactRoot = '';
 
   const originalEnvironment = {
     APP_ENV: process.env.APP_ENV,
@@ -135,6 +144,27 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     if (!database) throw new Error('Disposable S19.5 database is unavailable.');
     return database;
   };
+
+  async function startApplication(): Promise<void> {
+    if (!artifactRoot) throw new Error('S19 bootstrap artifact root is unavailable.');
+    const { AppModule } = await import('../src/app.module');
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(BOOTSTRAP_ARTIFACT_ROOT)
+      .useValue(artifactRoot)
+      .compile();
+    app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
+    configureApplication(app as NestExpressApplication, app.get(AppConfigService));
+    app.useLogger(app.get(Logger));
+    await app.init();
+    server = app.getHttpServer() as Server;
+  }
+
+  async function restartApplication(): Promise<void> {
+    const runningApplication = app;
+    app = undefined;
+    await runningApplication?.close();
+    await startApplication();
+  }
 
   function envelope(input: PushEnvelopeInput): Record<string, unknown> {
     const signed = license.license;
@@ -302,9 +332,19 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     return responseBody(response) as PullResponse;
   }
 
+  async function startBootstrap(): Promise<BootstrapManifest> {
+    const response = await request(server)
+      .post('/v1/sync/bootstrap')
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({ bootstrapVersion: 1, licenseId: license.license.payload.licenseId })
+      .expect(200);
+    return responseBody(response) as BootstrapManifest;
+  }
+
   beforeAll(async () => {
     if (!environment)
       throw new Error('The approved local PostgreSQL test environment is required.');
+    artifactRoot = await mkdtemp(join(tmpdir(), 'dokana-s19-integrated-lifecycle-'));
     database = await createInventoryTestDatabase(migrationFilename);
     const migrationClient = await db().migration.connect();
     try {
@@ -371,13 +411,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       [fixture.expenseCategoryId, fixture.storeId, randomUUID()],
     );
 
-    const { AppModule } = await import('../src/app.module');
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication<NestExpressApplication>({ bodyParser: false });
-    configureApplication(app as NestExpressApplication, app.get(AppConfigService));
-    app.useLogger(app.get(Logger));
-    await app.init();
-    server = app.getHttpServer() as Server;
+    await startApplication();
 
     login = responseBody(
       await request(server)
@@ -438,6 +472,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
   afterAll(async () => {
     await app?.close();
     await database?.close();
+    if (artifactRoot) await rm(artifactRoot, { recursive: true, force: true });
     for (const [key, value] of Object.entries(originalEnvironment)) {
       if (value === undefined) Reflect.deleteProperty(process.env, key);
       else process.env[key] = value;
@@ -1589,5 +1624,293 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       await migration.query('reset role').catch(() => undefined);
       migration.release();
     }
+  });
+
+  it('converges one bootstrap, offline push, recovery, restart, and retry-safe pull lifecycle', async () => {
+    const manifest = await startBootstrap();
+    const cursorService = app?.get(SyncCursorService);
+    if (!cursorService) throw new Error('S19 cursor service is unavailable.');
+    const basePosition = cursorService.decode(manifest.baseCursor);
+    expect(manifest).toMatchObject({
+      bootstrapVersion: 1,
+      protocolVersion: 1,
+      changeFeedVersion: 1,
+      sqliteSchemaVersion: 10_300,
+      storeId: fixture.storeId,
+      deviceId: fixture.deviceId,
+      status: 'ready',
+    });
+    expect(basePosition.storeId).toBe(fixture.storeId);
+
+    const storesDataset = manifest.datasets.find((dataset) => dataset.id === 'stores');
+    if (!storesDataset || storesDataset.pageCount !== 1) {
+      throw new Error('S19 Store bootstrap dataset is unavailable.');
+    }
+    const storePage = await request(server)
+      .get(`/v1/sync/bootstrap/${manifest.sessionId}/datasets/stores/pages/1`)
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .expect(200);
+    expect(responseBody(storePage)).toMatchObject({
+      sessionId: manifest.sessionId,
+      snapshotId: manifest.snapshotId,
+      records: [expect.objectContaining({ id: fixture.storeId })],
+    });
+
+    const customerId = randomUUID();
+    const productId = randomUUID();
+    const productUnitId = randomUUID();
+    const onlineCreateOperationId = randomUUID();
+    const productOperationId = randomUUID();
+    const inventoryOperationId = randomUUID();
+    const saleOperationId = randomUUID();
+    const contributionOperationId = randomUUID();
+    const rejectedOperationId = randomUUID();
+    const onlineUpdateOperationId = randomUUID();
+
+    await request(server)
+      .post('/v1/customers')
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({
+        id: customerId,
+        operationId: onlineCreateOperationId,
+        name: 'S19.9 Integrated Customer',
+        phone: '0599111901',
+      })
+      .expect(201);
+
+    const product = envelope({
+      operationId: productOperationId,
+      operationType: 'products.create.v1',
+      aggregateId: productId,
+      payload: {
+        name: 'S19.9 Integrated Product',
+        measurementType: 'count',
+        trackInventory: true,
+        allowNegativeStockOverride: false,
+        initialBaseUnit: {
+          id: productUnitId,
+          unitName: 'piece',
+          salePriceMinor: '300',
+          purchasePriceMinor: '300',
+        },
+      },
+    });
+    const inventory = envelope({
+      operationId: inventoryOperationId,
+      operationType: 'inventory.increase.post.v1',
+      aggregateId: randomUUID(),
+      payload: {
+        productId,
+        productUnitId,
+        selectedQuantityMilli: '3000',
+        totalPurchaseCostMinor: '900',
+        occurredAt,
+      },
+      dependencies: [productOperationId],
+    });
+    const sale = envelope({
+      operationId: saleOperationId,
+      operationType: 'sales.post.v1',
+      payload: {
+        customerId,
+        occurredAt,
+        totalMinor: '300',
+        items: [
+          {
+            isManualLine: false,
+            productId,
+            productUnitId,
+            quantityMilli: '1000',
+            unitPriceMinor: '300',
+            lineTotalMinor: '300',
+          },
+        ],
+      },
+      dependencies: [inventoryOperationId],
+    });
+    const contribution = envelope({
+      operationId: contributionOperationId,
+      operationType: 'owner_contributions.post.v1',
+      payload: { moneyAccountId: fixture.moneyAccountId, amountMinor: '1000', occurredAt },
+      clockState: 'clock_rollback_suspected',
+    });
+
+    const headBeforePending = await streamHead();
+    expect((await push([sale])).results[0]).toMatchObject({ status: 'DEPENDENCY_PENDING' });
+    expect(await streamHead()).toBe(headBeforePending);
+    await expect(accountingEffectVector(saleOperationId)).resolves.toMatchObject({
+      receivableDelta: '0',
+      inventoryQuantityDelta: '0',
+      sales: 0,
+      authoritativeChanges: 0,
+    });
+
+    expect((await push([product, inventory])).results.map((result) => result.status)).toEqual([
+      'APPLIED',
+      'APPLIED',
+    ]);
+    expect((await push([contribution])).results[0]).toMatchObject({
+      status: 'QUARANTINED',
+      code: 'OFFLINE_CLOCK_ROLLBACK_SUSPECTED',
+    });
+    await expect(accountingEffectVector(contributionOperationId)).resolves.toMatchObject({
+      moneyDelta: '0',
+      authoritativeChanges: 0,
+    });
+
+    await restartApplication();
+    await expect(operationStatus(contributionOperationId)).resolves.toMatchObject({
+      status: 'QUARANTINED',
+      recoveryEligible: true,
+    });
+    const recoveryRequestId = randomUUID();
+    await expect(recover(contribution, recoveryRequestId)).resolves.toMatchObject({
+      status: 'APPLIED',
+      code: null,
+    });
+    await expect(recover(contribution, recoveryRequestId)).resolves.toMatchObject({
+      status: 'EXACT_REPLAY',
+      code: null,
+    });
+    expect((await push([sale])).results[0]).toMatchObject({ status: 'APPLIED', code: null });
+
+    const rejected = {
+      ...envelope({
+        operationId: rejectedOperationId,
+        operationType: 'customers.create.v1',
+        aggregateId: randomUUID(),
+        payload: { name: 'S19.9 Wrong Store', phone: '0599111902' },
+      }),
+      storeId: randomUUID(),
+    };
+    expect((await push([rejected])).results[0]).toMatchObject({
+      status: 'REJECTED',
+      code: 'SYNC_CONTEXT_MISMATCH',
+    });
+
+    const headBeforeRetries = await streamHead();
+    expect((await push([sale])).results[0]).toMatchObject({ status: 'EXACT_REPLAY', code: null });
+    const changedSale = structuredClone(sale);
+    (changedSale.payload as Record<string, unknown>).totalMinor = '301';
+    const changedItems = (changedSale.payload as Record<string, unknown>).items as Record<
+      string,
+      unknown
+    >[];
+    if (!changedItems[0]) throw new Error('S19 Sale replay item is unavailable.');
+    changedItems[0].unitPriceMinor = '301';
+    changedItems[0].lineTotalMinor = '301';
+    expect((await push([changedSale])).results[0]).toMatchObject({
+      status: 'CONFLICT',
+      code: 'OFFLINE_OPERATION_ID_CONFLICT',
+    });
+    expect(await streamHead()).toBe(headBeforeRetries);
+
+    await request(server)
+      .patch(`/v1/customers/${customerId}`)
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({
+        operationId: onlineUpdateOperationId,
+        expectedVersion: '1',
+        name: 'S19.9 Integrated Customer Converged',
+      })
+      .expect(200);
+
+    await expect(accountingEffectVector(contributionOperationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '1000',
+      authoritativeChanges: 0,
+    });
+    await expect(accountingEffectVector(inventoryOperationId)).resolves.toMatchObject({
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '3000',
+      inventoryValueDelta: '900',
+      manualInventoryEntries: 1,
+    });
+    await expect(accountingEffectVector(saleOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      receivableEntries: 1,
+      receivableDelta: '300',
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '-1000',
+      inventoryValueDelta: '-300',
+      sales: 1,
+    });
+    const stock = await db().admin.query<{ quantity: string; value: string }>(
+      `select quantity_milli::text as quantity, inventory_value_minor::text as value
+       from ledger.stock_balances where store_id = $1 and product_id = $2`,
+      [fixture.storeId, productId],
+    );
+    expect(stock.rows[0]).toEqual({ quantity: '2000', value: '600' });
+    const salePeriod = await db().admin.query<{ status: string }>(
+      `select period.status
+       from ledger.sales sale
+       join ledger.accounting_periods period
+         on period.store_id = sale.store_id and period.id = sale.accounting_period_id
+       where sale.store_id = $1 and sale.operation_id = $2`,
+      [fixture.storeId, saleOperationId],
+    );
+    expect(salePeriod.rows[0]?.status).toBe('open');
+
+    const firstPage = await pull(manifest.baseCursor, 2);
+    const retriedFirstPage = await pull(manifest.baseCursor, 2);
+    expect(retriedFirstPage).toEqual(firstPage);
+    const changes: PullResponse['changes'] = [];
+    let page = firstPage;
+    for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+      changes.push(...page.changes);
+      if (!page.hasMore) break;
+      page = await pull(page.nextCursor, 2);
+      if (pageNumber === 99) throw new Error('S19 integrated pull did not terminate.');
+    }
+    expect(changes.length).toBeGreaterThan(0);
+    expect(changes.map((change) => change.sequence)).toEqual(
+      changes.map((_, index) => (basePosition.sequence + BigInt(index) + 1n).toString()),
+    );
+    expect(changes.at(-1)?.sequence).toBe(await streamHead());
+    expect((await pull(page.nextCursor, 2)).changes).toEqual([]);
+
+    const operationIds = new Set(changes.map((change) => change.operationId));
+    for (const operationId of [
+      onlineCreateOperationId,
+      productOperationId,
+      inventoryOperationId,
+      deriveMoneyFactOperationId(contributionOperationId, 'owner-entry'),
+      deriveMoneyFactOperationId(contributionOperationId, 'owner-money'),
+      saleOperationId,
+      onlineUpdateOperationId,
+    ]) {
+      expect(operationIds).toContain(operationId);
+    }
+    expect(operationIds).not.toContain(rejectedOperationId);
+    expect(
+      changes.every(
+        (change) => change.changeContractVersion === 1 && change.representationVersion === 1,
+      ),
+    ).toBe(true);
+    expect(
+      changes
+        .map((change) => change.representation.store_id)
+        .filter((storeId): storeId is string => typeof storeId === 'string')
+        .every((storeId) => storeId === fixture.storeId),
+    ).toBe(true);
+
+    const clientState = new Map<string, Record<string, unknown>>();
+    for (const change of changes) {
+      clientState.set(`${change.entityType}:${change.entityId ?? ''}`, change.representation);
+    }
+    const serverCustomer = await db().admin.query<{ name: string; version: string }>(
+      `select name, version::text as version from ledger.customers
+       where store_id = $1 and id = $2`,
+      [fixture.storeId, customerId],
+    );
+    expect(clientState.get(`customer:${customerId}`)).toMatchObject({
+      id: customerId,
+      store_id: fixture.storeId,
+      name: serverCustomer.rows[0]?.name,
+      version: serverCustomer.rows[0]?.version,
+    });
+    expect(JSON.stringify({ manifest, changes })).not.toMatch(
+      /password_hash|token_hash|private_key|authorization/i,
+    );
   });
 });
