@@ -64,6 +64,29 @@ interface PullResponse {
   hasMore: boolean;
 }
 
+interface AccountingEffectVector {
+  moneyMovements: number;
+  moneyDelta: string;
+  receivableEntries: number;
+  receivableDelta: string;
+  customerCreditDelta: string;
+  payableEntries: number;
+  payableDelta: string;
+  supplierCreditDelta: string;
+  inventoryMovements: number;
+  inventoryQuantityDelta: string;
+  inventoryValueDelta: string;
+  supplierInvoices: number;
+  supplierPayments: number;
+  supplierReturns: number;
+  sales: number;
+  expenses: number;
+  saleReturns: number;
+  manualInventoryEntries: number;
+  stockCounts: number;
+  authoritativeChanges: number;
+}
+
 function databaseUrl(url: string, name: string): string {
   const parsed = new URL(url);
   parsed.pathname = `/${name}`;
@@ -197,6 +220,60 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       [deriveTransactionGroupId(operationId)],
     );
     return result.rows[0]?.count ?? -1;
+  }
+
+  async function accountingEffectVector(operationId: string): Promise<AccountingEffectVector> {
+    const result = await db().admin.query<AccountingEffectVector>(
+      `select
+         (select count(*)::integer from ledger.money_movements
+          where store_id = $1 and transaction_group_id = $3) as "moneyMovements",
+         (select coalesce(sum(amount_delta_minor), 0)::text from ledger.money_movements
+          where store_id = $1 and transaction_group_id = $3) as "moneyDelta",
+         (select count(*)::integer from ledger.customer_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "receivableEntries",
+         (select coalesce(sum(receivable_delta_minor), 0)::text
+          from ledger.customer_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "receivableDelta",
+         (select coalesce(sum(credit_delta_minor), 0)::text
+          from ledger.customer_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "customerCreditDelta",
+         (select count(*)::integer from ledger.supplier_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "payableEntries",
+         (select coalesce(sum(payable_delta_minor), 0)::text
+          from ledger.supplier_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "payableDelta",
+         (select coalesce(sum(credit_delta_minor), 0)::text
+          from ledger.supplier_ledger_entries
+          where store_id = $1 and transaction_group_id = $3) as "supplierCreditDelta",
+         (select count(*)::integer from ledger.inventory_movements
+          where store_id = $1 and transaction_group_id = $3) as "inventoryMovements",
+         (select coalesce(sum(quantity_delta_milli), 0)::text from ledger.inventory_movements
+          where store_id = $1 and transaction_group_id = $3) as "inventoryQuantityDelta",
+         (select coalesce(sum(value_delta_minor), 0)::text from ledger.inventory_movements
+          where store_id = $1 and transaction_group_id = $3) as "inventoryValueDelta",
+         (select count(*)::integer from ledger.purchase_invoices
+          where store_id = $1 and operation_id = $2) as "supplierInvoices",
+         (select count(*)::integer from ledger.supplier_payments
+          where store_id = $1 and operation_id = $2) as "supplierPayments",
+         (select count(*)::integer from ledger.supplier_returns
+          where store_id = $1 and operation_id = $2) as "supplierReturns",
+         (select count(*)::integer from ledger.sales
+          where store_id = $1 and operation_id = $2) as sales,
+         (select count(*)::integer from ledger.expenses
+          where store_id = $1 and operation_id = $2) as expenses,
+         (select count(*)::integer from ledger.sale_returns
+          where store_id = $1 and operation_id = $2) as "saleReturns",
+         (select count(*)::integer from ledger.manual_inventory_entries
+          where store_id = $1 and operation_id = $2) as "manualInventoryEntries",
+         (select count(*)::integer from ledger.stock_counts
+          where store_id = $1 and operation_id = $2) as "stockCounts",
+         (select count(*)::integer from sync.store_change_events_v1
+          where store_id = $1 and operation_id = $2) as "authoritativeChanges"`,
+      [fixture.storeId, operationId, deriveTransactionGroupId(operationId)],
+    );
+    const vector = result.rows[0];
+    if (!vector) throw new Error('Accounting effect vector is unavailable.');
+    return vector;
   }
 
   async function streamHead(): Promise<string> {
@@ -561,13 +638,16 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       { status: 'APPLIED', code: null },
     ]);
 
-    const invoice = await db().admin.query<{ id: string }>(
-      `select id from ledger.purchase_invoices
+    const invoice = await db().admin.query<{ id: string; operationId: string }>(
+      `select id, operation_id as "operationId" from ledger.purchase_invoices
        where store_id = $1 and invoice_number = 'S19-5-INV-1'`,
       [fixture.storeId],
     );
     const invoiceId = invoice.rows[0]?.id;
-    if (!invoiceId) throw new Error('Supplier Invoice fixture was not applied.');
+    const invoiceOperationId = invoice.rows[0]?.operationId;
+    if (!invoiceId || !invoiceOperationId) {
+      throw new Error('Supplier Invoice fixture was not applied.');
+    }
     const supplierPaymentOperationId = randomUUID();
     const creditSaleOperationId = randomUUID();
     const expenseOperationId = randomUUID();
@@ -760,6 +840,109 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       await countByTransactionGroup('supplier_ledger_entries', supplierReturnOperationId),
     ).toBe(1);
 
+    await expect(accountingEffectVector(invoiceOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      moneyDelta: '0',
+      payableEntries: 1,
+      payableDelta: '1000',
+      inventoryMovements: 0,
+      inventoryQuantityDelta: '0',
+      supplierInvoices: 1,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(ownerOperationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '5000',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryQuantityDelta: '0',
+    });
+    await expect(accountingEffectVector(inventoryOperationId)).resolves.toMatchObject({
+      moneyDelta: '0',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '10000',
+      inventoryValueDelta: '2000',
+      manualInventoryEntries: 1,
+    });
+    await expect(accountingEffectVector(supplierPaymentOperationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '-600',
+      payableEntries: 1,
+      payableDelta: '-600',
+      inventoryMovements: 0,
+      supplierPayments: 1,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(creditSaleOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      receivableEntries: 1,
+      receivableDelta: '500',
+      customerCreditDelta: '0',
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '-1000',
+      inventoryValueDelta: '-200',
+      sales: 1,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(collectionOperationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '500',
+      receivableEntries: 1,
+      receivableDelta: '-500',
+      customerCreditDelta: '0',
+      payableDelta: '0',
+      inventoryMovements: 0,
+      sales: 0,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(expenseOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      moneyDelta: '0',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryMovements: 0,
+      expenses: 1,
+    });
+    await expect(accountingEffectVector(expensePaymentOperationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '-300',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryMovements: 0,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(supplierReturnOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      moneyDelta: '0',
+      payableEntries: 1,
+      payableDelta: '-100',
+      supplierCreditDelta: '0',
+      inventoryMovements: 0,
+      supplierReturns: 1,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(saleReturnOperationId)).resolves.toMatchObject({
+      moneyMovements: 0,
+      receivableDelta: '0',
+      customerCreditDelta: '500',
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '1000',
+      inventoryValueDelta: '200',
+      saleReturns: 1,
+      expenses: 0,
+    });
+    await expect(accountingEffectVector(stockCountOperationId)).resolves.toMatchObject({
+      moneyDelta: '0',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '-500',
+      inventoryValueDelta: '-100',
+      stockCounts: 1,
+    });
+
     const propagatedOperationIds = [
       ownerOperationId,
       inventoryOperationId,
@@ -772,16 +955,31 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       saleReturnOperationId,
       stockCountOperationId,
     ];
+    const vectorsBeforeReplay = await Promise.all(
+      propagatedOperationIds.map((operationId) => accountingEffectVector(operationId)),
+    );
     const changeCountBeforeReplay = await db().admin.query<{ count: number }>(
       `select count(*)::integer as count from sync.store_change_events_v1
        where store_id = $1 and operation_id = any($2::uuid[])`,
       [fixture.storeId, propagatedOperationIds],
     );
-    const ownerFoundation = foundations[2];
-    if (!ownerFoundation) throw new Error('S19.5 owner operation fixture is unavailable.');
-    const replay = await push([ownerFoundation]);
-    expect(replay.results[0]?.status).toBe('EXACT_REPLAY');
+    const foundationReplay = await push(foundations);
+    expect(foundationReplay.results.map((item) => item.status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+    ]);
     expect(await countByTransactionGroup('money_movements', ownerOperationId)).toBe(1);
+    expect((await push(financial)).results.map((item) => item.status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+    ]);
+    expect((await push(settlement)).results.map((item) => item.status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+    ]);
     const returnReplay = await push(returnAndCount);
     expect(returnReplay.results.map((item) => item.status)).toEqual([
       'EXACT_REPLAY',
@@ -791,6 +989,9 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(await count('supplier_returns', supplierReturnOperationId)).toBe(1);
     expect(await count('sale_returns', saleReturnOperationId)).toBe(1);
     expect(await count('stock_counts', stockCountOperationId)).toBe(1);
+    await expect(
+      Promise.all(propagatedOperationIds.map((operationId) => accountingEffectVector(operationId))),
+    ).resolves.toEqual(vectorsBeforeReplay);
     const changes = await db().admin.query<{ count: number }>(
       `select count(*)::integer as count from sync.store_change_events_v1
        where store_id = $1 and operation_id = any($2::uuid[])`,
@@ -1228,9 +1429,8 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     const operationId = randomUUID();
     const recoverable = envelope({
       operationId,
-      operationType: 'customers.create.v1',
-      aggregateId: randomUUID(),
-      payload: { name: 'Recovery Push Race', phone: '0599000080' },
+      operationType: 'owner_contributions.post.v1',
+      payload: { moneyAccountId: fixture.moneyAccountId, amountMinor: '37', occurredAt },
       clockState: 'clock_rollback_suspected',
     });
     expect((await push([recoverable])).results[0]?.status).toBe('QUARANTINED');
@@ -1241,7 +1441,13 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(['EXACT_REPLAY', 'QUARANTINED']).toContain(
       statuses.find((value) => value !== 'APPLIED'),
     );
-    expect(await count('customers', operationId)).toBe(1);
+    await expect(accountingEffectVector(operationId)).resolves.toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '37',
+      receivableDelta: '0',
+      payableDelta: '0',
+      inventoryQuantityDelta: '0',
+    });
 
     const blockedOperationId = randomUUID();
     const blocked = envelope({

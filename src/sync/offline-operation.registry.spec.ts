@@ -141,6 +141,77 @@ const expectedRoutes = {
   'sale_returns.replace.v1': ['saleReturnCorrections', 'replace'],
 } satisfies Record<OfflineOperationType, readonly [ServiceName, string]>;
 
+const accountingCoverage = {
+  fullyVerified: [
+    'owner_contributions.post.v1',
+    'inventory.increase.post.v1',
+    'stock_counts.post.v1',
+    'supplier_invoices.post.v1',
+    'supplier_payments.post.v1',
+    'supplier_returns.post.v1',
+    'sales.post.v1',
+    'customer_collections.post.v1',
+    'expenses.post.v1',
+    'expense_payments.post.v1',
+    'sale_returns.post.v1',
+  ],
+  semanticallyCoveredByCanonicalAuthority: [
+    'owner_loans.post.v1',
+    'owner_reimbursements.post.v1',
+    'owner_personal_withdrawals.post.v1',
+    'owner_capital_withdrawals.post.v1',
+    'owner_events.reverse.v1',
+    'owner_events.replace.v1',
+    'money_transfers.post.v1',
+    'money_transfers.reverse.v1',
+    'money_transfers.replace.v1',
+    'inventory.opening.post.v1',
+    'inventory.decrease.post.v1',
+    'inventory.corrections.post.v1',
+    'supplier_invoices.cancel.v1',
+    'supplier_invoices.edit.v1',
+    'supplier_payments.cancel.v1',
+    'supplier_payments.edit.v1',
+    'supplier_credits.apply.v1',
+    'supplier_refunds.post.v1',
+    'supplier_returns.cancel.v1',
+    'supplier_returns.replace.v1',
+    'supplier_credits.cancel.v1',
+    'supplier_credits.replace.v1',
+    'supplier_refunds.cancel.v1',
+    'supplier_refunds.replace.v1',
+    'sales.cancel.v1',
+    'sales.edit.v1',
+    'customer_collections.cancel.v1',
+    'customer_collections.edit.v1',
+    'customer_credits.apply.v1',
+    'customer_credits.apply_cancel.v1',
+    'customer_credits.apply_edit.v1',
+    'customer_credits.refund.v1',
+    'customer_credits.refund_cancel.v1',
+    'customer_credits.refund_edit.v1',
+    'customer_settlements.post.v1',
+    'customer_settlements.cancel.v1',
+    'customer_settlements.edit.v1',
+    'expenses.cancel.v1',
+    'expenses.edit.v1',
+    'expense_payments.cancel.v1',
+    'expense_payments.edit.v1',
+    'sale_returns.cancel.v1',
+    'sale_returns.replace.v1',
+  ],
+  notAccountingOrInventorySignificant: [
+    'customers.create.v1',
+    'customers.update.v1',
+    'suppliers.create.v1',
+    'suppliers.update.v1',
+    'products.create.v1',
+    'products.update.v1',
+    'product_units.create.v1',
+    'product_units.update.v1',
+  ],
+} as const satisfies Record<string, readonly OfflineOperationType[]>;
+
 const context: TenantTransactionContext = {
   storeId: randomUUID(),
   userId: randomUUID(),
@@ -254,6 +325,15 @@ describe('OfflineOperationRegistry', () => {
       expect(calls.reduce((sum, count) => sum + count, 0)).toBe(1);
       jest.clearAllMocks();
     }
+  });
+
+  it('classifies every registered operation for cross-domain accounting verification', () => {
+    const classified = Object.values(accountingCoverage).flat();
+
+    expect(new Set(classified).size).toBe(classified.length);
+    expect([...classified].sort()).toEqual([...OFFLINE_OPERATION_TYPES].sort());
+    expect(accountingCoverage.fullyVerified).not.toHaveLength(0);
+    expect(accountingCoverage.semanticallyCoveredByCanonicalAuthority).not.toHaveLength(0);
   });
 
   it.each([
