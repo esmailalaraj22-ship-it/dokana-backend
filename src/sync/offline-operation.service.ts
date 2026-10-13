@@ -1,18 +1,21 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 
 import type { SyncAuthenticatedPrincipal } from '../auth/auth.types';
+import { isUuid } from '../common/logging/request-id';
 import { DatabaseService } from '../database/database.service';
 import type { TenantTransactionContext } from '../database/database.types';
 import { OfflineLicenseCryptoService } from '../offline-licenses/offline-license-crypto';
 import type { OfflineLicensePayloadV1 } from '../offline-licenses/offline-license.types';
 import type { PushOfflineOperationsDto } from './dto/push-offline-operations.dto';
+import type { RecoverOfflineOperationDto } from './dto/recover-offline-operation.dto';
 import {
   OfflineOperationEnvelopeError,
   parseOfflineOperationEnvelope,
   type OfflineOperationEnvelopeV1,
   type OfflineOperationPushResult,
   type OfflineOperationResultStatus,
+  type OfflineOperationStatusResult,
 } from './offline-operation.contract';
 import type { SyncJsonObject } from './offline-operation-canonical-json';
 import { OfflineOperationRegistry } from './offline-operation.registry';
@@ -61,6 +64,119 @@ export class OfflineOperationService {
       results[item.index] = await this.process(item.envelope, principal, context);
     }
     return { results };
+  }
+
+  async status(
+    operationId: string,
+    provenanceHash: string | undefined,
+    context: TenantTransactionContext,
+  ): Promise<OfflineOperationStatusResult> {
+    if (!isUuid(operationId) || operationId !== operationId.toLowerCase()) {
+      throw new BadRequestException({
+        code: 'SYNC_IDENTIFIER_INVALID',
+        message: 'Offline operation identifier is invalid.',
+      });
+    }
+    const row = await this.database.withTenantTransaction(context, (transaction) =>
+      this.repository.readStatus(transaction, context.storeId, operationId, provenanceHash ?? null),
+    );
+    if (!row) {
+      throw new NotFoundException({
+        code: 'SYNC_OPERATION_NOT_FOUND',
+        message: 'Offline operation was not found.',
+      });
+    }
+    return {
+      operationId: row.operationId,
+      status: this.externalStatus(row.status),
+      code: row.reasonCode,
+      response: row.responseBody,
+      recoveryEligible: row.recoveryEligible,
+      recoveryAttemptCount: row.recoveryAttemptCount,
+      lastRecoveryAt:
+        row.lastRecoveryAt === null
+          ? null
+          : row.lastRecoveryAt instanceof Date
+            ? row.lastRecoveryAt.toISOString()
+            : new Date(row.lastRecoveryAt).toISOString(),
+    };
+  }
+
+  async recover(
+    operationId: string,
+    input: RecoverOfflineOperationDto,
+    principal: SyncAuthenticatedPrincipal,
+    context: TenantTransactionContext,
+  ): Promise<OfflineOperationPushResult> {
+    let envelope: OfflineOperationEnvelopeV1;
+    try {
+      envelope = parseOfflineOperationEnvelope(input.operation);
+    } catch (error) {
+      return this.malformedResult(input.operation, error);
+    }
+    if (operationId !== envelope.operationId) {
+      return this.result(envelope.operationId, 'REJECTED', 'SYNC_OPERATION_ID_MISMATCH');
+    }
+    if (envelope.storeId !== context.storeId || envelope.deviceId !== context.deviceId) {
+      return this.result(envelope.operationId, 'REJECTED', 'SYNC_CONTEXT_MISMATCH');
+    }
+    if (!this.registry.supports(envelope.operationType)) {
+      return this.result(envelope.operationId, 'REJECTED', 'SYNC_OPERATION_NOT_ALLOWED');
+    }
+
+    let license: OfflineLicensePayloadV1;
+    try {
+      license = this.licenses.verify(envelope.signedLicense);
+    } catch {
+      return this.result(envelope.operationId, 'REJECTED', 'OFFLINE_LICENSE_INVALID');
+    }
+    if (!this.licenseBindingMatches(envelope, license)) {
+      return this.result(envelope.operationId, 'REJECTED', 'OFFLINE_LICENSE_BINDING_INVALID');
+    }
+
+    return this.database.withOfflineOperationTransaction(
+      context,
+      { operationId: envelope.operationId, operationType: envelope.operationType },
+      async (transaction) => {
+        const beginning = await this.repository.beginRecovery(
+          transaction,
+          envelope,
+          context.requestId,
+        );
+        if (beginning.disposition !== 'authorized') {
+          return this.beginResult(envelope.operationId, beginning);
+        }
+
+        await transaction.execute(sql.raw('savepoint s19_offline_recovery_domain'));
+        try {
+          const response = await this.registry.dispatch(envelope, principal, context);
+          await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
+          const completed = await this.repository.finishRecovery(
+            transaction,
+            context.storeId,
+            envelope.operationId,
+            context.requestId,
+            'applied',
+            response,
+          );
+          return this.result(envelope.operationId, 'APPLIED', null, completed.responseBody);
+        } catch (error) {
+          await transaction.execute(sql.raw('rollback to savepoint s19_offline_recovery_domain'));
+          await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
+          const failure = this.domainFailure(error);
+          if (!failure) throw error;
+          await this.repository.finishRecovery(
+            transaction,
+            context.storeId,
+            envelope.operationId,
+            context.requestId,
+            failure.disposition,
+            failure.response,
+          );
+          return this.result(envelope.operationId, failure.status, failure.response.code);
+        }
+      },
+    );
   }
 
   private async process(
@@ -152,6 +268,7 @@ export class OfflineOperationService {
       Exclude<BeginOfflineOperationResult['disposition'], 'authorized'>,
       OfflineOperationResultStatus
     > = {
+      applied: 'EXACT_REPLAY',
       exact_replay: 'EXACT_REPLAY',
       rejected: 'REJECTED',
       dependency_pending: 'DEPENDENCY_PENDING',
@@ -166,6 +283,20 @@ export class OfflineOperationService {
       beginning.reasonCode,
       beginning.responseBody,
     );
+  }
+
+  private externalStatus(
+    status: Exclude<BeginOfflineOperationResult['disposition'], 'authorized'> | 'applied',
+  ): OfflineOperationResultStatus {
+    const statuses: Record<typeof status, OfflineOperationResultStatus> = {
+      applied: 'APPLIED',
+      exact_replay: 'EXACT_REPLAY',
+      rejected: 'REJECTED',
+      dependency_pending: 'DEPENDENCY_PENDING',
+      conflict: 'CONFLICT',
+      quarantined: 'QUARANTINED',
+    };
+    return statuses[status];
   }
 
   private domainFailure(error: unknown): {

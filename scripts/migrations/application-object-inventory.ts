@@ -184,3 +184,17 @@ export const offlineOperationPushRoutines = [
   'sync.finish_offline_operation_v1(p_store_id uuid, p_operation_id uuid, p_disposition text, p_response_body jsonb)',
   'sync.offline_operation_finished_at_commit_v1()',
 ] as const;
+
+export const offlineOperationRecoveryTables = [
+  'sync.offline_operation_recovery_events_v1',
+] as const;
+
+export const offlineOperationRecoveryRoutines = [
+  'sync.begin_offline_operation_recovery_v1(p_store_id uuid, p_device_id uuid, p_operation_id uuid, p_recovery_attempt_id uuid, p_operation_type text, p_local_sequence bigint, p_provenance_hash text, p_license_id uuid, p_subscription_id uuid, p_subscription_version bigint, p_client_recorded_at timestamp with time zone, p_trusted_server_time timestamp with time zone, p_observed_device_time timestamp with time zone, p_clock_state text, p_known_store_status text, p_known_store_status_at timestamp with time zone, p_dependency_operation_ids uuid[])',
+  'sync.begin_offline_operation_v2(p_store_id uuid, p_device_id uuid, p_operation_id uuid, p_operation_type text, p_local_sequence bigint, p_provenance_hash text, p_license_id uuid, p_subscription_id uuid, p_subscription_version bigint, p_client_recorded_at timestamp with time zone, p_trusted_server_time timestamp with time zone, p_observed_device_time timestamp with time zone, p_clock_state text, p_known_store_status text, p_known_store_status_at timestamp with time zone, p_dependency_operation_ids uuid[])',
+  'sync.finish_offline_operation_recovery_v1(p_store_id uuid, p_operation_id uuid, p_recovery_attempt_id uuid, p_disposition text, p_response_body jsonb)',
+  'sync.offline_dependency_cycle_v1(p_store_id uuid, p_operation_id uuid, p_dependency_operation_ids uuid[])',
+  'sync.offline_recovery_finished_at_commit_v1()',
+  'sync.read_offline_operation_status_v1(p_store_id uuid, p_operation_id uuid, p_provenance_hash text)',
+  'sync.reject_offline_recovery_event_mutation_v1()',
+] as const;

@@ -51,6 +51,7 @@ describe('controlled migration runner', () => {
       '0025_fix_offline_operation_terminal_outcomes.sql',
       '0026_durable_changed_replay_conflict.sql',
       '0027_immutable_sync_change_representations.sql',
+      '0028_offline_operation_recovery_authority.sql',
     ]);
   });
 

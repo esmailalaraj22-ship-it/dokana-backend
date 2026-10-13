@@ -11,6 +11,8 @@ import {
   commitOrderedSyncFoundationRoutines,
   commitOrderedSyncFoundationTables,
   immutableSyncChangeRepresentationRoutines,
+  offlineOperationRecoveryRoutines,
+  offlineOperationRecoveryTables,
   offlineOperationPushRoutines,
   offlineOperationPushTables,
   offlineLicenseAuthorityRoutines,
@@ -72,6 +74,7 @@ export async function verifyApplicationInventory(
   let commitOrderedSyncFoundationApplied = false;
   let offlineOperationPushApplied = false;
   let immutableSyncChangeRepresentationApplied = false;
+  let offlineOperationRecoveryApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -206,6 +209,18 @@ export async function verifyApplicationInventory(
       }
       immutableSyncChangeRepresentationApplied = true;
     }
+
+    const offlineOperationRecovery = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0028_offline_operation_recovery_authority.sql'`,
+    );
+    if (offlineOperationRecovery.rows[0]) {
+      const file = await readMigrationFile('0028_offline_operation_recovery_authority.sql');
+      if (offlineOperationRecovery.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Offline operation recovery authority migration checksum mismatch.');
+      }
+      offlineOperationRecoveryApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -253,6 +268,7 @@ export async function verifyApplicationInventory(
     ...(platformAuthorityFoundationApplied ? platformAuthorityFoundationTables : []),
     ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationTables : []),
     ...(offlineOperationPushApplied ? offlineOperationPushTables : []),
+    ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -317,6 +333,7 @@ export async function verifyApplicationInventory(
       ...(immutableSyncChangeRepresentationApplied
         ? immutableSyncChangeRepresentationRoutines
         : []),
+      ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

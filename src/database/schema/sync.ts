@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   check,
+  customType,
   foreignKey,
   index,
   jsonb,
@@ -15,8 +16,138 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { devices, stores } from './ledger';
+import { licenseIssuances, subscriptions, users } from './platform';
 
 export const syncSchema = pgSchema('sync');
+const xid8 = customType<{ data: string }>({ dataType: () => 'xid8' });
+
+export const offlineOperationProvenanceV1 = syncSchema.table(
+  'offline_operation_provenance_v1',
+  {
+    storeId: uuid('store_id')
+      .notNull()
+      .references(() => stores.id, { onDelete: 'cascade' }),
+    operationId: uuid('operation_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    localSequence: bigint('local_sequence', { mode: 'bigint' }).notNull(),
+    operationType: text('operation_type').notNull(),
+    provenanceHash: text('provenance_hash').notNull(),
+    canonicalRequestHash: text('canonical_request_hash'),
+    licenseId: uuid('license_id')
+      .notNull()
+      .references(() => licenseIssuances.id, { onDelete: 'restrict' }),
+    subscriptionId: uuid('subscription_id')
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: 'restrict' }),
+    subscriptionVersion: bigint('subscription_version', { mode: 'bigint' }).notNull(),
+    clientRecordedAt: timestamp('client_recorded_at', {
+      withTimezone: true,
+      mode: 'date',
+    }).notNull(),
+    trustedServerTime: timestamp('trusted_server_time', {
+      withTimezone: true,
+      mode: 'date',
+    }).notNull(),
+    observedDeviceTime: timestamp('observed_device_time', {
+      withTimezone: true,
+      mode: 'date',
+    }).notNull(),
+    clockState: text('clock_state').$type<'trusted' | 'clock_rollback_suspected'>().notNull(),
+    knownStoreStatus: text('known_store_status')
+      .$type<'active' | 'read_only' | 'suspended'>()
+      .notNull(),
+    knownStoreStatusAt: timestamp('known_store_status_at', {
+      withTimezone: true,
+      mode: 'date',
+    }).notNull(),
+    dependencyOperationIds: uuid('dependency_operation_ids').array().notNull().default([]),
+    disposition: text('disposition')
+      .$type<
+        'processing' | 'applied' | 'rejected' | 'conflict' | 'quarantined' | 'dependency_pending'
+      >()
+      .notNull(),
+    reasonCode: text('reason_code'),
+    responseBody: jsonb('response_body').$type<Record<string, unknown>>(),
+    authorizedUserId: uuid('authorized_user_id'),
+    authorizationXid: xid8('authorization_xid'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.operationId] }),
+    unique('offline_operation_provenance__store_id_device_id_local_sequ_key').on(
+      table.storeId,
+      table.deviceId,
+      table.localSequence,
+    ),
+    foreignKey({
+      name: 'offline_operation_provenance_v1_store_id_device_id_fkey',
+      columns: [table.storeId, table.deviceId],
+      foreignColumns: [devices.storeId, devices.id],
+    }).onDelete('restrict'),
+    check('offline_operation_provenance_v1_local_sequence_check', sql`${table.localSequence} > 0`),
+    check(
+      'offline_operation_provenance_v1_subscription_version_check',
+      sql`${table.subscriptionVersion} >= 1`,
+    ),
+    index('idx_offline_operation_provenance_v1_license').on(
+      table.storeId,
+      table.licenseId,
+      table.clientRecordedAt,
+    ),
+  ],
+);
+
+export const offlineOperationRecoveryEventsV1 = syncSchema.table(
+  'offline_operation_recovery_events_v1',
+  {
+    storeId: uuid('store_id').notNull(),
+    recoveryAttemptId: uuid('recovery_attempt_id').notNull(),
+    eventSequence: smallint('event_sequence').notNull(),
+    operationId: uuid('operation_id').notNull(),
+    provenanceHash: text('provenance_hash').notNull(),
+    originalQuarantineReason: text('original_quarantine_reason'),
+    eventType: text('event_type').$type<'began' | 'completed'>().notNull(),
+    resultStatus: text('result_status').$type<
+      'applied' | 'exact_replay' | 'rejected' | 'dependency_pending' | 'conflict' | 'quarantined'
+    >(),
+    reasonCode: text('reason_code'),
+    responseBody: jsonb('response_body').$type<Record<string, unknown>>(),
+    recoveryPolicyVersion: smallint('recovery_policy_version').notNull().default(1),
+    authorizedUserId: uuid('authorized_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    authorizationXid: xid8('authorization_xid'),
+    recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.recoveryAttemptId, table.eventSequence] }),
+    foreignKey({
+      name: 'offline_operation_recovery_events_v1_store_operation_fkey',
+      columns: [table.storeId, table.operationId],
+      foreignColumns: [
+        offlineOperationProvenanceV1.storeId,
+        offlineOperationProvenanceV1.operationId,
+      ],
+    }).onDelete('restrict'),
+    check(
+      'offline_operation_recovery_events_v1_event_sequence_check',
+      sql`${table.eventSequence} in (1, 2)`,
+    ),
+    check(
+      'offline_operation_recovery_events_v1_policy_version_check',
+      sql`${table.recoveryPolicyVersion} = 1`,
+    ),
+    index('idx_offline_operation_recovery_events_v1_operation').on(
+      table.storeId,
+      table.operationId,
+      table.recordedAt,
+      table.recoveryAttemptId,
+    ),
+  ],
+);
 
 export const storeChangeWatermarksV1 = syncSchema.table(
   'store_change_watermarks_v1',

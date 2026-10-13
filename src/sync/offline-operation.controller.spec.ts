@@ -13,7 +13,9 @@ describe('OfflineOperationController', () => {
   } as jest.Mocked<Pick<SyncAuthenticationService, 'issueFromRefreshToken'>>;
   const operations = {
     push: jest.fn(),
-  } as jest.Mocked<Pick<OfflineOperationService, 'push'>>;
+    status: jest.fn(),
+    recover: jest.fn(),
+  } as jest.Mocked<Pick<OfflineOperationService, 'push' | 'status' | 'recover'>>;
   const controller = new OfflineOperationController(
     authentication as unknown as SyncAuthenticationService,
     operations as unknown as OfflineOperationService,
@@ -56,5 +58,49 @@ describe('OfflineOperationController', () => {
 
     await expect(controller.push(input, request)).resolves.toEqual({ results: [] });
     expect(operations.push).toHaveBeenCalledWith(input, request.principal, request.tenantContext);
+  });
+
+  it('protects status and recovery and delegates only trusted request context', async () => {
+    const statusGuards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      OfflineOperationController.prototype.status,
+    ) as unknown[];
+    const recoveryGuards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      OfflineOperationController.prototype.recover,
+    ) as unknown[];
+    expect(statusGuards).toContain(SyncAuthenticationGuard);
+    expect(recoveryGuards).toContain(SyncAuthenticationGuard);
+
+    const request = {
+      principal: { userId: 'principal-user' },
+      tenantContext: { storeId: 'trusted-store' },
+    } as unknown as SyncAuthenticatedRequest;
+    const operationId = '71085fe4-f593-4f68-8c0f-d46afc36769b';
+    operations.status.mockResolvedValue({
+      operationId,
+      status: 'QUARANTINED',
+      code: 'OFFLINE_CLOCK_ROLLBACK_SUSPECTED',
+      response: null,
+      recoveryEligible: true,
+      recoveryAttemptCount: 0,
+      lastRecoveryAt: null,
+    });
+    operations.recover.mockResolvedValue({
+      operationId,
+      status: 'APPLIED',
+      code: null,
+      response: { id: 'result-id' },
+    });
+
+    await controller.status(operationId, {}, request);
+    await controller.recover(operationId, { operation: {} }, request);
+    expect(operations.status).toHaveBeenCalledWith(operationId, undefined, request.tenantContext);
+    expect(operations.recover).toHaveBeenCalledWith(
+      operationId,
+      { operation: {} },
+      request.principal,
+      request.tenantContext,
+    );
   });
 });

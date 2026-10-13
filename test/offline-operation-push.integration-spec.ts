@@ -19,7 +19,10 @@ import {
   deriveMoneyFactOperationId,
   deriveTransactionGroupId,
 } from '../src/money-movements/money-movement-identity';
-import type { OfflineOperationPushResult } from '../src/sync/offline-operation.contract';
+import {
+  parseOfflineOperationEnvelope,
+  type OfflineOperationPushResult,
+} from '../src/sync/offline-operation.contract';
 import { SyncCursorService } from '../src/sync/sync-cursor.service';
 import {
   createInventoryTestDatabase,
@@ -27,7 +30,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0027_immutable_sync_change_representations.sql';
+const migrationFilename = '0028_offline_operation_recovery_authority.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
 
@@ -41,6 +44,7 @@ interface PushEnvelopeInput {
   payload: Record<string, unknown>;
   dependencies?: string[];
   localSequence?: string;
+  clockState?: 'trusted' | 'clock_rollback_suspected';
 }
 
 interface PushResponse {
@@ -86,6 +90,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     DATABASE_URL: process.env.DATABASE_URL,
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL,
     AUTH_DATABASE_URL: process.env.AUTH_DATABASE_URL,
+    REQUEST_ID_TRUST_INCOMING: process.env.REQUEST_ID_TRUST_INCOMING,
   };
   const fixture = {
     storeId: randomUUID(),
@@ -131,7 +136,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
         version: 1,
         trustedServerTime: signed.payload.issuedAt,
         observedDeviceTime: occurredAt,
-        clockState: 'trusted',
+        clockState: input.clockState ?? 'trusted',
         knownStoreStatus: 'active',
         knownStoreStatusAt: signed.payload.issuedAt,
       },
@@ -150,6 +155,30 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       .send({ operations })
       .expect(200);
     return responseBody(response) as PushResponse;
+  }
+
+  async function recover(
+    operation: Record<string, unknown>,
+    requestId?: string,
+  ): Promise<OfflineOperationPushResult> {
+    const recoveryRequest = request(server)
+      .post(`/v1/sync/operations/${String(operation.operationId)}/recover`)
+      .set('authorization', `Bearer ${syncAuthentication.syncToken}`);
+    if (requestId) recoveryRequest.set('x-request-id', requestId);
+    const response = await recoveryRequest.send({ operation }).expect(200);
+    return responseBody(response) as OfflineOperationPushResult;
+  }
+
+  async function operationStatus(
+    operationId: string,
+    provenanceHash?: string,
+  ): Promise<Record<string, unknown>> {
+    const response = await request(server)
+      .get(`/v1/sync/operations/${operationId}`)
+      .set('authorization', `Bearer ${syncAuthentication.syncToken}`)
+      .query(provenanceHash ? { provenanceHash } : {})
+      .expect(200);
+    return responseBody(response) as Record<string, unknown>;
   }
 
   async function count(table: string, operationId: string): Promise<number> {
@@ -219,6 +248,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     process.env.DATABASE_URL = databaseUrl(environment.runtimeUrl, databaseName);
     process.env.TEST_DATABASE_URL = process.env.DATABASE_URL;
     process.env.AUTH_DATABASE_URL = databaseUrl(environment.authUrl, databaseName);
+    process.env.REQUEST_ID_TRUST_INCOMING = 'true';
 
     const passwordHash = await new PasswordService().hash(password);
     await db().admin.query(
@@ -928,5 +958,430 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     );
     expect(customer.rows[0]?.version).toBe('2');
     expect(['S19.5 Customer A', 'S19.5 Customer B']).toContain(customer.rows[0]?.name);
+  });
+
+  it('recovers a durable clock quarantine once and publishes one canonical change', async () => {
+    const operationId = randomUUID();
+    const customerId = randomUUID();
+    const quarantined = envelope({
+      operationId,
+      operationType: 'customers.create.v1',
+      aggregateId: customerId,
+      payload: { name: 'Recovered Offline Customer', phone: '0599000077' },
+      clockState: 'clock_rollback_suspected',
+    });
+    const streamBefore = await streamHead();
+
+    expect((await push([quarantined])).results[0]).toMatchObject({
+      status: 'QUARANTINED',
+      code: 'OFFLINE_CLOCK_ROLLBACK_SUSPECTED',
+    });
+    expect(await count('customers', operationId)).toBe(0);
+    await expect(operationStatus(operationId)).resolves.toMatchObject({
+      operationId,
+      status: 'QUARANTINED',
+      recoveryEligible: true,
+      recoveryAttemptCount: 0,
+    });
+
+    const firstRecoveryRequestId = randomUUID();
+    await expect(recover(quarantined, firstRecoveryRequestId)).resolves.toMatchObject({
+      operationId,
+      status: 'APPLIED',
+      code: null,
+    });
+    expect(await count('customers', operationId)).toBe(1);
+    expect(BigInt(await streamHead()) - BigInt(streamBefore)).toBe(1n);
+    await expect(recover(quarantined, firstRecoveryRequestId)).resolves.toMatchObject({
+      operationId,
+      status: 'EXACT_REPLAY',
+      code: null,
+    });
+    expect(await count('customers', operationId)).toBe(1);
+    expect(BigInt(await streamHead()) - BigInt(streamBefore)).toBe(1n);
+
+    const concurrentReplay = await Promise.all([recover(quarantined), recover(quarantined)]);
+    expect(concurrentReplay.map((result) => result.status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+    ]);
+    expect(await count('customers', operationId)).toBe(1);
+    expect(BigInt(await streamHead()) - BigInt(streamBefore)).toBe(1n);
+    await expect(operationStatus(operationId)).resolves.toMatchObject({
+      status: 'APPLIED',
+      recoveryEligible: false,
+      recoveryAttemptCount: 3,
+    });
+    await expect(
+      operationStatus(operationId, parseOfflineOperationEnvelope(quarantined).provenanceHash),
+    ).resolves.toMatchObject({ status: 'EXACT_REPLAY' });
+
+    const changedRecovery = structuredClone(quarantined);
+    (changedRecovery.payload as Record<string, unknown>).name = 'Changed Recovery Intent';
+    await expect(recover(changedRecovery)).resolves.toMatchObject({
+      status: 'CONFLICT',
+      code: 'OFFLINE_OPERATION_ID_CONFLICT',
+    });
+    expect(await count('customers', operationId)).toBe(1);
+
+    const lineage = await db().admin.query<{ events: number; attempts: number }>(
+      `select count(*)::integer as events,
+              count(distinct recovery_attempt_id)::integer as attempts
+       from sync.offline_operation_recovery_events_v1
+       where store_id = $1 and operation_id = $2`,
+      [fixture.storeId, operationId],
+    );
+    expect(lineage.rows[0]).toEqual({ events: 6, attempts: 3 });
+  });
+
+  it('fails dependency cycles closed without executing either domain command', async () => {
+    const firstOperationId = randomUUID();
+    const secondOperationId = randomUUID();
+    const first = envelope({
+      operationId: firstOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Cycle A', phone: '0599000078' },
+      dependencies: [secondOperationId],
+    });
+    const second = envelope({
+      operationId: secondOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Cycle B', phone: '0599000079' },
+      dependencies: [firstOperationId],
+    });
+
+    expect((await push([first])).results[0]?.status).toBe('DEPENDENCY_PENDING');
+    expect((await push([second])).results[0]).toMatchObject({
+      status: 'CONFLICT',
+      code: 'OFFLINE_DEPENDENCY_CYCLE',
+    });
+    expect((await push([first])).results[0]?.status).toBe('CONFLICT');
+    expect(await count('customers', firstOperationId)).toBe(0);
+    expect(await count('customers', secondOperationId)).toBe(0);
+  });
+
+  it('serializes two first recovery attempts and re-evaluates dependency release', async () => {
+    const concurrentOperationId = randomUUID();
+    const concurrent = envelope({
+      operationId: concurrentOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Concurrent Recovery', phone: '0599000082' },
+      clockState: 'clock_rollback_suspected',
+    });
+    expect((await push([concurrent])).results[0]?.status).toBe('QUARANTINED');
+    const concurrentResults = await Promise.all([recover(concurrent), recover(concurrent)]);
+    expect(concurrentResults.map((result) => result.status).sort()).toEqual([
+      'APPLIED',
+      'EXACT_REPLAY',
+    ]);
+    expect(await count('customers', concurrentOperationId)).toBe(1);
+
+    const prerequisiteOperationId = randomUUID();
+    const dependentOperationId = randomUUID();
+    const prerequisite = envelope({
+      operationId: prerequisiteOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Recovered Prerequisite', phone: '0599000083' },
+      clockState: 'clock_rollback_suspected',
+    });
+    const dependent = envelope({
+      operationId: dependentOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Recovered Dependent', phone: '0599000084' },
+      dependencies: [prerequisiteOperationId],
+    });
+    expect((await push([prerequisite])).results[0]?.status).toBe('QUARANTINED');
+    expect((await push([dependent])).results[0]).toMatchObject({
+      status: 'QUARANTINED',
+      code: 'OFFLINE_DEPENDENCY_QUARANTINED',
+    });
+    await expect(recover(dependent)).resolves.toMatchObject({
+      status: 'QUARANTINED',
+      code: 'OFFLINE_DEPENDENCY_QUARANTINED',
+    });
+    expect((await recover(prerequisite)).status).toBe('APPLIED');
+    expect((await recover(dependent)).status).toBe('APPLIED');
+    expect(await count('customers', prerequisiteOperationId)).toBe(1);
+    expect(await count('customers', dependentOperationId)).toBe(1);
+  });
+
+  it('revalidates expectedVersion and never overwrites a newer server version', async () => {
+    const version = await db().admin.query<{ version: string }>(
+      `select version::text as version from ledger.customers
+       where store_id = $1 and id = $2`,
+      [fixture.storeId, fixture.customerId],
+    );
+    const expectedVersion = version.rows[0]?.version;
+    if (!expectedVersion) throw new Error('Customer version fixture is unavailable.');
+    const recoveryOperationId = randomUUID();
+    const quarantined = envelope({
+      operationId: recoveryOperationId,
+      operationType: 'customers.update.v1',
+      aggregateId: fixture.customerId,
+      expectedVersion,
+      payload: { name: 'Must Not Win Recovery Race' },
+      clockState: 'clock_rollback_suspected',
+    });
+    expect((await push([quarantined])).results[0]?.status).toBe('QUARANTINED');
+
+    await request(server)
+      .patch(`/v1/customers/${fixture.customerId}`)
+      .set('authorization', `Bearer ${login.accessToken}`)
+      .send({
+        operationId: randomUUID(),
+        expectedVersion,
+        name: 'Authoritative Newer Customer',
+      })
+      .expect(200);
+
+    await expect(recover(quarantined)).resolves.toMatchObject({ status: 'CONFLICT' });
+    const customer = await db().admin.query<{ name: string; version: string }>(
+      `select name, version::text as version from ledger.customers
+       where store_id = $1 and id = $2`,
+      [fixture.storeId, fixture.customerId],
+    );
+    expect(customer.rows[0]).toEqual({
+      name: 'Authoritative Newer Customer',
+      version: (BigInt(expectedVersion) + 1n).toString(),
+    });
+    expect(await count('customers', recoveryOperationId)).toBe(0);
+  });
+
+  it('recovers representative money, payable, and inventory effects exactly once', async () => {
+    const moneyOperationId = randomUUID();
+    const payableOperationId = randomUUID();
+    const inventoryOperationId = randomUUID();
+    const operations = [
+      envelope({
+        operationId: moneyOperationId,
+        operationType: 'owner_contributions.post.v1',
+        payload: { moneyAccountId: fixture.moneyAccountId, amountMinor: '23', occurredAt },
+        clockState: 'clock_rollback_suspected',
+      }),
+      envelope({
+        operationId: payableOperationId,
+        operationType: 'supplier_invoices.post.v1',
+        payload: {
+          supplierId: fixture.supplierId,
+          invoiceNumber: `S19-7-${payableOperationId}`,
+          occurredAt,
+          totalMinor: '41',
+          items: [
+            {
+              description: 'Recovered payable only',
+              unitName: 'unit',
+              quantityMilli: '1000',
+              unitCostMinor: '41',
+              lineTotalMinor: '41',
+            },
+          ],
+        },
+        clockState: 'clock_rollback_suspected',
+      }),
+      envelope({
+        operationId: inventoryOperationId,
+        operationType: 'inventory.increase.post.v1',
+        aggregateId: randomUUID(),
+        payload: {
+          productId: fixture.productId,
+          productUnitId: fixture.productUnitId,
+          selectedQuantityMilli: '1000',
+          totalPurchaseCostMinor: '200',
+          occurredAt,
+        },
+        clockState: 'clock_rollback_suspected',
+      }),
+    ];
+    expect((await push(operations)).results.map((result) => result.status)).toEqual([
+      'QUARANTINED',
+      'QUARANTINED',
+      'QUARANTINED',
+    ]);
+    expect(
+      (await Promise.all(operations.map((operation) => recover(operation)))).map(
+        (result) => result.status,
+      ),
+    ).toEqual(['APPLIED', 'APPLIED', 'APPLIED']);
+    expect(await countByTransactionGroup('money_movements', moneyOperationId)).toBe(1);
+    expect(await count('purchase_invoices', payableOperationId)).toBe(1);
+    expect(await countByTransactionGroup('supplier_ledger_entries', payableOperationId)).toBe(1);
+    expect(await countByTransactionGroup('inventory_movements', payableOperationId)).toBe(0);
+    expect(await count('manual_inventory_entries', inventoryOperationId)).toBe(1);
+    expect(await countByTransactionGroup('inventory_movements', inventoryOperationId)).toBe(1);
+
+    expect(
+      (await Promise.all(operations.map((operation) => recover(operation)))).map(
+        (result) => result.status,
+      ),
+    ).toEqual(['EXACT_REPLAY', 'EXACT_REPLAY', 'EXACT_REPLAY']);
+    expect(await countByTransactionGroup('money_movements', moneyOperationId)).toBe(1);
+    expect(await countByTransactionGroup('supplier_ledger_entries', payableOperationId)).toBe(1);
+    expect(await countByTransactionGroup('inventory_movements', inventoryOperationId)).toBe(1);
+  });
+
+  it('serializes recovery against normal push and fails unknown quarantine reasons closed', async () => {
+    const operationId = randomUUID();
+    const recoverable = envelope({
+      operationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Recovery Push Race', phone: '0599000080' },
+      clockState: 'clock_rollback_suspected',
+    });
+    expect((await push([recoverable])).results[0]?.status).toBe('QUARANTINED');
+
+    const raced = await Promise.all([recover(recoverable), push([recoverable])]);
+    const statuses = [raced[0].status, raced[1].results[0]?.status];
+    expect(statuses).toContain('APPLIED');
+    expect(['EXACT_REPLAY', 'QUARANTINED']).toContain(
+      statuses.find((value) => value !== 'APPLIED'),
+    );
+    expect(await count('customers', operationId)).toBe(1);
+
+    const blockedOperationId = randomUUID();
+    const blocked = envelope({
+      operationId: blockedOperationId,
+      operationType: 'customers.create.v1',
+      aggregateId: randomUUID(),
+      payload: { name: 'Permanent Quarantine', phone: '0599000081' },
+      clockState: 'clock_rollback_suspected',
+    });
+    expect((await push([blocked])).results[0]?.status).toBe('QUARANTINED');
+    await db().admin.query(
+      `update sync.offline_operation_provenance_v1
+       set reason_code = 'OFFLINE_UNKNOWN_QUARANTINE'
+       where store_id = $1 and operation_id = $2`,
+      [fixture.storeId, blockedOperationId],
+    );
+    await expect(recover(blocked)).resolves.toMatchObject({
+      status: 'QUARANTINED',
+      code: 'OFFLINE_RECOVERY_NOT_ALLOWED',
+    });
+    expect(await count('customers', blockedOperationId)).toBe(0);
+  });
+
+  it('preserves period authority and least-privilege Store isolation during recovery', async () => {
+    const operationId = randomUUID();
+    const quarantined = envelope({
+      operationId,
+      operationType: 'owner_contributions.post.v1',
+      payload: { moneyAccountId: fixture.moneyAccountId, amountMinor: '19', occurredAt },
+      clockState: 'clock_rollback_suspected',
+    });
+    expect((await push([quarantined])).results[0]?.status).toBe('QUARANTINED');
+
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Hebron',
+      year: 'numeric',
+      month: 'numeric',
+    }).formatToParts(new Date(occurredAt));
+    const year = Number(parts.find((part) => part.type === 'year')?.value);
+    const month = Number(parts.find((part) => part.type === 'month')?.value);
+    const periodId = deriveAccountingPeriodId(fixture.storeId, year, month);
+    await db().admin.query(
+      `update ledger.accounting_periods set status = 'closed', closed_at = clock_timestamp()
+       where store_id = $1 and id = $2`,
+      [fixture.storeId, periodId],
+    );
+    try {
+      const recovered = await recover(quarantined);
+      expect(['CONFLICT', 'REJECTED']).toContain(recovered.status);
+      expect(await countByTransactionGroup('money_movements', operationId)).toBe(0);
+    } finally {
+      await db().admin.query(
+        `update ledger.accounting_periods set status = 'open', closed_at = null
+         where store_id = $1 and id = $2`,
+        [fixture.storeId, periodId],
+      );
+    }
+
+    const privilegeState = await db().admin.query<{
+      forcedRls: boolean;
+      runtimeSelect: boolean;
+      runtimeInsert: boolean;
+      runtimeUpdate: boolean;
+      runtimeDelete: boolean;
+      publicStatusExecute: boolean;
+      runtimeStatusExecute: boolean;
+      runtimeLegacyBeginExecute: boolean;
+    }>(
+      `select
+         (select relrowsecurity and relforcerowsecurity from pg_class
+          where oid = 'sync.offline_operation_recovery_events_v1'::regclass) as "forcedRls",
+         has_table_privilege('shop_app_runtime', 'sync.offline_operation_recovery_events_v1', 'SELECT') as "runtimeSelect",
+         has_table_privilege('shop_app_runtime', 'sync.offline_operation_recovery_events_v1', 'INSERT') as "runtimeInsert",
+         has_table_privilege('shop_app_runtime', 'sync.offline_operation_recovery_events_v1', 'UPDATE') as "runtimeUpdate",
+         has_table_privilege('shop_app_runtime', 'sync.offline_operation_recovery_events_v1', 'DELETE') as "runtimeDelete",
+         has_function_privilege('public', 'sync.read_offline_operation_status_v1(uuid,uuid,text)', 'EXECUTE') as "publicStatusExecute",
+         has_function_privilege('shop_app_runtime', 'sync.read_offline_operation_status_v1(uuid,uuid,text)', 'EXECUTE') as "runtimeStatusExecute",
+         has_function_privilege('shop_app_runtime', 'sync.begin_offline_operation_v1(uuid,uuid,uuid,text,bigint,text,uuid,uuid,bigint,timestamptz,timestamptz,timestamptz,text,text,timestamptz,uuid[])', 'EXECUTE') as "runtimeLegacyBeginExecute"`,
+    );
+    expect(privilegeState.rows[0]).toEqual({
+      forcedRls: true,
+      runtimeSelect: false,
+      runtimeInsert: false,
+      runtimeUpdate: false,
+      runtimeDelete: false,
+      publicStatusExecute: false,
+      runtimeStatusExecute: true,
+      runtimeLegacyBeginExecute: false,
+    });
+
+    const runtime = await db().runtime.connect();
+    try {
+      await runtime.query('begin');
+      await runtime.query(
+        `select set_config('app.store_id', $1, true),
+                set_config('app.user_id', $2, true),
+                set_config('app.device_id', $3, true),
+                set_config('app.request_id', $4, true)`,
+        [fixture.storeId, fixture.userId, fixture.deviceId, randomUUID()],
+      );
+      await expect(
+        runtime.query(
+          `select * from sync.read_offline_operation_status_v1($1::uuid, $2::uuid, null)`,
+          [randomUUID(), operationId],
+        ),
+      ).rejects.toMatchObject({ code: '22023' });
+      await runtime.query('rollback');
+      await expect(
+        runtime.query('select * from sync.offline_operation_recovery_events_v1'),
+      ).rejects.toMatchObject({
+        code: '42501',
+      });
+    } finally {
+      await runtime.query('rollback').catch(() => undefined);
+      runtime.release();
+    }
+
+    const immutableAttempt = await db().admin.query<{ recoveryAttemptId: string }>(
+      `select recovery_attempt_id as "recoveryAttemptId"
+       from sync.offline_operation_recovery_events_v1
+       where store_id = $1 and operation_id = $2
+       order by recorded_at limit 1`,
+      [fixture.storeId, operationId],
+    );
+    const recoveryAttemptId = immutableAttempt.rows[0]?.recoveryAttemptId;
+    if (!recoveryAttemptId) throw new Error('Recovery lineage fixture is unavailable.');
+    const migration = await db().migration.connect();
+    try {
+      await verifyMigrationSession(migration);
+      await expect(
+        migration.query(
+          `update sync.offline_operation_recovery_events_v1
+           set reason_code = 'MUTATION_MUST_FAIL'
+           where store_id = $1 and recovery_attempt_id = $2`,
+          [fixture.storeId, recoveryAttemptId],
+        ),
+      ).rejects.toMatchObject({ code: '55000' });
+    } finally {
+      await migration.query('reset role').catch(() => undefined);
+      migration.release();
+    }
   });
 });

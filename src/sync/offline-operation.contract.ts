@@ -50,6 +50,12 @@ export interface OfflineOperationPushResult {
   response: SyncJsonObject | null;
 }
 
+export interface OfflineOperationStatusResult extends OfflineOperationPushResult {
+  recoveryEligible: boolean;
+  recoveryAttemptCount: number;
+  lastRecoveryAt: string | null;
+}
+
 export class OfflineOperationEnvelopeError extends Error {
   constructor(readonly code: string) {
     super('Offline operation envelope validation failed.');

@@ -95,6 +95,12 @@ describe('OfflineOperationService', () => {
     execute: jest.fn().mockResolvedValue({ rows: [] }),
   } as unknown as DatabaseTransaction;
   const database = {
+    withTenantTransaction: jest.fn(
+      async (
+        _context: TenantTransactionContext,
+        work: (tx: DatabaseTransaction) => Promise<unknown>,
+      ) => work(transaction),
+    ),
     withOfflineOperationTransaction: jest.fn(
       async (
         _context: TenantTransactionContext,
@@ -102,14 +108,24 @@ describe('OfflineOperationService', () => {
         work: (tx: DatabaseTransaction) => Promise<unknown>,
       ) => work(transaction),
     ),
-  } as jest.Mocked<Pick<DatabaseService, 'withOfflineOperationTransaction'>>;
+  } as jest.Mocked<
+    Pick<DatabaseService, 'withTenantTransaction' | 'withOfflineOperationTransaction'>
+  >;
   const licenses = {
     verify: jest.fn().mockReturnValue(license),
   } as jest.Mocked<Pick<OfflineLicenseCryptoService, 'verify'>>;
   const repository = {
     begin: jest.fn(),
     finish: jest.fn(),
-  } as jest.Mocked<Pick<OfflineOperationRepository, 'begin' | 'finish'>>;
+    readStatus: jest.fn(),
+    beginRecovery: jest.fn(),
+    finishRecovery: jest.fn(),
+  } as jest.Mocked<
+    Pick<
+      OfflineOperationRepository,
+      'begin' | 'finish' | 'readStatus' | 'beginRecovery' | 'finishRecovery'
+    >
+  >;
   const registry = {
     supports: jest.fn((operationType: string) => operationType === 'customers.create.v1'),
     dispatch: jest.fn(),
@@ -137,6 +153,26 @@ describe('OfflineOperationService', () => {
       processedOperationPreexisted: false,
     });
     repository.finish.mockResolvedValue({
+      disposition: 'applied',
+      canonicalRequestHash: 'a'.repeat(64),
+      responseBody: { id: 'result-id', version: '1' },
+    });
+    repository.readStatus.mockResolvedValue({
+      operationId: '71085fe4-f593-4f68-8c0f-d46afc36769b',
+      status: 'applied',
+      reasonCode: null,
+      responseBody: { id: 'result-id', version: '1' },
+      recoveryEligible: false,
+      recoveryAttemptCount: 0,
+      lastRecoveryAt: null,
+    });
+    repository.beginRecovery.mockResolvedValue({
+      disposition: 'authorized',
+      reasonCode: null,
+      responseBody: null,
+      processedOperationPreexisted: false,
+    });
+    repository.finishRecovery.mockResolvedValue({
       disposition: 'applied',
       canonicalRequestHash: 'a'.repeat(64),
       responseBody: { id: 'result-id', version: '1' },
@@ -291,5 +327,86 @@ describe('OfflineOperationService', () => {
     ]);
     expect(result.results.map((entry) => entry.status)).toEqual(['APPLIED', 'APPLIED', 'REJECTED']);
     expect(database.withOfflineOperationTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('reads a sanitized Store-scoped operation status without domain execution', async () => {
+    const operationId = '71085fe4-f593-4f68-8c0f-d46afc36769b';
+
+    await expect(service.status(operationId, 'a'.repeat(64), context)).resolves.toEqual({
+      operationId,
+      status: 'APPLIED',
+      code: null,
+      response: { id: 'result-id', version: '1' },
+      recoveryEligible: false,
+      recoveryAttemptCount: 0,
+      lastRecoveryAt: null,
+    });
+    expect(database.withTenantTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.readStatus).toHaveBeenCalledWith(
+      transaction,
+      context.storeId,
+      operationId,
+      'a'.repeat(64),
+    );
+    expect(registry.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('recovers the exact original envelope through canonical domain dispatch once', async () => {
+    const original = operation('50', {
+      trustedTimeEvidence: {
+        version: 1,
+        trustedServerTime: license.issuedAt,
+        observedDeviceTime: '2026-01-02T00:00:00.000Z',
+        clockState: 'clock_rollback_suspected',
+        knownStoreStatus: 'active',
+        knownStoreStatusAt: license.issuedAt,
+      },
+    });
+    const operationId = String(original.operationId);
+
+    await expect(
+      service.recover(operationId, { operation: original }, principal, context),
+    ).resolves.toEqual({
+      operationId,
+      status: 'APPLIED',
+      code: null,
+      response: { id: 'result-id', version: '1' },
+    });
+    expect(repository.beginRecovery).toHaveBeenCalledWith(
+      transaction,
+      expect.objectContaining({ operationId }),
+      context.requestId,
+    );
+    expect(registry.dispatch).toHaveBeenCalledTimes(1);
+    expect(repository.finishRecovery).toHaveBeenCalledWith(
+      transaction,
+      context.storeId,
+      operationId,
+      context.requestId,
+      'applied',
+      { id: 'result-id', version: '1' },
+    );
+  });
+
+  it('returns an already completed recovery attempt as an exact replay', async () => {
+    repository.beginRecovery.mockResolvedValue({
+      disposition: 'applied',
+      reasonCode: null,
+      responseBody: { id: 'result-id', version: '1' },
+      processedOperationPreexisted: true,
+    });
+    const original = operation('51');
+    const operationId = String(original.operationId);
+
+    await expect(
+      service.recover(operationId, { operation: original }, principal, context),
+    ).resolves.toEqual({
+      operationId,
+      status: 'EXACT_REPLAY',
+      code: null,
+      response: { id: 'result-id', version: '1' },
+    });
+    expect(registry.dispatch).not.toHaveBeenCalled();
+    expect(repository.finishRecovery).not.toHaveBeenCalled();
   });
 });
