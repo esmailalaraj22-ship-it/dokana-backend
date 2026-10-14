@@ -49,6 +49,19 @@ describe('DatabaseService tenant transactions', () => {
     expect(database.transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('runs a tenant snapshot as one read-only repeatable-read transaction', async () => {
+    const work = jest.fn().mockResolvedValue('snapshot');
+
+    await expect(service.withTenantSnapshotTransaction(context, work)).resolves.toBe('snapshot');
+
+    expect(execute).toHaveBeenCalledTimes(4);
+    expect(work).toHaveBeenCalledWith(transaction);
+    expect(database.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'repeatable read',
+      accessMode: 'read only',
+    });
+  });
+
   it('rejects malformed context before opening a transaction', async () => {
     await expect(
       service.withTenantTransaction(

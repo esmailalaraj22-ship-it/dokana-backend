@@ -1643,7 +1643,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(basePosition.storeId).toBe(fixture.storeId);
 
     const storesDataset = manifest.datasets.find((dataset) => dataset.id === 'stores');
-    if (!storesDataset || storesDataset.pageCount !== 1) {
+    if (storesDataset?.pageCount !== 1) {
       throw new Error('S19 Store bootstrap dataset is unavailable.');
     }
     const storePage = await request(server)

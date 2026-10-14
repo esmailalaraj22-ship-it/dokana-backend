@@ -7,6 +7,7 @@ import { CommonModule } from './common/common.module';
 import { LoggingModule } from './common/logging/logging.module';
 import { ApplicationConfigModule } from './config/config.module';
 import { CustomersModule } from './customers/customers.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -40,6 +41,7 @@ import { SyncModule } from './sync/sync.module';
     OwnerLedgerModule,
     PlatformAuthorityModule,
     CustomersModule,
+    DashboardModule,
     ExpensesModule,
     ProductsModule,
     ReturnsModule,
