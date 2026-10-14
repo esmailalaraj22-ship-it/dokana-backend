@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AuthenticatedPrincipal } from '../auth/auth.types';
 import type { TenantTransactionContext } from '../database/database.types';
 import { decodeReportCursor, reportCursorScopeHash } from './report-cursor';
-import { ReportsRepository } from './reports.repository';
+import type { ReportsRepository } from './reports.repository';
 import { ReportsService } from './reports.service';
 import type { SalesReportRow } from './reports.types';
 

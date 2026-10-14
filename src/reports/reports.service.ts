@@ -70,10 +70,10 @@ export class ReportsService {
   ): Promise<OperationalSummaryResponse> {
     this.assertAuthorized(principal, context);
     this.assertDateRange(query.fromDate, query.toDate, MAX_DAILY_RANGE_DAYS);
-    const result = await this.repository.readOperationalSummary(context, {
-      ...query,
-      granularity: 'day',
-    });
+    const result = await this.repository.readOperationalSummary(
+      context,
+      Object.assign({}, query, { granularity: 'day' as const }),
+    );
     return { ...result, asOf: result.asOf.toISOString() };
   }
 
@@ -84,10 +84,10 @@ export class ReportsService {
   ): Promise<OperationalSummaryResponse> {
     this.assertAuthorized(principal, context);
     this.assertDateRange(query.fromDate, query.toDate, MAX_REPORT_RANGE_DAYS);
-    const result = await this.repository.readOperationalSummary(context, {
-      ...query,
-      granularity: 'month',
-    });
+    const result = await this.repository.readOperationalSummary(
+      context,
+      Object.assign({}, query, { granularity: 'month' as const }),
+    );
     return { ...result, asOf: result.asOf.toISOString() };
   }
 
@@ -122,12 +122,14 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readSales(context, {
-          ...query,
-          status,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readSales(
+          context,
+          Object.assign({}, query, {
+            status,
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'businessDate',
       {
@@ -160,12 +162,14 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readExpenses(context, {
-          ...query,
-          status,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readExpenses(
+          context,
+          Object.assign({}, query, {
+            status,
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'businessDate',
       {
@@ -199,11 +203,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readMoneyMovements(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readMoneyMovements(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'occurredAt',
       {
@@ -230,11 +236,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readLiquidity(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readLiquidity(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'currentState',
       { accountType: query.accountType ?? null, status: 'active', availability: 'available' },
@@ -259,11 +267,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readCustomerReceivables(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readCustomerReceivables(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'currentState',
       { customerId: query.customerId ?? null },
@@ -288,11 +298,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readSupplierPayables(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readSupplierPayables(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'currentState',
       { supplierId: query.supplierId ?? null },
@@ -313,11 +325,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readInventoryStock(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readInventoryStock(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.productId, type: null }),
       'currentState',
       { productId: query.productId ?? null, trackedOnly: true },
@@ -349,11 +363,13 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readInventoryMovements(context, {
-          ...query,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-        }),
+        this.repository.readInventoryMovements(
+          context,
+          Object.assign({}, query, {
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: null }),
       'postingDate',
       {
@@ -386,13 +402,15 @@ export class ReportsService {
       scope,
       query,
       (cursor, limit) =>
-        this.repository.readReturnsCorrections(context, {
-          ...query,
-          sourceType,
-          limit,
-          cursorId: cursor?.anchorId ?? null,
-          cursorSourceType: cursor?.anchorType ?? null,
-        }),
+        this.repository.readReturnsCorrections(
+          context,
+          Object.assign({}, query, {
+            sourceType,
+            limit,
+            cursorId: cursor?.anchorId ?? null,
+            cursorSourceType: cursor?.anchorType ?? null,
+          }),
+        ),
       (row) => ({ id: row.id, type: row.sourceType }),
       'postingDate',
       {
@@ -423,11 +441,13 @@ export class ReportsService {
     ];
     const limit = query.limit ?? DEFAULT_LIMIT;
     const cursor = this.cursor('owner-ledger', scope, query.cursor, false);
-    const result = await this.repository.readOwnerLedger(context, {
-      ...query,
-      limit,
-      cursorId: cursor?.anchorId ?? null,
-    });
+    const result = await this.repository.readOwnerLedger(
+      context,
+      Object.assign({}, query, {
+        limit,
+        cursorId: cursor?.anchorId ?? null,
+      }),
+    );
     const page = this.mapPage(
       'owner-ledger',
       scope,

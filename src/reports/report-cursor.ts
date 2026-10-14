@@ -12,6 +12,10 @@ const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
 const scopeHashPattern = /^[A-Za-z0-9_-]{43}$/;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 export interface ReportCursor {
   scopeHash: string;
   anchorId: string;
@@ -84,19 +88,21 @@ export function decodeReportCursor(encoded: string, expectedScopeHash: string): 
   } catch {
     throw invalidCursor('reportCursor');
   }
+  if (!isUnknownArray(parsed) || parsed.length !== 4) {
+    throw invalidCursor('reportCursorScope');
+  }
+  const [version, scopeHash, anchorId, anchorType] = parsed;
   if (
-    !Array.isArray(parsed) ||
-    parsed.length !== 4 ||
-    parsed[0] !== CURSOR_VERSION ||
-    typeof parsed[1] !== 'string' ||
-    parsed[1] !== expectedScopeHash ||
-    typeof parsed[2] !== 'string' ||
-    !isUUID(parsed[2]) ||
-    parsed[2] !== parsed[2].toLowerCase() ||
-    (parsed[3] !== null &&
-      (typeof parsed[3] !== 'string' || !/^[a-z][a-z_]{0,63}$/.test(parsed[3])))
+    version !== CURSOR_VERSION ||
+    typeof scopeHash !== 'string' ||
+    scopeHash !== expectedScopeHash ||
+    typeof anchorId !== 'string' ||
+    !isUUID(anchorId) ||
+    anchorId !== anchorId.toLowerCase() ||
+    (anchorType !== null &&
+      (typeof anchorType !== 'string' || !/^[a-z][a-z_]{0,63}$/.test(anchorType)))
   ) {
     throw invalidCursor('reportCursorScope');
   }
-  return { scopeHash: parsed[1], anchorId: parsed[2], anchorType: parsed[3] };
+  return { scopeHash, anchorId, anchorType };
 }

@@ -17,11 +17,9 @@ describe('Report cursor', () => {
     });
 
     expect(cursor.length).toBeLessThanOrEqual(REPORT_CURSOR_MAX_ENCODED_LENGTH);
-    expect(decodeReportCursor(cursor, scopeHash)).toEqual({
-      scopeHash,
-      anchorId: expect.any(String),
-      anchorType: null,
-    });
+    const decoded = decodeReportCursor(cursor, scopeHash);
+    expect(decoded).toMatchObject({ scopeHash, anchorType: null });
+    expect(typeof decoded.anchorId).toBe('string');
     expect(() => decodeReportCursor(cursor, reportCursorScopeHash('sales', ['different']))).toThrow(
       'Report query is invalid.',
     );

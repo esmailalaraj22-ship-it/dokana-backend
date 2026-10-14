@@ -17,6 +17,7 @@ import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
 import { DATABASE_POOL } from '../src/database/database.constants';
 import type { DashboardResponse } from '../src/dashboard/dashboard.types';
+import { normalizeMoneyAccountNameV1 } from '../src/money-accounts/money-account-normalization';
 import type { OfflineLicenseResponse } from '../src/offline-licenses/offline-license.types';
 import type {
   CustomerReceivableReportRow,
@@ -43,6 +44,7 @@ import type {
   SupplierPayableReportRow,
   SupplierPayableReportTotals,
 } from '../src/reports/reports.types';
+import type { GlobalSearchResponse } from '../src/search/search.types';
 import type { OfflineOperationPushResult } from '../src/sync/offline-operation.contract';
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
@@ -170,6 +172,18 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       .set('authorization', `Bearer ${identity.token}`)
       .expect(200);
     return response.body as T;
+  }
+
+  async function search(
+    query: Record<string, string | number>,
+    identity: Identity = owner,
+  ): Promise<GlobalSearchResponse> {
+    const response = await request(server)
+      .get('/v1/search')
+      .query(query)
+      .set('authorization', `Bearer ${identity.token}`)
+      .expect(200);
+    return response.body as GlobalSearchResponse;
   }
 
   async function insertMoneyMovement(input: {
@@ -930,7 +944,8 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
     });
     const dailyRow = daily.rows[0];
     if (!dailyRow) throw new Error('The Daily Report row is missing.');
-    const { period: _period, ...expectedDailyTotals } = dailyRow;
+    const { period: dailyPeriod, ...expectedDailyTotals } = dailyRow;
+    expect(dailyPeriod).toBe(clock.businessDate);
     expect(daily.totals).toEqual(expectedDailyTotals);
 
     const monthly = await report<OperationalSummaryResponse>('monthly', dateQuery);
@@ -1172,6 +1187,175 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       if (lockOpen) await lockClient.query('rollback');
       lockClient.release();
     }
+  });
+
+  it('discovers canonical multi-domain, archived, corrected, and origin-neutral records without mutation', async () => {
+    const archivedCustomerId = randomUUID();
+    const localizedAccountId = randomUUID();
+    await db().admin.query(
+      `insert into ledger.customers(
+        id,store_id,name,normalized_name,phone,normalized_phone,status,archived_at,
+        device_id,operation_id
+      ) values($1,$2,'Archived Discovery','archived discovery','0599000204',
+        '+970599000204','archived',clock_timestamp(),$3,$4)`,
+      [archivedCustomerId, owner.storeId, owner.deviceId, randomUUID()],
+    );
+    const localizedAccountName = '\u0623\u064e\u062d\u0645\u062f \u0628\u0646\u0643';
+    await db().admin.query(
+      `insert into ledger.money_accounts(
+        id,store_id,name,normalized_name,account_type,availability,is_default,status,
+        device_id,operation_id
+      ) values($1,$2,$3,$4,'transfer','available',false,'active',$5,$6)`,
+      [
+        localizedAccountId,
+        owner.storeId,
+        localizedAccountName,
+        normalizeMoneyAccountNameV1(localizedAccountName),
+        owner.deviceId,
+        randomUUID(),
+      ],
+    );
+    const before = await db().admin.query<{ sales: number; money: number; inventory: number }>(
+      `select
+        (select count(*)::integer from ledger.sales where store_id=$1) as sales,
+        (select count(*)::integer from ledger.money_movements where store_id=$1) as money,
+        (select count(*)::integer from ledger.inventory_movements where store_id=$1) as inventory`,
+      [owner.storeId],
+    );
+
+    const multiDomain = await search({ q: 'Dashboard' });
+    expect(multiDomain.items.map((item) => item.type)).toEqual(
+      expect.arrayContaining(['customer', 'supplier', 'expense']),
+    );
+    expect(multiDomain.items.every((item) => item.id === item.id.toLowerCase())).toBe(true);
+    expect(multiDomain.items.length).toBeLessThanOrEqual(multiDomain.pagination.limit);
+
+    const byUuid = await search({ q: ids.customer, type: 'customer' });
+    expect(byUuid.items).toEqual([
+      expect.objectContaining({ type: 'customer', id: ids.customer, status: 'active' }),
+    ]);
+    const byPhone = await search({ q: '+970 59 900 0202', type: 'customer' });
+    expect(byPhone.items).toEqual([
+      expect.objectContaining({ id: ids.customer, primaryLabel: 'Dashboard Customer' }),
+    ]);
+    const byProduct = await search({ q: 'Known', type: 'product' });
+    expect(byProduct.items).toEqual([
+      expect.objectContaining({ id: ids.knownProduct, status: 'active' }),
+    ]);
+    const byLocalizedAccount = await search({
+      q: localizedAccountName,
+      type: 'money_account',
+    });
+    expect(byLocalizedAccount.items).toEqual([
+      expect.objectContaining({ id: localizedAccountId, primaryLabel: localizedAccountName }),
+    ]);
+    const byAmount = await search({ q: '9007199254740993' });
+    expect(byAmount.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'sale', amountMinor: '9007199254740993' }),
+        expect.objectContaining({
+          type: 'inventory_movement',
+          quantityMilli: '9007199254740993',
+        }),
+      ]),
+    );
+    const byDate = await search({ q: clock.businessDate, type: 'expense' });
+    expect(byDate.items).toEqual([
+      expect.objectContaining({ type: 'expense', businessDate: clock.businessDate }),
+    ]);
+    const archived = await search({ q: 'Archived Discovery', type: 'customer' });
+    expect(archived.items).toEqual([
+      expect.objectContaining({ id: archivedCustomerId, status: 'archived' }),
+    ]);
+    const corrected = await search({ q: 'S20-CORRECTED', type: 'sale' });
+    expect(corrected.items).toEqual([
+      expect.objectContaining({ displayNumber: 'S20-CORRECTED', status: 'corrected' }),
+    ]);
+    const originNeutral = await search({ q: '321', type: 'sale' });
+    expect(originNeutral.items).toHaveLength(2);
+    expect(originNeutral.items.every((item) => item.amountMinor === '321')).toBe(true);
+    const literalPattern = await search({ q: '%%', type: 'sale' });
+    expect(literalPattern.items).toEqual([]);
+
+    const after = await db().admin.query<{ sales: number; money: number; inventory: number }>(
+      `select
+        (select count(*)::integer from ledger.sales where store_id=$1) as sales,
+        (select count(*)::integer from ledger.money_movements where store_id=$1) as money,
+        (select count(*)::integer from ledger.inventory_movements where store_id=$1) as inventory`,
+      [owner.storeId],
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  it('enforces stable keyset pagination, authorization, validation, RLS, and Store-scoped cursors', async () => {
+    const first = await search({ q: 'S20', type: 'sale', limit: 2 });
+    expect(first.items).toHaveLength(2);
+    expect(first.pagination.nextCursor).toEqual(expect.any(String));
+    const repeated = await search({ q: 'S20', type: 'sale', limit: 2 });
+    expect(repeated.items).toEqual(first.items);
+    const second = await search({
+      q: 'S20',
+      type: 'sale',
+      limit: 2,
+      cursor: first.pagination.nextCursor ?? '',
+    });
+    expect(second.items).toHaveLength(2);
+    expect(second.items.map((item) => item.id)).not.toEqual(
+      expect.arrayContaining(first.items.map((item) => item.id)),
+    );
+
+    expect((await search({ q: 'Foreign', type: 'sale' })).items).toEqual([]);
+    expect((await search({ q: 'S20-FOREIGN', type: 'sale' }, foreignOwner)).items).toEqual([
+      expect.objectContaining({ displayNumber: 'S20-FOREIGN' }),
+    ]);
+    await request(server)
+      .get('/v1/search')
+      .query({
+        q: 'S20',
+        type: 'sale',
+        limit: 2,
+        cursor: first.pagination.nextCursor,
+      })
+      .set('authorization', `Bearer ${foreignOwner.token}`)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'SEARCH_QUERY_INVALID' }));
+
+    await request(server)
+      .get('/v1/search')
+      .query({ q: 'Dashboard' })
+      .set('authorization', `Bearer ${manager.token}`)
+      .expect(403)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'SEARCH_READ_NOT_ALLOWED' }));
+    await request(server).get('/v1/search').query({ q: 'Dashboard' }).expect(401);
+    await expect(
+      search({ q: 'Read', type: 'money_account' }, readOnlyOwner),
+    ).resolves.toMatchObject({
+      items: [expect.objectContaining({ primaryLabel: 'Read Only Cash' })],
+    });
+
+    for (const invalidQuery of [
+      {},
+      { q: '' },
+      { q: '   ' },
+      { q: 'x'.repeat(257) },
+      { q: 'Dashboard', type: 'unknown' },
+      { q: 'Dashboard', limit: 0 },
+      { q: 'Dashboard', limit: 51 },
+      { q: 'Dashboard', limit: '01' },
+      { q: 'Dashboard', cursor: 'not-base64+' },
+      { q: 'Dashboard', storeId: foreignOwner.storeId },
+    ]) {
+      await request(server)
+        .get('/v1/search')
+        .query(invalidQuery)
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(400);
+    }
+
+    const withoutContext = await db().runtime.query<{ count: number }>(
+      'select count(*)::integer as count from ledger.customers',
+    );
+    expect(withoutContext.rows[0]).toEqual({ count: 0 });
   });
 
   function saleBody(operationId: string | null, occurredAt: string): Record<string, unknown> {

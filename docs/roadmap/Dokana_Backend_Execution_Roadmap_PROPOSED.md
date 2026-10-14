@@ -9,7 +9,7 @@
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
 | Closed execution history  | Stations S0-S19                             |
-| Current Station           | S20.3 - CLOSED; S20.4 next / not started   |
+| Current Station           | S20.4 - CLOSED; S20.5 next / not started   |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S19                                        |
-| Current task                    | S20.3 closed; S20.4 next / not started     |
+| Current task                    | S20.4 closed; S20.5 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -1706,7 +1706,7 @@ current code already exposes sync dispatch.
 
 ### S20 - Dashboard, Reports, Search, Documents, and Export
 
-- **Status:** CURRENT - S20.3 CLOSED; S20.4 NEXT / NOT STARTED.
+- **Status:** CURRENT - S20.4 CLOSED; S20.5 NEXT / NOT STARTED.
 - **Purpose:** Deliver authoritative user-facing read models and documents.
 - **Distinct boundary:** Reports and documents consume stabilized ledgers and projections
   without becoming new accounting authority.
@@ -1756,6 +1756,18 @@ Dashboard metrics, online/offline-originated data, RLS/Store isolation, `read_on
 and concurrent snapshot consistency. PostgreSQL remains 28 applied / 0 pending, with
 PostgreSQL-reference and SQLite deltas both 0.
 
+S20.4 added owner-authorized `GET /v1/search` discovery over an explicit allow-list of
+Customer, Supplier, Product, Sale, Supplier Invoice, Expense, Customer Collection,
+Supplier Payment, Money Account, Money Movement, Sale Return, Supplier Return, and
+Inventory Movement records. Search uses bounded normalized input, exact identifier,
+phone, amount, and date matching where applicable, deterministic ranked keyset pagination,
+scope-bound cursors, canonical stored values, and privacy-equivalent authorization errors.
+Archived and corrected records remain discoverable with truthful status, while Platform,
+authentication, synchronization, audit, internal-note, and secret data remain excluded.
+Real PostgreSQL tests proved Store isolation, owner authorization, `read_only` access,
+online/offline neutrality, adversarial input bounds, and read-only behavior. PostgreSQL
+remains 28 applied / 0 pending, with PostgreSQL-reference and SQLite deltas both 0.
+
 S20 uses `businessDate` for Store-local operational activity, `postingDate` and
 `accountingPeriodId` for financial/period reporting, and `occurredAt` for event chronology.
 Single-query reads may use ordinary tenant transactions; multi-query dashboard/report/export
@@ -1769,8 +1781,8 @@ authority or attachment storage. Approved export scope is PDF; backup/restore be
 | S20.1 - Orientation, Scope, and Stage Decomposition    | CLOSED             | Inventory existing read authorities, freeze S20 boundaries, date/precision rules, consistency needs, gaps, and delivery order                                                                                                        | S19 closed; no product implementation                                                                                            | Database delta = 0                                                   | Repository/database baseline verified; no owner decision or database blocker                                                                                                                                                              |
 | S20.2 - Dashboard and Shared Read Foundation           | CLOSED             | Add owner-authorized dashboard aggregates and shared bounded filters/snapshot primitives over canonical Sales, collections, Expenses, supplier payments, money balances, receivables, payables, inventory value, and recent activity | S7-S19; excludes notifications, audit browsing, new projections, and accounting writes                                           | Database delta = 0                                                   | Source reconciliation, Store-local day boundaries, unknown-cost disclosure, exact money, read-only access, RLS, cross-Store rejection, online/offline neutrality, and snapshot consistency proven                                         |
 | S20.3 - Accounting and Operational Reports             | CLOSED             | Added bounded daily/monthly Sales, collections, debt, Expense/payment, profit, liquidity, Customer, Supplier, inventory, account, movement, return/correction, and owner-ledger reports using established domain signs and status   | S20.2 shared read foundation; excludes new financial statements, ledger effects, and rewritten correction history                | Database delta = 0; PostgreSQL remains 28 applied / 0 pending        | Current-state versus historical-ledger semantics, totals/subtotals, known/unknown cost coverage, date/period filters, exact precision, pagination, snapshots, RLS, and reconciliation proven                                              |
-| S20.4 - Global Store Search and Read-Side Discovery    | NEXT / NOT STARTED | Add typed, allow-listed, bounded global Store search across approved Customer, Supplier, Product, invoice/document, phone, amount, date, status, account, and movement fields while retaining entity-specific search                 | S20.2-S20.3; excludes arbitrary-table/full-text infrastructure, Platform data, and cross-tenant discovery                         | Database delta expected = 0; indexes only if measurement proves need | Prove deterministic scope-bound pagination, ranking/filter contract, archived/history behavior, privacy-equivalent errors, RLS, and adversarial input bounds                                                                              |
-| S20.5 - Canonical Business Documents and PDF Export    | NOT STARTED        | Generate Sale invoices/receipts and approved report/Customer/Supplier ledger PDFs from the same canonical read models and source identifiers                                                                                         | S20.2-S20.4 as applicable; excludes attachment storage, notification delivery, backup, restore, CSV/XLSX, and reposting metadata | Database delta expected = 0                                          | Prove regeneration is read-only, PDF/API equivalence, correction/return traceability, exact money/date/time rendering, bounded data capture, authorization, and Store isolation                                                           |
+| S20.4 - Global Store Search and Read-Side Discovery    | CLOSED             | Added typed, allow-listed, bounded global Store search across approved Customer, Supplier, Product, invoice/document, phone, amount, date, status, account, and movement fields while retaining entity-specific search               | S20.2-S20.3; excludes arbitrary-table/full-text infrastructure, Platform data, and cross-tenant discovery                         | Database delta = 0; PostgreSQL remains 28 applied / 0 pending        | Deterministic scope-bound pagination, ranking/filter contract, archived/history behavior, privacy-equivalent errors, RLS, adversarial input bounds, read-only behavior, and Store isolation proven                                        |
+| S20.5 - Canonical Business Documents and PDF Export    | NEXT / NOT STARTED | Generate Sale invoices/receipts and approved report/Customer/Supplier ledger PDFs from the same canonical read models and source identifiers                                                                                         | S20.2-S20.4 as applicable; excludes attachment storage, notification delivery, backup, restore, CSV/XLSX, and reposting metadata | Database delta expected = 0                                          | Prove regeneration is read-only, PDF/API equivalence, correction/return traceability, exact money/date/time rendering, bounded data capture, authorization, and Store isolation                                                           |
 | S20.6 - API/Data Dictionary and Integrated S20 Closure | NOT STARTED        | Close machine-readable API/data-dictionary debt and execute integrated Dashboard/report/search/document/export verification                                                                                                          | S20.2-S20.5; excludes S21/S22 implementation                                                                                     | Database delta expected = 0                                          | Prove authoritative reconciliation, precision, date/period semantics, pagination, consistent snapshots, RLS/least privilege, read-only behavior, no S19 regression, no second accounting engine, and clean documentation/repository gates |
 
 ### S21 - Notifications, Attachments, and Audit Access
@@ -1964,9 +1976,9 @@ new explicit owner decision.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S19 - Offline Sync and Data Bootstrap      |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Safe completed capabilities         | S0-S19 plus S20.1-S20.3                    |
+| Safe completed capabilities         | S0-S19 plus S20.1-S20.4                    |
 | First incomplete release dependency | S20 - Dashboard, Reports, Search, Documents, and Export |
-| Current Station                     | S20.3 - CLOSED; S20.4 NEXT / NOT STARTED   |
+| Current Station                     | S20.4 - CLOSED; S20.5 NEXT / NOT STARTED   |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -1989,9 +2001,9 @@ new explicit owner decision.
 | S20.1 current status                | CLOSED                                     |
 | S20.2 current status                | CLOSED                                     |
 | S20.3 current status                | CLOSED                                     |
-| S20.4 current status                | NEXT / NOT STARTED                         |
-| S20.5 current status                | NOT STARTED                                |
+| S20.4 current status                | CLOSED                                     |
+| S20.5 current status                | NEXT / NOT STARTED                         |
 | S20.6 current status                | NOT STARTED                                |
 
-Do not start S20.4 from this document. It requires a separate execution prompt. Database,
+Do not start S20.5 from this document. It requires a separate execution prompt. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.
