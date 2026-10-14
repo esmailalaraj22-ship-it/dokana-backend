@@ -18,6 +18,7 @@ import { OfflineLicensesModule } from './offline-licenses/offline-licenses.modul
 import { OwnerLedgerModule } from './owner-ledger/owner-ledger.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { ProductsModule } from './products/products.module';
+import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SettingsModule } from './settings/settings.module';
@@ -44,6 +45,7 @@ import { SyncModule } from './sync/sync.module';
     DashboardModule,
     ExpensesModule,
     ProductsModule,
+    ReportsModule,
     ReturnsModule,
     SalesModule,
     SuppliersModule,

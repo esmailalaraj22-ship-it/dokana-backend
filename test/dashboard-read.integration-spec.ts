@@ -18,6 +18,31 @@ import { AppConfigService } from '../src/config/app-config.service';
 import { DATABASE_POOL } from '../src/database/database.constants';
 import type { DashboardResponse } from '../src/dashboard/dashboard.types';
 import type { OfflineLicenseResponse } from '../src/offline-licenses/offline-license.types';
+import type {
+  CustomerReceivableReportRow,
+  CustomerReceivableReportTotals,
+  ExpenseReportRow,
+  ExpenseReportTotals,
+  InventoryMovementReportRow,
+  InventoryMovementReportTotals,
+  InventoryStockReportRow,
+  InventoryStockReportTotals,
+  LiquidityReportRow,
+  LiquidityReportTotals,
+  MoneyMovementReportRow,
+  MoneyMovementReportTotals,
+  OperationalSummaryResponse,
+  OwnerLedgerReportRow,
+  OwnerLedgerReportTotals,
+  ProfitReportResponse,
+  ReportPageResponse,
+  ReturnCorrectionReportRow,
+  ReturnCorrectionReportTotals,
+  SalesReportRow,
+  SalesReportTotals,
+  SupplierPayableReportRow,
+  SupplierPayableReportTotals,
+} from '../src/reports/reports.types';
 import type { OfflineOperationPushResult } from '../src/sync/offline-operation.contract';
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
@@ -132,6 +157,19 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       .set('authorization', `Bearer ${identity.token}`)
       .expect(200);
     return response.body as DashboardResponse;
+  }
+
+  async function report<T>(
+    path: string,
+    query: Record<string, string | number>,
+    identity: Identity = owner,
+  ): Promise<T> {
+    const response = await request(server)
+      .get(`/v1/reports/${path}`)
+      .query(query)
+      .set('authorization', `Bearer ${identity.token}`)
+      .expect(200);
+    return response.body as T;
   }
 
   async function insertMoneyMovement(input: {
@@ -870,6 +908,272 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
+  it('reports every S20.3 authority with exact totals, bounded cursors, and Dashboard consistency', async () => {
+    const dateQuery = { fromDate: clock.businessDate, toDate: clock.businessDate };
+    const dashboardNow = await dashboard();
+    const daily = await report<OperationalSummaryResponse>('daily', dateQuery);
+    expect(daily).toMatchObject({
+      timezoneName: 'Asia/Hebron',
+      granularity: 'day',
+      rows: [
+        {
+          period: clock.businessDate,
+          salesMinor: dashboardNow.today.salesMinor,
+          immediateSaleCollectionsMinor: dashboardNow.today.immediateSaleCollectionsMinor,
+          customerCollectionsMinor: dashboardNow.today.customerCollectionsMinor,
+          customerReceivableAllocationsMinor: dashboardNow.today.customerReceivableAllocationsMinor,
+          creditSalesMinor: dashboardNow.today.creditSalesMinor,
+          expensesRecognizedMinor: dashboardNow.today.expensesRecognizedMinor,
+          supplierPaymentsMinor: dashboardNow.today.supplierPaymentsMinor,
+        },
+      ],
+    });
+    const dailyRow = daily.rows[0];
+    if (!dailyRow) throw new Error('The Daily Report row is missing.');
+    const { period: _period, ...expectedDailyTotals } = dailyRow;
+    expect(daily.totals).toEqual(expectedDailyTotals);
+
+    const monthly = await report<OperationalSummaryResponse>('monthly', dateQuery);
+    expect(monthly.rows[0]?.salesMinor).toBe(dashboardNow.today.salesMinor);
+
+    const profit = await report<ProfitReportResponse>('profit', dateQuery);
+    expect(profit).toMatchObject({
+      grossSalesMinor: dashboardNow.today.salesMinor,
+      netSalesMinor: dashboardNow.today.salesMinor,
+      expensesMinor: dashboardNow.today.expensesRecognizedMinor,
+      profitMinor: null,
+      costCoverage: { complete: false },
+    });
+
+    const sales = await report<
+      ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+    >('sales', { ...dateQuery, limit: 2 });
+    expect(sales.items).toHaveLength(2);
+    expect(sales.pagination.nextCursor).toEqual(expect.any(String));
+    expect(sales.totals.page.rowCount).toBe(2);
+    expect(sales.totals.filtered.postedTotalMinor).toBe(dashboardNow.today.salesMinor);
+    const nextSales = await report<
+      ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+    >('sales', { ...dateQuery, limit: 2, cursor: sales.pagination.nextCursor ?? '' });
+    expect(nextSales.items[0]?.id).not.toBe(sales.items[0]?.id);
+    expect(nextSales.totals.filtered).toEqual(sales.totals.filtered);
+    const correctedSales = await report<
+      ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+    >('sales', { ...dateQuery, status: 'corrected', accountingPeriodId: periodId });
+    expect(correctedSales).toMatchObject({
+      items: [expect.objectContaining({ status: 'corrected' })],
+      totals: { filtered: { rowCount: 1, correctedTotalMinor: '888' } },
+    });
+    expect(sales.items.filter((row) => row.totalMinor === '321')).toHaveLength(2);
+
+    const expenses = await report<
+      ReportPageResponse<ExpenseReportRow, ExpenseReportTotals, Record<string, unknown>>
+    >('expenses', dateQuery);
+    expect(expenses.totals.filtered).toMatchObject({
+      recognizedMinor: '300',
+      paidMinor: '0',
+      outstandingMinor: '300',
+    });
+
+    const movements = await report<
+      ReportPageResponse<MoneyMovementReportRow, MoneyMovementReportTotals, Record<string, unknown>>
+    >('money-movements', dateQuery);
+    expect(BigInt(movements.totals.filtered.netMinor)).toBe(BigInt(dashboardNow.money.totalMinor));
+    const cashMovements = await report<
+      ReportPageResponse<MoneyMovementReportRow, MoneyMovementReportTotals, Record<string, unknown>>
+    >('money-movements', { ...dateQuery, moneyAccountId: ids.cash });
+    expect(cashMovements.items.every((row) => row.moneyAccountId === ids.cash)).toBe(true);
+
+    const liquidity = await report<
+      ReportPageResponse<LiquidityReportRow, LiquidityReportTotals, Record<string, unknown>>
+    >('liquidity', {});
+    expect(liquidity.totals.filtered.balanceMinor).toBe(dashboardNow.money.totalMinor);
+
+    const receivables = await report<
+      ReportPageResponse<
+        CustomerReceivableReportRow,
+        CustomerReceivableReportTotals,
+        Record<string, unknown>
+      >
+    >('customer-receivables', {});
+    expect(receivables.totals.filtered.netDueMinor).toBe(
+      dashboardNow.obligations.customerReceivablesMinor,
+    );
+
+    const payables = await report<
+      ReportPageResponse<
+        SupplierPayableReportRow,
+        SupplierPayableReportTotals,
+        Record<string, unknown>
+      >
+    >('supplier-payables', {});
+    expect(payables.totals.filtered.netPayableMinor).toBe(
+      dashboardNow.obligations.supplierPayablesMinor,
+    );
+
+    const stock = await report<
+      ReportPageResponse<
+        InventoryStockReportRow,
+        InventoryStockReportTotals,
+        Record<string, unknown>
+      >
+    >('inventory-stock', {});
+    expect(stock.totals.filtered).toMatchObject({
+      rowCount: dashboardNow.inventory.trackedProductCount,
+      knownValueMinor: dashboardNow.inventory.knownValueMinor,
+      totalValueMinor: null,
+    });
+
+    const inventoryMovements = await report<
+      ReportPageResponse<
+        InventoryMovementReportRow,
+        InventoryMovementReportTotals,
+        Record<string, unknown>
+      >
+    >('inventory-movements', dateQuery);
+    expect(inventoryMovements.items).toContainEqual(
+      expect.objectContaining({
+        quantityDeltaMilli: '9007199254740993',
+        valueDeltaMinor: null,
+      }),
+    );
+    expect(inventoryMovements.totals.filtered.unknownCostMovementCount).toBeGreaterThan(0);
+
+    const corrections = await report<
+      ReportPageResponse<
+        ReturnCorrectionReportRow,
+        ReturnCorrectionReportTotals,
+        Record<string, unknown>
+      >
+    >('returns-corrections', dateQuery);
+    expect(corrections.items).toContainEqual(
+      expect.objectContaining({ sourceType: 'sale_correction', subtype: 'corrected' }),
+    );
+    const saleCorrections = await report<
+      ReportPageResponse<
+        ReturnCorrectionReportRow,
+        ReturnCorrectionReportTotals,
+        Record<string, unknown>
+      >
+    >('returns-corrections', { ...dateQuery, sourceType: 'sale_correction' });
+    expect(saleCorrections.items.every((row) => row.sourceType === 'sale_correction')).toBe(true);
+
+    const ownerLedger = await report<
+      ReportPageResponse<OwnerLedgerReportRow, OwnerLedgerReportTotals, Record<string, unknown>> & {
+        currentPosition: { storeOwesOwnerMinor: string; ownerEquityMovementMinor: string };
+      }
+    >('owner-ledger', dateQuery);
+    expect(ownerLedger).toMatchObject({
+      totals: {
+        filtered: {
+          rowCount: 0,
+          ownerLiabilityDeltaMinor: '0',
+          equityDeltaMinor: '0',
+        },
+      },
+      currentPosition: { storeOwesOwnerMinor: '0', ownerEquityMovementMinor: '0' },
+    });
+  });
+
+  it('preserves report authorization, READ_ONLY access, validation, RLS, and Store isolation', async () => {
+    const dateQuery = { fromDate: clock.businessDate, toDate: clock.businessDate };
+    await request(server)
+      .get('/v1/reports/daily')
+      .query(dateQuery)
+      .set('authorization', `Bearer ${manager.token}`)
+      .expect(403)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'REPORT_READ_NOT_ALLOWED' }));
+
+    await request(server)
+      .get('/v1/reports/daily')
+      .query({ ...dateQuery, storeId: foreignOwner.storeId })
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(400);
+
+    const foreign = await report<OperationalSummaryResponse>('daily', dateQuery, foreignOwner);
+    expect(foreign.totals.salesMinor).toBe('6000000000000000000');
+    expect(foreign.totals.salesMinor).not.toBe((await dashboard()).today.salesMinor);
+
+    const readOnly = await report<OperationalSummaryResponse>('daily', dateQuery, readOnlyOwner);
+    expect(readOnly.totals.salesMinor).toBe('0');
+
+    const foreignCustomerFilter = await report<
+      ReportPageResponse<
+        CustomerReceivableReportRow,
+        CustomerReceivableReportTotals,
+        Record<string, unknown>
+      >
+    >('customer-receivables', { customerId: ids.foreignCustomer });
+    expect(foreignCustomerFilter).toMatchObject({
+      items: [],
+      totals: {
+        filtered: {
+          rowCount: 0,
+          receivableMinor: '0',
+          creditMinor: '0',
+          netDueMinor: '0',
+        },
+      },
+    });
+
+    const firstPage = await report<
+      ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+    >('sales', { ...dateQuery, limit: 1 });
+    await request(server)
+      .get('/v1/reports/sales')
+      .query({ ...dateQuery, limit: 1, status: 'posted', cursor: firstPage.pagination.nextCursor })
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(400)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'REPORT_QUERY_INVALID' }));
+
+    const withoutContext = await db().runtime.query<{ count: number }>(
+      'select count(*)::integer as count from ledger.money_movements',
+    );
+    expect(withoutContext.rows[0]).toEqual({ count: 0 });
+  });
+
+  it('keeps report rows and filtered totals on one repeatable-read snapshot', async () => {
+    const dateQuery = { fromDate: clock.businessDate, toDate: clock.businessDate };
+    const before = await report<
+      ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+    >('sales', { ...dateQuery, limit: 100 });
+    const lockClient = await db().admin.connect();
+    let lockOpen = false;
+    try {
+      await lockClient.query('begin');
+      lockOpen = true;
+      await lockClient.query('lock table ledger.customers in access exclusive mode');
+      const pending = report<
+        ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+      >('sales', { ...dateQuery, limit: 100 });
+      await waitForReportCustomerLock(db().admin);
+      await insertSale({
+        id: randomUUID(),
+        totalMinor: '77',
+        occurredAt: clock.now,
+        displayNumber: `S203-CONCURRENT-${randomUUID()}`,
+        status: 'posted',
+      });
+      await lockClient.query('commit');
+      lockOpen = false;
+
+      const during = await pending;
+      expect(during.items).toHaveLength(before.items.length);
+      expect(during.totals.filtered).toEqual(before.totals.filtered);
+
+      const after = await report<
+        ReportPageResponse<SalesReportRow, SalesReportTotals, Record<string, unknown>>
+      >('sales', { ...dateQuery, limit: 100 });
+      expect(after.items).toHaveLength(before.items.length + 1);
+      expect(after.totals.filtered.postedTotalMinor).toBe(
+        (BigInt(before.totals.filtered.postedTotalMinor) + 77n).toString(),
+      );
+    } finally {
+      if (lockOpen) await lockClient.query('rollback');
+      lockClient.release();
+    }
+  });
+
   function saleBody(operationId: string | null, occurredAt: string): Record<string, unknown> {
     return {
       ...(operationId ? { operationId } : {}),
@@ -904,4 +1208,20 @@ async function waitForMoneyQueryLock(pool: Pool): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('The Dashboard money query did not reach the expected relation lock.');
+}
+
+async function waitForReportCustomerLock(pool: Pool): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await pool.query<{ blocked: boolean }>(
+      `select exists(
+        select 1 from pg_stat_activity
+        where datname=current_database()
+          and application_name='dokana-s202-runtime'
+          and wait_event_type='Lock'
+      ) as blocked`,
+    );
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('The Sales report did not reach the expected Customer relation lock.');
 }
