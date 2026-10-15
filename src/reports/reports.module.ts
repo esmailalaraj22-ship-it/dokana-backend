@@ -10,5 +10,6 @@ import { ReportsService } from './reports.service';
   imports: [AuthenticationModule, DatabaseModule],
   controllers: [ReportsController],
   providers: [ReportsRepository, ReportsService],
+  exports: [ReportsService],
 })
 export class ReportsModule {}

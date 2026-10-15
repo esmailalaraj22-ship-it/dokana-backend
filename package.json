@@ -38,6 +38,7 @@
     "db:check:migration": "tsx scripts/check-database.ts migration"
   },
   "dependencies": {
+    "@expo-google-fonts/noto-sans-arabic": "^0.4.3",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
@@ -51,6 +52,7 @@
     "jose": "^5.10.0",
     "libphonenumber-js": "1.13.10",
     "nestjs-pino": "^4.0.0",
+    "pdfkit": "^0.20.2",
     "pg": "^8.0.0",
     "pino": "^9.0.0",
     "reflect-metadata": "^0.2.0",
@@ -64,6 +66,7 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^29.0.0",
     "@types/node": "^22.0.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.0.0",
     "@types/supertest": "^6.0.0",
     "drizzle-kit": "^0.31.0",

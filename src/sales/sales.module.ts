@@ -61,6 +61,7 @@ import { SalesController } from './sales.controller';
     CustomerPaymentPostingService,
     SaleCorrectionService,
     SalePostingService,
+    SaleReadService,
   ],
 })
 export class SalesModule {}

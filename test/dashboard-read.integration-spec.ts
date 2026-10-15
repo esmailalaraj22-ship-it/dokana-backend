@@ -17,6 +17,9 @@ import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
 import { DATABASE_POOL } from '../src/database/database.constants';
 import type { DashboardResponse } from '../src/dashboard/dashboard.types';
+import { formatCanonicalDocumentValue } from '../src/documents/document-format';
+import { DocumentsService } from '../src/documents/documents.service';
+import type { CanonicalPdfDocumentModel } from '../src/documents/document.types';
 import { normalizeMoneyAccountNameV1 } from '../src/money-accounts/money-account-normalization';
 import type { OfflineLicenseResponse } from '../src/offline-licenses/offline-license.types';
 import type {
@@ -45,6 +48,7 @@ import type {
   SupplierPayableReportTotals,
 } from '../src/reports/reports.types';
 import type { GlobalSearchResponse } from '../src/search/search.types';
+import type { SaleDetailResponse } from '../src/sales/sale-read.types';
 import type { OfflineOperationPushResult } from '../src/sync/offline-operation.contract';
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import {
@@ -146,6 +150,7 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
   let login: AuthenticationResponse;
   let syncAuthentication: SyncAuthenticationResponse;
   let license: OfflineLicenseResponse;
+  let firstSaleId: string;
   const password = `S20.2-${randomUUID()}!`;
 
   function db(): InventoryTestDatabase {
@@ -184,6 +189,47 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       .set('authorization', `Bearer ${identity.token}`)
       .expect(200);
     return response.body as GlobalSearchResponse;
+  }
+
+  function documentPrincipal(identity: Identity = owner) {
+    return {
+      storeId: identity.storeId,
+      storeName: 'S20.2 fixture',
+      userId: identity.userId,
+      deviceId: identity.deviceId,
+      membershipRole: identity.role,
+    };
+  }
+
+  function documentContext(identity: Identity = owner) {
+    return {
+      storeId: identity.storeId,
+      userId: identity.userId,
+      deviceId: identity.deviceId,
+      requestId: randomUUID(),
+    };
+  }
+
+  function documentSection(
+    model: CanonicalPdfDocumentModel,
+    title: string,
+  ): Record<string, string> {
+    const section = model.sections.find((candidate) => candidate.title === title);
+    if (!section) throw new Error(`Document section ${title} is missing.`);
+    return Object.fromEntries(section.fields.map((field) => [field.label, field.value]));
+  }
+
+  function expectPdfResponse(
+    body: unknown,
+    headers: Record<string, string | string[] | undefined>,
+    filename: string,
+  ): void {
+    expect(headers['content-type']).toMatch(/^application\/pdf(?:;|$)/);
+    expect(headers['content-disposition']).toBe(`attachment; filename="${filename}"`);
+    expect(Buffer.isBuffer(body)).toBe(true);
+    const buffer = body as Buffer;
+    expect(buffer.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+    expect(buffer.length).toBeGreaterThan(1_000);
   }
 
   async function insertMoneyMovement(input: {
@@ -469,10 +515,12 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       displayNumber: 'S20-PREVIOUS-DAY',
       status: 'posted',
     });
+    const correctedSaleId = randomUUID();
+    const correctedOccurredAt = new Date(clock.dayStart.getTime() + 25_000);
     await insertSale({
-      id: randomUUID(),
+      id: correctedSaleId,
       totalMinor: '888',
-      occurredAt: new Date(clock.dayStart.getTime() + 25_000),
+      occurredAt: correctedOccurredAt,
       displayNumber: 'S20-CORRECTED',
       status: 'corrected',
     });
@@ -492,11 +540,108 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       status: 'posted',
     });
 
+    const salePaymentMovement = await db().admin.query<{ id: string }>(
+      `select id from ledger.money_movements
+       where store_id=$1 and movement_type='sale_payment'
+       order by occurred_at desc
+       limit 1`,
+      [owner.storeId],
+    );
+    const salePaymentMovementId = salePaymentMovement.rows[0]?.id;
+    if (!salePaymentMovementId) throw new Error('The Sale payment movement fixture is missing.');
     await db().admin.query(
       `insert into ledger.sale_payments(
         id,store_id,sale_id,money_account_id,amount_minor,payment_at,money_movement_id
-      ) values($1,$2,$3,$4,100,$5,null)`,
-      [randomUUID(), owner.storeId, saleIds[0], ids.cash, clock.now],
+      ) values($1,$2,$3,$4,100,$5,$6)`,
+      [randomUUID(), owner.storeId, saleIds[0], ids.cash, clock.now, salePaymentMovementId],
+    );
+    const correctedMovementId = randomUUID();
+    await db().admin.query(
+      `insert into ledger.money_movements(
+        id,store_id,account_id,accounting_period_id,movement_type,
+        amount_delta_minor,reference_type,reference_id,transaction_group_id,
+        occurred_at,operation_id
+      ) values($1,$2,$3,$4,'sale_payment',888,'sale',$5,$6,$7,$8)`,
+      [
+        correctedMovementId,
+        owner.storeId,
+        ids.cash,
+        periodId,
+        correctedSaleId,
+        randomUUID(),
+        correctedOccurredAt,
+        randomUUID(),
+      ],
+    );
+    await db().admin.query(
+      `insert into ledger.sale_payments(
+        id,store_id,sale_id,money_account_id,amount_minor,payment_at,money_movement_id
+      ) values($1,$2,$3,$4,888,$5,$6)`,
+      [
+        randomUUID(),
+        owner.storeId,
+        correctedSaleId,
+        ids.cash,
+        correctedOccurredAt,
+        correctedMovementId,
+      ],
+    );
+    await db().admin.query(
+      `insert into ledger.sale_items(
+        id,store_id,sale_id,product_id,product_unit_id,is_manual_line,
+        product_name_snapshot,unit_name_snapshot,quantity_milli,
+        conversion_factor_num,conversion_factor_den,base_quantity_milli,
+        unit_price_minor,line_gross_minor,line_discount_minor,rounding_minor,
+        line_total_minor,cost_status,unit_cost_minor,line_cost_minor
+      ) values($1,$2,$3,null,null,true,'Corrected service','service',1000,1,1,null,
+        888,888,0,0,888,'unknown',null,null)`,
+      [randomUUID(), owner.storeId, correctedSaleId],
+    );
+    await db().admin.query('update ledger.sales set unknown_cost_line_count=1 where id=$1', [
+      correctedSaleId,
+    ]);
+    await db().admin.query(
+      `insert into ledger.money_movements(
+        id,store_id,account_id,accounting_period_id,movement_type,
+        amount_delta_minor,reference_type,reference_id,transaction_group_id,
+        reversal_of_id,occurred_at,operation_id
+      ) values($1,$2,$3,$4,'correction',-888,'sale_correction',$5,$6,$7,$8,$9)`,
+      [
+        randomUUID(),
+        owner.storeId,
+        ids.cash,
+        periodId,
+        correctedSaleId,
+        randomUUID(),
+        correctedMovementId,
+        correctedOccurredAt,
+        randomUUID(),
+      ],
+    );
+    const firstSale = saleIds[0];
+    if (!firstSale) throw new Error('The first Dashboard Sale fixture is missing.');
+    await db().admin.query(
+      `insert into ledger.sale_items(
+        id,store_id,sale_id,product_id,product_unit_id,is_manual_line,
+        product_name_snapshot,unit_name_snapshot,quantity_milli,
+        conversion_factor_num,conversion_factor_den,base_quantity_milli,
+        unit_price_minor,line_gross_minor,line_discount_minor,rounding_minor,
+        line_total_minor,cost_status,unit_cost_minor,line_cost_minor
+      ) values($1,$2,$3,null,null,true,$4,$5,1250,1,1,null,80,100,0,0,100,
+        'unknown',null,null)`,
+      [
+        randomUUID(),
+        owner.storeId,
+        firstSale,
+        `منتج عربي آمن <script> ${'تفاصيل '.repeat(70)}`,
+        'وحدة',
+      ],
+    );
+    await db().admin.query(
+      `update ledger.sales
+       set notes=$2, unknown_cost_line_count=1
+       where id=$1`,
+      [firstSale, `ملاحظة عربية & <safe> ${'نص طويل '.repeat(50)}`],
     );
     await db().admin.query(
       `insert into ledger.customer_payments(
@@ -563,9 +708,7 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       ) values($1,$2,$3,'Dashboard expense',300,0,$4,'due_later','posted',$5,$6)`,
       [randomUUID(), owner.storeId, periodId, clock.now, owner.deviceId, randomUUID()],
     );
-    const firstSaleId = saleIds[0];
-    if (!firstSaleId) throw new Error('The first Dashboard Sale fixture is missing.');
-    return firstSaleId;
+    return firstSale;
   }
 
   async function insertSale(input: {
@@ -696,7 +839,7 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
     ).body as SyncAuthenticationResponse;
 
     await seedCatalogAndBalances();
-    await seedTodayAndActivity();
+    firstSaleId = await seedTodayAndActivity();
   });
 
   afterAll(async () => {
@@ -1356,6 +1499,252 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       'select count(*)::integer as count from ledger.customers',
     );
     expect(withoutContext.rows[0]).toEqual({ count: 0 });
+  });
+
+  it('generates canonical Sale, ledger, and every approved report PDF from existing authorities', async () => {
+    if (!app) throw new Error('The S20.5 application fixture is unavailable.');
+    const documents = app.get(DocumentsService);
+    const dateQuery = { fromDate: clock.businessDate, toDate: clock.businessDate };
+
+    const saleApi = await request(server)
+      .get(`/v1/sales/${firstSaleId}`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(200);
+    const saleSource = saleApi.body as SaleDetailResponse;
+    const saleDocument = await documents.generateSale(
+      documentPrincipal(),
+      documentContext(),
+      firstSaleId,
+    );
+    expect(documentSection(saleDocument.model, 'Canonical Totals')['Sale total']).toBe(
+      formatCanonicalDocumentValue('totalMinor', saleSource.sale.totalMinor),
+    );
+    expect(saleDocument.model.tables[0]?.rows[0]).toEqual(expect.arrayContaining(['1.250']));
+    expect(saleDocument.model.tables[0]?.columns).not.toContain('Unit Cost Minor');
+    expect(JSON.stringify(saleDocument.model)).toContain('منتج عربي آمن');
+    expect(JSON.stringify(saleDocument.model)).toContain('<script>');
+
+    const salePdf = await request(server)
+      .get(`/v1/documents/sales/${firstSaleId}.pdf`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(200);
+    expectPdfResponse(salePdf.body, salePdf.headers, `sale-${firstSaleId}.pdf`);
+
+    const customerReport = await report<
+      ReportPageResponse<
+        CustomerReceivableReportRow,
+        CustomerReceivableReportTotals,
+        Record<string, unknown>
+      >
+    >('customer-receivables', { customerId: ids.customer });
+    const customerDocument = await documents.generateCustomerLedger(
+      documentPrincipal(),
+      documentContext(),
+      ids.customer,
+    );
+    expect(customerDocument.model.tables[0]?.rows).toHaveLength(customerReport.items.length);
+    expect(documentSection(customerDocument.model, 'Filtered Totals')['Net Due Minor']).toBe(
+      formatCanonicalDocumentValue('netDueMinor', customerReport.totals.filtered.netDueMinor),
+    );
+
+    const supplierReport = await report<
+      ReportPageResponse<
+        SupplierPayableReportRow,
+        SupplierPayableReportTotals,
+        Record<string, unknown>
+      >
+    >('supplier-payables', { supplierId: ids.supplier });
+    const supplierDocument = await documents.generateSupplierLedger(
+      documentPrincipal(),
+      documentContext(),
+      ids.supplier,
+    );
+    expect(documentSection(supplierDocument.model, 'Filtered Totals')['Net Payable Minor']).toBe(
+      formatCanonicalDocumentValue(
+        'netPayableMinor',
+        supplierReport.totals.filtered.netPayableMinor,
+      ),
+    );
+
+    const routes: {
+      path: string;
+      filename: string;
+      query: Record<string, string | number>;
+    }[] = [
+      { path: 'daily', filename: 'report-daily.pdf', query: dateQuery },
+      { path: 'monthly', filename: 'report-monthly.pdf', query: dateQuery },
+      { path: 'profit', filename: 'report-profit.pdf', query: dateQuery },
+      { path: 'sales', filename: 'report-sales.pdf', query: { ...dateQuery, limit: 2 } },
+      { path: 'expenses', filename: 'report-expenses.pdf', query: dateQuery },
+      {
+        path: 'money-movements',
+        filename: 'report-money-movements.pdf',
+        query: dateQuery,
+      },
+      { path: 'liquidity', filename: 'report-liquidity.pdf', query: {} },
+      {
+        path: 'customer-receivables',
+        filename: 'report-customer-receivables.pdf',
+        query: {},
+      },
+      {
+        path: 'supplier-payables',
+        filename: 'report-supplier-payables.pdf',
+        query: {},
+      },
+      { path: 'inventory-stock', filename: 'report-inventory-stock.pdf', query: {} },
+      {
+        path: 'inventory-movements',
+        filename: 'report-inventory-movements.pdf',
+        query: dateQuery,
+      },
+      {
+        path: 'returns-corrections',
+        filename: 'report-returns-corrections.pdf',
+        query: dateQuery,
+      },
+      { path: 'owner-ledger', filename: 'report-owner-ledger.pdf', query: dateQuery },
+    ];
+    for (const route of routes) {
+      const response = await request(server)
+        .get(`/v1/documents/reports/${route.path}.pdf`)
+        .query(route.query)
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(200);
+      expectPdfResponse(response.body, response.headers, route.filename);
+    }
+
+    const salesPage = await documents.generateSalesReport(documentPrincipal(), documentContext(), {
+      ...dateQuery,
+      limit: 2,
+    });
+    expect(salesPage.model.notices).toContainEqual(expect.stringContaining('More results'));
+
+    const stock = await documents.generateInventoryStockReport(
+      documentPrincipal(),
+      documentContext(),
+      {},
+    );
+    const stockRepresentation = JSON.stringify(stock.model);
+    expect(stockRepresentation).toContain('9,007,199,254,740.993');
+    expect(stockRepresentation).toContain('Unknown');
+  });
+
+  it('preserves document authorization, privacy-equivalent isolation, READ_ONLY access, and validation', async () => {
+    const dateQuery = { fromDate: clock.businessDate, toDate: clock.businessDate };
+    const foreignSale = await db().admin.query<{ id: string }>(
+      `select id from ledger.sales where store_id=$1 and display_number='S20-FOREIGN'`,
+      [foreignOwner.storeId],
+    );
+    const foreignSaleId = foreignSale.rows[0]?.id;
+    if (!foreignSaleId) throw new Error('The foreign Sale fixture is missing.');
+
+    await request(server)
+      .get(`/v1/documents/sales/${foreignSaleId}.pdf`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(404)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'SALE_NOT_FOUND' }));
+    await request(server)
+      .get(`/v1/documents/customers/${ids.foreignCustomer}/ledger.pdf`)
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(404)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'DOCUMENT_NOT_FOUND' }));
+    await request(server)
+      .get(`/v1/documents/sales/${firstSaleId}.pdf`)
+      .set('authorization', `Bearer ${manager.token}`)
+      .expect(403)
+      .expect(({ body }) => expect(body).toMatchObject({ code: 'SALE_READ_NOT_ALLOWED' }));
+    await request(server).get(`/v1/documents/sales/${firstSaleId}.pdf`).expect(401);
+
+    const readOnly = await request(server)
+      .get('/v1/documents/reports/daily.pdf')
+      .query(dateQuery)
+      .set('authorization', `Bearer ${readOnlyOwner.token}`)
+      .expect(200);
+    expectPdfResponse(readOnly.body, readOnly.headers, 'report-daily.pdf');
+
+    await request(server)
+      .get('/v1/documents/reports/sales.pdf')
+      .query({ ...dateQuery, limit: 101 })
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(400);
+    await request(server)
+      .get('/v1/documents/reports/sales.pdf')
+      .query({ ...dateQuery, storeId: foreignOwner.storeId })
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(400);
+    await request(server)
+      .get('/v1/documents/sales/not-a-uuid.pdf')
+      .set('authorization', `Bearer ${owner.token}`)
+      .expect(400);
+
+    const withoutContext = await db().runtime.query<{ count: number }>(
+      'select count(*)::integer as count from ledger.sales',
+    );
+    expect(withoutContext.rows[0]).toEqual({ count: 0 });
+  });
+
+  it('keeps repeated, corrected, online, and offline document generation read-only and origin-neutral', async () => {
+    if (!app) throw new Error('The S20.5 application fixture is unavailable.');
+    const documents = app.get(DocumentsService);
+    const stateQuery = `select
+      (select version::text from ledger.sales where id=$2) as "saleVersion",
+      (select count(*)::integer from ledger.money_movements where store_id=$1) as money,
+      (select count(*)::integer from ledger.inventory_movements where store_id=$1) as inventory,
+      (select count(*)::integer from ledger.customer_ledger_entries where store_id=$1) as customer,
+      (select count(*)::integer from ledger.supplier_ledger_entries where store_id=$1) as supplier,
+      (select count(*)::integer from sync.store_change_events_v1 where store_id=$1) as changes,
+      (select count(*)::integer from audit.central_audit_logs where store_id=$1) as audit`;
+    const before = await db().admin.query(stateQuery, [owner.storeId, firstSaleId]);
+
+    const first = await documents.generateSale(documentPrincipal(), documentContext(), firstSaleId);
+    const second = await documents.generateSale(
+      documentPrincipal(),
+      documentContext(),
+      firstSaleId,
+    );
+    expect(first.model.sections).toEqual(second.model.sections);
+    expect(first.buffer.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+    expect(second.buffer.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+
+    const corrected = await db().admin.query<{ id: string }>(
+      `select id from ledger.sales where store_id=$1 and display_number='S20-CORRECTED'`,
+      [owner.storeId],
+    );
+    const correctedId = corrected.rows[0]?.id;
+    if (!correctedId) throw new Error('The corrected Sale fixture is missing.');
+    const correctedDocument = await documents.generateSale(
+      documentPrincipal(),
+      documentContext(),
+      correctedId,
+    );
+    expect(correctedDocument.model.notices).toContain('Sale status: corrected');
+
+    const originRows = await db().admin.query<{ id: string }>(
+      `select id from ledger.sales
+       where store_id=$1 and total_minor=321
+       order by created_at desc
+       limit 2`,
+      [owner.storeId],
+    );
+    expect(originRows.rows).toHaveLength(2);
+    const originModels = await Promise.all(
+      originRows.rows.map((row) =>
+        documents.generateSale(documentPrincipal(), documentContext(), row.id),
+      ),
+    );
+    const [firstOrigin, secondOrigin] = originModels;
+    if (!firstOrigin || !secondOrigin) {
+      throw new Error('The online/offline Sale document fixtures are incomplete.');
+    }
+    expect(documentSection(firstOrigin.model, 'Canonical Totals')).toEqual(
+      documentSection(secondOrigin.model, 'Canonical Totals'),
+    );
+    expect(firstOrigin.model.documentType).toBe('sale');
+    expect(secondOrigin.model.documentType).toBe('sale');
+
+    const after = await db().admin.query(stateQuery, [owner.storeId, firstSaleId]);
+    expect(after.rows[0]).toEqual(before.rows[0]);
   });
 
   function saleBody(operationId: string | null, occurredAt: string): Record<string, unknown> {
