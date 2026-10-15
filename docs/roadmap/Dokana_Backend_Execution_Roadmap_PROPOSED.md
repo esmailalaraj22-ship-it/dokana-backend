@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S19                             |
-| Current Station           | S20.5 - CLOSED; S20.6 next / not started   |
+| Closed execution history  | Stations S0-S20                             |
+| Current Station           | S20 - CLOSED; S21 next / not started       |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -68,8 +68,8 @@ The roadmap was reconstructed against this verified state:
 | Migrations                      | 28 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S19                                        |
-| Current task                    | S20.5 closed; S20.6 next / not started     |
+| Last fully closed Station       | S20                                        |
+| Current task                    | S20 closed; S21 next / not started         |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -211,7 +211,7 @@ backup/restore, and final release validation.
 | Returns/reversals/corrections                      | Implemented                          | S17 (closed)                 |
 | Subscription/offline licensing/SaaS administration | Implemented                          | S18 (closed)                 |
 | Generic sync and consistent data bootstrap         | Bootstrap implemented; sync partial  | S19                          |
-| Dashboard/reports/search/documents/export          | Still required                       | S20                          |
+| Dashboard/reports/search/documents/export          | Implemented                          | S20 (closed)                 |
 | Notifications/attachments/audit access             | Partially implemented infrastructure | S21                          |
 | Backup/restore/recovery                            | Still required                       | S22                          |
 | Final security/recovery/release validation         | Still required                       | S23                          |
@@ -1706,7 +1706,7 @@ current code already exposes sync dispatch.
 
 ### S20 - Dashboard, Reports, Search, Documents, and Export
 
-- **Status:** CURRENT - S20.5 CLOSED; S20.6 NEXT / NOT STARTED.
+- **Status:** CLOSED; S20.1-S20.6 are closed.
 - **Purpose:** Deliver authoritative user-facing read models and documents.
 - **Distinct boundary:** Reports and documents consume stabilized ledgers and projections
   without becoming new accounting authority.
@@ -1768,6 +1768,18 @@ Real PostgreSQL tests proved Store isolation, owner authorization, `read_only` a
 online/offline neutrality, adversarial input bounds, and read-only behavior. PostgreSQL
 remains 28 applied / 0 pending, with PostgreSQL-reference and SQLite deltas both 0.
 
+S20.6 closed the machine-readable API and data-semantics gap with an application-generated
+OpenAPI document at `GET /openapi.json`. The document covers the current REST surface and
+explicitly describes S20 Dashboard, report, search, document, and PDF operations, including
+authentication, bounded filters and cursors, error responses, exact decimal-string money and
+milli-unit values, Store-local business dates, posting dates, accounting periods, record
+versions, unknown-cost disclosure, and operational-profit scope. Integrated real-PostgreSQL
+verification reconciled Dashboard, reports, search, and canonical PDFs to existing domain
+authorities; proved online/offline equivalence, `read_only` access, RLS and Store isolation,
+consistent snapshots, deterministic pagination, and zero read-side mutation; and found no
+second accounting engine. PostgreSQL remains 28 applied / 0 pending, with no migration,
+PostgreSQL-reference, or SQLite delta.
+
 S20 uses `businessDate` for Store-local operational activity, `postingDate` and
 `accountingPeriodId` for financial/period reporting, and `occurredAt` for event chronology.
 Single-query reads may use ordinary tenant transactions; multi-query dashboard/report/export
@@ -1783,7 +1795,7 @@ authority or attachment storage. Approved export scope is PDF; backup/restore be
 | S20.3 - Accounting and Operational Reports             | CLOSED             | Added bounded daily/monthly Sales, collections, debt, Expense/payment, profit, liquidity, Customer, Supplier, inventory, account, movement, return/correction, and owner-ledger reports using established domain signs and status   | S20.2 shared read foundation; excludes new financial statements, ledger effects, and rewritten correction history                | Database delta = 0; PostgreSQL remains 28 applied / 0 pending        | Current-state versus historical-ledger semantics, totals/subtotals, known/unknown cost coverage, date/period filters, exact precision, pagination, snapshots, RLS, and reconciliation proven                                              |
 | S20.4 - Global Store Search and Read-Side Discovery    | CLOSED             | Added typed, allow-listed, bounded global Store search across approved Customer, Supplier, Product, invoice/document, phone, amount, date, status, account, and movement fields while retaining entity-specific search               | S20.2-S20.3; excludes arbitrary-table/full-text infrastructure, Platform data, and cross-tenant discovery                         | Database delta = 0; PostgreSQL remains 28 applied / 0 pending        | Deterministic scope-bound pagination, ranking/filter contract, archived/history behavior, privacy-equivalent errors, RLS, adversarial input bounds, read-only behavior, and Store isolation proven                                        |
 | S20.5 - Canonical Business Documents and PDF Export    | CLOSED             | Added Sale, Customer Ledger, Supplier Ledger, and all approved S20.3 report PDFs from canonical Sale/report authorities, with truthful correction/return state, exact money/milli-unit formatting, unknown-cost disclosure, Arabic/long-text support, safe bounded multi-page rendering, and zero persistent generation effects | S20.2-S20.4 as applicable; excludes attachment storage, notification delivery, backup, restore, CSV/XLSX, and reposting metadata | Database delta = 0; PostgreSQL remains 28 applied / 0 pending         | API/PDF semantic equivalence, repeated-generation zero mutation, Store isolation, read-only access, safe filenames, injection boundaries, online/offline neutrality, and zero temporary-file residue proven                              |
-| S20.6 - API/Data Dictionary and Integrated S20 Closure | NEXT / NOT STARTED | Close machine-readable API/data-dictionary debt and execute integrated Dashboard/report/search/document/export verification                                                                                                          | S20.2-S20.5; excludes S21/S22 implementation                                                                                     | Database delta expected = 0                                          | Prove authoritative reconciliation, precision, date/period semantics, pagination, consistent snapshots, RLS/least privilege, read-only behavior, no S19 regression, no second accounting engine, and clean documentation/repository gates |
+| S20.6 - API/Data Dictionary and Integrated S20 Closure | CLOSED             | Added generated OpenAPI coverage and exact S20 data semantics, then executed integrated Dashboard/report/search/document/PDF verification                                                                                            | S20.2-S20.5; excludes S21/S22 implementation                                                                                     | Database delta = 0; PostgreSQL remains 28 applied / 0 pending        | Authoritative reconciliation, precision, date/period semantics, pagination, snapshots, RLS/Store isolation, least privilege, read-only behavior, online/offline equivalence, no second accounting engine, and clean code gates proven      |
 
 ### S21 - Notifications, Attachments, and Audit Access
 
@@ -1974,11 +1986,11 @@ new explicit owner decision.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S19 - Offline Sync and Data Bootstrap      |
+| Last fully closed Station           | S20 - Dashboard, Reports, Search, Documents, and Export |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Safe completed capabilities         | S0-S19 plus S20.1-S20.5                    |
-| First incomplete release dependency | S20 - Dashboard, Reports, Search, Documents, and Export |
-| Current Station                     | S20.5 - CLOSED; S20.6 NEXT / NOT STARTED   |
+| Safe completed capabilities         | S0-S20                                     |
+| First incomplete release dependency | S21 - Notifications, Attachments, and Audit Access |
+| Current Station                     | S20 - CLOSED; S21 NEXT / NOT STARTED       |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -1997,13 +2009,14 @@ new explicit owner decision.
 | S19.7 current status                | CLOSED                                     |
 | S19.8 current status                | CLOSED                                     |
 | S19.9 current status                | CLOSED                                     |
-| S20 current status                  | CURRENT                                    |
+| S20 current status                  | CLOSED                                     |
 | S20.1 current status                | CLOSED                                     |
 | S20.2 current status                | CLOSED                                     |
 | S20.3 current status                | CLOSED                                     |
 | S20.4 current status                | CLOSED                                     |
 | S20.5 current status                | CLOSED                                     |
-| S20.6 current status                | NEXT / NOT STARTED                         |
+| S20.6 current status                | CLOSED                                     |
+| S21 current status                  | NEXT / NOT STARTED                         |
 
-Do not start S20.6 from this document. It requires a separate execution prompt. Database,
+Do not start S21 from this document. It requires a separate orientation and execution prompt. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.

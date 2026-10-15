@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 
+import { configureOpenApi } from './api-contract/openapi';
 import { AppModule } from './app.module';
 import { configureApplication } from './bootstrap';
 import { AppConfigService } from './config/app-config.service';
@@ -18,6 +19,7 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(AppConfigService);
   configureApplication(app, config);
+  configureOpenApi(app);
 
   await app.listen(config.port);
 
