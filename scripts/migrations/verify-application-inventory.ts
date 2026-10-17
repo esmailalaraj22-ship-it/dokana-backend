@@ -22,6 +22,7 @@ import {
   platformAdminStoreLifecycleRoutines,
   platformAuthorityFoundationRoutines,
   platformAuthorityFoundationTables,
+  sanitizedOwnerAuditRoutines,
   station2ContextFunctions,
   subscriptionLifecycleProvisioningRoutines,
 } from './application-object-inventory';
@@ -79,6 +80,7 @@ export async function verifyApplicationInventory(
   let offlineOperationRecoveryApplied = false;
   let notificationUserStateApplied = false;
   let notificationTouchApplied = false;
+  let sanitizedOwnerAuditApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -249,6 +251,18 @@ export async function verifyApplicationInventory(
       }
       notificationTouchApplied = true;
     }
+
+    const sanitizedOwnerAudit = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0031_sanitized_owner_business_audit.sql'`,
+    );
+    if (sanitizedOwnerAudit.rows[0]) {
+      const file = await readMigrationFile('0031_sanitized_owner_business_audit.sql');
+      if (sanitizedOwnerAudit.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Sanitized Owner audit migration checksum mismatch.');
+      }
+      sanitizedOwnerAuditApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -364,6 +378,7 @@ export async function verifyApplicationInventory(
         : []),
       ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryRoutines : []),
       ...(notificationTouchApplied ? notificationTouchRoutines : []),
+      ...(sanitizedOwnerAuditApplied ? sanitizedOwnerAuditRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

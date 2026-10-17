@@ -272,6 +272,9 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     await adminPool.query('delete from ledger.devices where store_id = any($1::uuid[])', [
       storeIds,
     ]);
+    await adminPool.query('delete from platform.users where id = any($1::uuid[])', [
+      Object.values(fixture.users),
+    ]);
     await adminPool.query('delete from ledger.stores where id = any($1::uuid[])', [storeIds]);
   }
 
@@ -324,6 +327,12 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     await removeFixtures();
     const storeKeys = Object.keys(fixture.stores) as StoreKey[];
     for (const [index, key] of storeKeys.entries()) {
+      await adminPool.query(
+        `insert into platform.users (
+           id, email, normalized_email, password_hash, full_name, status
+         ) values ($1,$2,$2,'s10.3-test-only','S10.3 Owner','active')`,
+        [fixture.users[key], `s10.3-${key.toLowerCase()}@example.test`],
+      );
       await adminPool.query('insert into ledger.stores (id, name, status) values ($1,$2,$3)', [
         fixture.stores[key],
         `S10.3 ${key} store`,
@@ -511,6 +520,7 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
       { tableName: 'money_movements', name: 'trg_money_movements_no_mutation' },
       { tableName: 'money_movements', name: 'trg_money_movements_period' },
       { tableName: 'money_movements', name: 'trg_money_movements_store_change_v1' },
+      { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_entries_central_audit' },
       { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_entries_store_change_v1' },
       { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_no_mutation' },
       { tableName: 'owner_ledger_entries', name: 'trg_owner_ledger_period' },

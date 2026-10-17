@@ -87,6 +87,7 @@ describe('machine-readable Dokana API contract', () => {
     expect(Object.keys(document.paths).length).toBeGreaterThan(100);
     expect(document.paths).toHaveProperty('/v1/auth/login');
     expect(document.paths).toHaveProperty('/v1/customers');
+    expect(document.paths).toHaveProperty('/v1/audit');
     expect(document.paths).toHaveProperty('/v1/sync/pull');
     expect(document.paths).toHaveProperty('/v1/admin/stores');
     expect(operationIds.every((operationId) => typeof operationId === 'string')).toBe(true);
@@ -290,6 +291,53 @@ describe('machine-readable Dokana API contract', () => {
       type: 'string',
       pattern: '^(0|[1-9][0-9]*)$',
     });
+  });
+
+  it('documents only the bounded privacy-safe Owner business-audit read surface', () => {
+    const auditPath = document.paths['/v1/audit'];
+    const list = operationAt(document, '/v1/audit', 'get');
+
+    expect(auditPath?.post).toBeUndefined();
+    expect(auditPath?.patch).toBeUndefined();
+    expect(auditPath?.delete).toBeUndefined();
+    expect(list.operationId).toBe('audit.list');
+    expect(list.security).toContainEqual({ bearer: [] });
+    expect(list.responses).toMatchObject({ '200': {}, '400': {}, '401': {}, '403': {} });
+    expect(responseRef(list)).toBe('#/components/schemas/AuditListResponseDto');
+
+    const query = parameters(list);
+    expect(parameter(query, 'occurredFrom').schema).toMatchObject({ format: 'date-time' });
+    expect(parameter(query, 'occurredTo').schema).toMatchObject({ format: 'date-time' });
+    expect(parameter(query, 'actorUserId').schema).toMatchObject({ format: 'uuid' });
+    expect(parameter(query, 'entityId').schema).toMatchObject({ format: 'uuid' });
+    expect(parameterSchema(parameter(query, 'action')).enum).toEqual(
+      expect.arrayContaining(['SALE_CREATED', 'STORE_SETTINGS_UPDATED']),
+    );
+    expect(parameterSchema(parameter(query, 'entityType')).enum).toEqual(
+      expect.arrayContaining(['sale', 'store_settings']),
+    );
+    expect(parameter(query, 'limit').schema).toMatchObject({
+      minimum: 1,
+      maximum: 100,
+      default: 50,
+    });
+    expect(parameter(query, 'cursor').schema).toMatchObject({ maxLength: 768 });
+
+    const item = schemaAt(document, 'AuditBusinessItemResponseDto');
+    expect(schemaProperty(item, 'action').enum).toEqual(
+      expect.arrayContaining(['SALE_CREATED', 'OWNER_LEDGER_ENTRY_CREATED']),
+    );
+    expect(schemaProperty(item, 'occurredAt')).toMatchObject({ format: 'date-time' });
+    expect(schemaProperty(item, 'businessDate')).toMatchObject({
+      format: 'date',
+      nullable: true,
+    });
+    expect(schemaProperty(item, 'context').description).toContain('Raw row snapshots');
+
+    const actor = schemaAt(document, 'AuditActorResponseDto');
+    expect(schemaProperty(actor, 'displayName').description).toContain(
+      'authentication identifiers are excluded',
+    );
   });
 });
 

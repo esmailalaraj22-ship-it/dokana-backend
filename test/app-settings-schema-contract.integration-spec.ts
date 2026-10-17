@@ -339,11 +339,10 @@ describe('Store settings database contract', () => {
         checkExpression: '(store_id = platform.current_store_id())',
       },
     ]);
-    // app_settings is intentionally in the touch and change-event loops but NOT
-    // the central-audit or no-delete loops. The absent no-delete trigger plus the
-    // DELETE privilege below is the documented Task 7.2 residual controlled in
-    // application code (no delete path) and by forced RLS.
+    // The absent no-delete trigger plus the DELETE privilege below is the documented
+    // Task 7.2 residual controlled in application code (no delete path) and by forced RLS.
     expect(triggers.rows).toEqual([
+      { name: 'trg_app_settings_central_audit', functionName: 'audit.capture_row_change' },
       { name: 'trg_app_settings_change_event', functionName: 'sync.capture_change_event' },
       {
         name: 'trg_app_settings_store_change_v1',

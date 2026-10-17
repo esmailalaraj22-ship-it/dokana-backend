@@ -1160,7 +1160,7 @@ describe('App settings write API with real PostgreSQL', () => {
     ]);
   });
 
-  it('creates no accounting, inventory, central-audit, or non-null central URI effect', async () => {
+  it('creates required central audit without accounting, inventory, or central URI effects', async () => {
     const result = await adminPool.query<{
       accountingInventory: number;
       auditLogs: number;
@@ -1184,6 +1184,7 @@ describe('App settings write API with real PostgreSQL', () => {
           as "uriRows"`,
       [storeIds],
     );
-    expect(result.rows[0]).toEqual({ accountingInventory: 0, auditLogs: 0, uriRows: 0 });
+    expect(result.rows[0]).toMatchObject({ accountingInventory: 0, uriRows: 0 });
+    expect(result.rows[0]?.auditLogs).toBeGreaterThan(0);
   });
 });

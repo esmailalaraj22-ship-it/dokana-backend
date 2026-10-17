@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AccountingCorrectionsModule } from './accounting-corrections/accounting-corrections.module';
 import { AccountingPeriodsModule } from './accounting-periods/accounting-periods.module';
+import { AuditModule } from './audit/audit.module';
 import { AuthenticationModule } from './auth/auth.module';
 import { CommonModule } from './common/common.module';
 import { LoggingModule } from './common/logging/logging.module';
@@ -36,6 +37,7 @@ import { SyncModule } from './sync/sync.module';
     HealthModule,
     InventoryModule,
     AuthenticationModule,
+    AuditModule,
     AccountingPeriodsModule,
     AccountingCorrectionsModule,
     MoneyAccountsModule,

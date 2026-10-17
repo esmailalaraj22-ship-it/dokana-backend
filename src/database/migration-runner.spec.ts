@@ -54,6 +54,7 @@ describe('controlled migration runner', () => {
       '0028_offline_operation_recovery_authority.sql',
       '0029_notification_user_state_and_debt_threshold.sql',
       '0030_notification_touch_trigger_fix.sql',
+      '0031_sanitized_owner_business_audit.sql',
     ]);
   });
 

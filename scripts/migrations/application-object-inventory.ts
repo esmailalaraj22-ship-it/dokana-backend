@@ -202,3 +202,8 @@ export const offlineOperationRecoveryRoutines = [
 export const notificationUserStateTables = ['ledger.notification_user_states'] as const;
 
 export const notificationTouchRoutines = ['ledger.touch_notification_row()'] as const;
+
+export const sanitizedOwnerAuditRoutines = [
+  'ledger.read_owner_business_audit_v1(p_limit integer, p_cursor_occurred_at timestamp with time zone, p_cursor_event_id uuid, p_occurred_from timestamp with time zone, p_occurred_to timestamp with time zone, p_actor_user_id uuid, p_action text, p_entity_type text, p_entity_id uuid)',
+  'ledger.sanitize_app_settings_audit_v1(p_old jsonb, p_new jsonb)',
+] as const;
