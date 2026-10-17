@@ -24,6 +24,7 @@ const settingsSelection = {
   allowNegativeStock: appSettings.allowNegativeStock,
   lowStockAlertEnabled: appSettings.lowStockAlertEnabled,
   debtAgeAlertDays: appSettings.debtAgeAlertDays,
+  customerDebtAmountAlertMinor: appSettings.customerDebtAmountAlertMinor,
   backupEnabled: appSettings.backupEnabled,
   backupIntervalHours: appSettings.backupIntervalHours,
   timezoneName: appSettings.timezoneName,
@@ -330,6 +331,9 @@ export class AppSettingsWriteRepository {
     }
     if (values.debtAgeAlertDays !== undefined) {
       updates.debtAgeAlertDays = values.debtAgeAlertDays;
+    }
+    if (values.customerDebtAmountAlertMinor !== undefined) {
+      updates.customerDebtAmountAlertMinor = values.customerDebtAmountAlertMinor;
     }
     if (values.backupEnabled !== undefined) {
       updates.backupEnabled = values.backupEnabled;

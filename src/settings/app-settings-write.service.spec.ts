@@ -28,6 +28,7 @@ const response: AppSettingsMutationResponse = {
   allowNegativeStock: false,
   lowStockAlertEnabled: true,
   debtAgeAlertDays: 90,
+  customerDebtAmountAlertMinor: '50000',
   backupEnabled: true,
   backupIntervalHours: 24,
   timezoneName: 'Asia/Hebron',

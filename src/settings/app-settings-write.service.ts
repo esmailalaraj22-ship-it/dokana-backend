@@ -121,6 +121,13 @@ export class AppSettingsWriteService {
         2_147_483_647,
       );
     }
+    if (dto.customerDebtAmountAlertMinor !== undefined) {
+      values.customerDebtAmountAlertMinor = this.parseBigint(
+        dto.customerDebtAmountAlertMinor,
+        'customerDebtAmountAlertMinor',
+        nonNegativeDecimalPattern,
+      );
+    }
     if (dto.backupEnabled !== undefined) {
       values.backupEnabled = this.boolean(dto.backupEnabled, 'backupEnabled');
     }

@@ -37,6 +37,7 @@ export function mapAppSettingsMutationResponse(
     allowNegativeStock: row.allowNegativeStock,
     lowStockAlertEnabled: row.lowStockAlertEnabled,
     debtAgeAlertDays: row.debtAgeAlertDays,
+    customerDebtAmountAlertMinor: row.customerDebtAmountAlertMinor.toString(),
     backupEnabled: row.backupEnabled,
     backupIntervalHours: row.backupIntervalHours,
     timezoneName: MVP_TIMEZONE_NAME,
@@ -62,6 +63,8 @@ export function parseStoredAppSettingsMutationResponse(
     typeof value.lowStockAlertEnabled !== 'boolean' ||
     typeof value.debtAgeAlertDays !== 'number' ||
     !Number.isInteger(value.debtAgeAlertDays) ||
+    typeof value.customerDebtAmountAlertMinor !== 'string' ||
+    !nonNegativeDecimalPattern.test(value.customerDebtAmountAlertMinor) ||
     typeof value.backupEnabled !== 'boolean' ||
     typeof value.backupIntervalHours !== 'number' ||
     !Number.isInteger(value.backupIntervalHours) ||
@@ -83,6 +86,7 @@ export function parseStoredAppSettingsMutationResponse(
     allowNegativeStock: value.allowNegativeStock,
     lowStockAlertEnabled: value.lowStockAlertEnabled,
     debtAgeAlertDays: value.debtAgeAlertDays,
+    customerDebtAmountAlertMinor: value.customerDebtAmountAlertMinor,
     backupEnabled: value.backupEnabled,
     backupIntervalHours: value.backupIntervalHours,
     timezoneName: MVP_TIMEZONE_NAME,

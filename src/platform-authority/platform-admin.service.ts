@@ -232,6 +232,9 @@ export class PlatformAdminService {
             allowNegativeStock: body.settings.allowNegativeStock,
             lowStockAlertEnabled: body.settings.lowStockAlertEnabled,
             debtAgeAlertDays: body.settings.debtAgeAlertDays,
+            customerDebtAmountAlertMinor: BigInt(
+              body.settings.customerDebtAmountAlertMinor ?? '50000',
+            ),
             backupEnabled: body.settings.backupEnabled,
             backupIntervalHours: body.settings.backupIntervalHours,
             timezoneName: MVP_TIMEZONE_NAME,

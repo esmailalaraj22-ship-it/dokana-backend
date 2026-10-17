@@ -104,6 +104,7 @@ export class StoreProvisioningService {
         allowNegativeStock: command.settings.allowNegativeStock,
         lowStockAlertEnabled: command.settings.lowStockAlertEnabled,
         debtAgeAlertDays: command.settings.debtAgeAlertDays,
+        customerDebtAmountAlertMinor: command.settings.customerDebtAmountAlertMinor.toString(),
         backupEnabled: command.settings.backupEnabled,
         backupIntervalHours: command.settings.backupIntervalHours,
         timezoneName: command.settings.timezoneName,

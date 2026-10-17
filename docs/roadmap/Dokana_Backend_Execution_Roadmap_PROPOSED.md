@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S20; S21.1 orientation          |
-| Current Station           | S21.1 - CLOSED; S21.2 next / not started    |
+| Closed execution history  | Stations S0-S20; S21.1-S21.2                |
+| Current Station           | S21.1-S21.2 CLOSED; S21.3 next / not started |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -65,11 +65,11 @@ The roadmap was reconstructed against this verified state:
 | Starting `origin/main`          | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree at S19.4 start     | Clean                                      |
-| Migrations                      | 28 applied, 0 pending                      |
+| Migrations                      | 30 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S20                                        |
-| Current task                    | S20 closed; S21 next / not started         |
+| Current task                    | S21.2 closed; S21.3 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -1799,7 +1799,7 @@ authority or attachment storage. Approved export scope is PDF; backup/restore be
 
 ### S21 - Notifications, Attachments, and Audit Access
 
-- **Status:** CURRENT - S21.1 CLOSED; S21.2 NEXT / NOT STARTED.
+- **Status:** CURRENT - S21.1-S21.2 CLOSED; S21.3 NEXT / NOT STARTED.
 - **Purpose:** Complete cross-domain operational support and history access.
 - **Distinct boundary:** Notification state, secure file metadata, and audit visibility
   are cross-cutting capabilities with separate security and lifecycle requirements.
@@ -1824,6 +1824,17 @@ deduplication identity, bounded links to related records, and read/unread and re
 state. Email, external mobile push, and marketing or messaging channels are not approved
 S21 scope. Notification failure must never roll back or duplicate canonical business or
 accounting effects. S22 owns the future backup-failure producer.
+
+S21.2 implements owner-focused in-app notification reconciliation over committed canonical
+Customer, Supplier, inventory, Expense, and Subscription state. It keeps per-user read state
+separate from canonical active/resolved lifecycle, uses stable cause identity and 180-day
+resolved-notification retention, permits notification reads/read-state in `read_only`, and
+keeps settings writes under the existing business-write authority. Migration `0029` adds the
+per-user presentation state and exact customer-debt amount threshold; corrective migration
+`0030` replaces only the broken notification update trigger with an `updated_at`-only trigger,
+without adding a notification version column or changing the shared generic trigger.
+PostgreSQL is 30 applied / 0 pending; PostgreSQL-reference and SQLite deltas are 0. S22 still
+owns production of backup-failure notifications.
 
 Attachments are supporting Customer, Product, Supplier, or Expense files. PostgreSQL owns
 Store-scoped metadata while a separately approved binary store owns file content; original
@@ -1858,8 +1869,8 @@ and immutable business-audit evidence. S21 does not design backup, restore, or r
 | Sub-stage | Status | Purpose and in scope | Dependencies and explicit non-scope | Database and storage expectation | Security, accounting, tests, and closure |
 | --- | --- | --- | --- | --- | --- |
 | S21.1 - Orientation, Scope, and Stage Decomposition | CLOSED | Freeze the three capability definitions, boundaries, reusable foundations, gaps, decision gates, and execution order | S20 closed; no product implementation | Database, reference, SQLite, and code deltas = 0 | Repository and live migration baseline verified; Roadmap is the only changed file |
-| S21.2 - In-App Notifications and Lifecycle | NEXT / NOT STARTED | Implement approved cause reconciliation, stable deduplication, tenant-safe links, bounded reads, and notification state transitions | Reuses S7 settings, S18 entitlement state, S19 committed canonical state, and S20 links; excludes email, external push, backup execution, and accounting derivation | Existing PostgreSQL foundation is expected to suffice; no external storage | Prove trigger/reconciliation correctness, replay deduplication, Store isolation, lifecycle behavior, resolution, and failure independence with zero accounting mutation |
-| S21.3 - Privacy-Safe Business Audit Access and Capture Hardening | NOT STARTED | Expose bounded owner business history, trustworthy actor/time/action context, approved filters, and close approved capture gaps including settings if authorized | Reuses immutable central audit and canonical domain history; excludes Platform Admin, auth/security, raw sync, unrestricted logs, and a second ledger | A reviewed narrow PostgreSQL read/capture migration may be required; broad runtime audit access is prohibited; no external storage | Owner privacy scope and retention decisions plus any DB authorization precede implementation; prove append-only behavior, sanitization, pagination, actor semantics, RLS, and no accounting duplication |
+| S21.2 - In-App Notifications and Lifecycle | CLOSED | Added owner-focused canonical cause reconciliation, stable episode deduplication, per-user read state, bounded APIs, configurable debt thresholds, lifecycle resolution, and retention | Reuses S7 settings, S18 entitlement state, S19 committed canonical state, and S20 links; excludes email, external push, backup execution, and accounting derivation | Migrations `0029` and `0030`; PostgreSQL 30 applied / 0 pending; PostgreSQL-reference and SQLite deltas = 0 | Trigger/reconciliation correctness, replay/concurrency deduplication, Store/user isolation, read-only behavior, lifecycle/retention, least privilege, and zero accounting mutation proven |
+| S21.3 - Privacy-Safe Business Audit Access and Capture Hardening | NEXT / NOT STARTED | Expose bounded owner business history, trustworthy actor/time/action context, approved filters, and close approved capture gaps including settings if authorized | Reuses immutable central audit and canonical domain history; excludes Platform Admin, auth/security, raw sync, unrestricted logs, and a second ledger | A reviewed narrow PostgreSQL read/capture migration may be required; broad runtime audit access is prohibited; no external storage | Owner privacy scope and retention decisions plus any DB authorization precede implementation; prove append-only behavior, sanitization, pagination, actor semantics, RLS, and no accounting duplication |
 | S21.4 - Secure Attachment Metadata and Binary Access | NOT STARTED | Implement approved upload, download, metadata lifecycle, entity links, cleanup, and audit integration for Customer, Product, Supplier, and Expense | Depends on S21.3 audit authority and approved storage/file policy; excludes S20 PDF persistence, generic file drive, mobile picker/queue, and S22 backup | Requires an approved binary-storage adapter/provider; a minimal versioned migration may be required after lifecycle decisions; PostgreSQL is not large-object storage | Prove signatures/types/sizes, safe names and object keys, cross-Store denial, authorization, orphan handling, failure cleanup, lifecycle behavior, and zero business/accounting mutation |
 | S21.5 - Integrated Verification and S21 Closure | NOT STARTED | Reconcile all three families, documentation, least privilege, durable-asset inventory, and S22 handoff | S21.2-S21.4 closed; no new product capability or S22 implementation | No new delta unless a verified closure defect is separately authorized | Run focused regression and final security/RLS/lifecycle/failure/accounting-nonmutation gates; close only with clean repository and reviewed S22 asset handoff |
 
@@ -2035,9 +2046,9 @@ new explicit owner decision.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S20 - Dashboard, Reports, Search, Documents, and Export |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Safe completed capabilities         | S0-S20 plus S21.1 orientation              |
+| Safe completed capabilities         | S0-S20 plus S21.1-S21.2                    |
 | First incomplete release dependency | S21 - Notifications, Attachments, and Audit Access |
-| Current Station                     | S21.1 - CLOSED; S21.2 NEXT / NOT STARTED   |
+| Current Station                     | S21.1-S21.2 CLOSED; S21.3 NEXT / NOT STARTED |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2065,11 +2076,11 @@ new explicit owner decision.
 | S20.6 current status                | CLOSED                                     |
 | S21 current status                  | CURRENT                                    |
 | S21.1 current status                | CLOSED                                     |
-| S21.2 current status                | NEXT / NOT STARTED                         |
-| S21.3 current status                | NOT STARTED                                |
+| S21.2 current status                | CLOSED                                     |
+| S21.3 current status                | NEXT / NOT STARTED                         |
 | S21.4 current status                | NOT STARTED                                |
 | S21.5 current status                | NOT STARTED                                |
 
-Do not start S21.2 from this document. It requires a separate execution prompt and all
+Do not start S21.3 from this document. It requires a separate execution prompt and all
 applicable owner decisions. Database, PostgreSQL-reference, and SQLite deltas remain 0 by
 default.

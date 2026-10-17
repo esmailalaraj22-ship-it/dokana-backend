@@ -21,6 +21,11 @@ import { SettingsController } from './settings.controller';
     AppSettingsInitializationService,
     OperationalTimeService,
   ],
-  exports: [AppSettingsInitializationService, OperationalTimeService],
+  exports: [
+    AppSettingsInitializationService,
+    AppSettingsReadService,
+    AppSettingsWriteService,
+    OperationalTimeService,
+  ],
 })
 export class SettingsModule {}

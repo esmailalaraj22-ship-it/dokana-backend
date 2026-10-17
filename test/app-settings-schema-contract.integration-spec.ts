@@ -161,6 +161,7 @@ describe('Store settings database contract', () => {
     expect(appSettings.attachmentsDirectoryUri.notNull).toBe(false);
     expect(appSettings.version.dataType).toBe('bigint');
     expect(appSettings.defaultCreditLimitMinor.dataType).toBe('bigint');
+    expect(appSettings.customerDebtAmountAlertMinor.dataType).toBe('bigint');
   });
 
   it('has no unique constraints and one cascade tenant foreign key', async () => {
@@ -231,6 +232,8 @@ describe('Store settings database contract', () => {
           'CHECK (((business_day_start_minutes >= 0) AND (business_day_start_minutes <= 1439)))',
         app_settings_daily_report_time_minutes_check:
           'CHECK (((daily_report_time_minutes >= 0) AND (daily_report_time_minutes <= 1439)))',
+        app_settings_customer_debt_amount_alert_minor_check:
+          'CHECK ((customer_debt_amount_alert_minor >= 0))',
         app_settings_debt_age_alert_days_check: 'CHECK ((debt_age_alert_days >= 0))',
         app_settings_default_credit_limit_minor_check:
           'CHECK (((default_credit_limit_minor IS NULL) OR (default_credit_limit_minor >= 0)))',
@@ -254,6 +257,7 @@ describe('Store settings database contract', () => {
       app_settings_default_credit_limit_minor_check:
         'default_credit_limit_minor is null or default_credit_limit_minor >= 0',
       app_settings_debt_age_alert_days_check: 'debt_age_alert_days >= 0',
+      app_settings_customer_debt_amount_alert_minor_check: 'customer_debt_amount_alert_minor >= 0',
       app_settings_backup_interval_hours_check: 'backup_interval_hours >= 1',
       app_settings_version_check: 'version >= 1',
       app_settings_business_day_start_minutes_check:
@@ -384,13 +388,19 @@ describe('Store settings database contract', () => {
         primary: column.pk === 1,
       })),
     ).toEqual(
-      tableConfig.columns.map((column) => ({
-        name: column.name,
-        type: sqliteTypeForPostgres[column.getSQLType()],
-        notNull: column.notNull,
-        primary: column.primary,
-      })),
+      tableConfig.columns
+        .filter((column) => column.name !== 'customer_debt_amount_alert_minor')
+        .map((column) => ({
+          name: column.name,
+          type: sqliteTypeForPostgres[column.getSQLType()],
+          notNull: column.notNull,
+          primary: column.primary,
+        })),
     );
+    expect(sqliteColumns.some((column) => column.name === 'customer_debt_amount_alert_minor')).toBe(
+      false,
+    );
+    expect(appSettings.customerDebtAmountAlertMinor.default).toBe(50000n);
     expect(
       Object.fromEntries(sqliteColumns.map((column) => [column.name, column.dflt_value])),
     ).toMatchObject({

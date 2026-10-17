@@ -58,6 +58,7 @@ export interface AppSettingsRow {
   allowNegativeStock: boolean;
   lowStockAlertEnabled: boolean;
   debtAgeAlertDays: number;
+  customerDebtAmountAlertMinor: bigint;
   backupEnabled: boolean;
   backupIntervalHours: number;
   exportDirectoryUri: string | null;
@@ -86,6 +87,7 @@ export interface AppSettingsReadModel {
   allowNegativeStock: boolean;
   lowStockAlertEnabled: boolean;
   debtAgeAlertDays: number;
+  customerDebtAmountAlertMinor: string;
   backupEnabled: boolean;
   backupIntervalHours: number;
   timezoneName: MvpTimezone;
@@ -110,6 +112,7 @@ export interface AppSettingsReadRow {
   allowNegativeStock: boolean;
   lowStockAlertEnabled: boolean;
   debtAgeAlertDays: number;
+  customerDebtAmountAlertMinor: bigint;
   backupEnabled: boolean;
   backupIntervalHours: number;
   timezoneName: string;
@@ -137,6 +140,7 @@ export interface AppSettingsUpdateCommand {
   allowNegativeStock?: boolean;
   lowStockAlertEnabled?: boolean;
   debtAgeAlertDays?: number;
+  customerDebtAmountAlertMinor?: bigint;
   backupEnabled?: boolean;
   backupIntervalHours?: number;
 }
@@ -206,6 +210,7 @@ export interface AppSettingsInitializationValues {
   allowNegativeStock: boolean;
   lowStockAlertEnabled: boolean;
   debtAgeAlertDays: number;
+  customerDebtAmountAlertMinor: bigint;
   backupEnabled: boolean;
   backupIntervalHours: number;
   timezoneName: MvpTimezone;
@@ -224,6 +229,7 @@ export const APP_SETTINGS_MUTABLE_FIELDS = [
   'allowNegativeStock',
   'lowStockAlertEnabled',
   'debtAgeAlertDays',
+  'customerDebtAmountAlertMinor',
   'backupEnabled',
   'backupIntervalHours',
 ] as const;

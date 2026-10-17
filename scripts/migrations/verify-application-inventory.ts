@@ -11,6 +11,8 @@ import {
   commitOrderedSyncFoundationRoutines,
   commitOrderedSyncFoundationTables,
   immutableSyncChangeRepresentationRoutines,
+  notificationTouchRoutines,
+  notificationUserStateTables,
   offlineOperationRecoveryRoutines,
   offlineOperationRecoveryTables,
   offlineOperationPushRoutines,
@@ -75,6 +77,8 @@ export async function verifyApplicationInventory(
   let offlineOperationPushApplied = false;
   let immutableSyncChangeRepresentationApplied = false;
   let offlineOperationRecoveryApplied = false;
+  let notificationUserStateApplied = false;
+  let notificationTouchApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -221,6 +225,30 @@ export async function verifyApplicationInventory(
       }
       offlineOperationRecoveryApplied = true;
     }
+
+    const notificationUserState = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0029_notification_user_state_and_debt_threshold.sql'`,
+    );
+    if (notificationUserState.rows[0]) {
+      const file = await readMigrationFile('0029_notification_user_state_and_debt_threshold.sql');
+      if (notificationUserState.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Notification user-state migration checksum mismatch.');
+      }
+      notificationUserStateApplied = true;
+    }
+
+    const notificationTouch = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0030_notification_touch_trigger_fix.sql'`,
+    );
+    if (notificationTouch.rows[0]) {
+      const file = await readMigrationFile('0030_notification_touch_trigger_fix.sql');
+      if (notificationTouch.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Notification touch-trigger migration checksum mismatch.');
+      }
+      notificationTouchApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -269,6 +297,7 @@ export async function verifyApplicationInventory(
     ...(commitOrderedSyncFoundationApplied ? commitOrderedSyncFoundationTables : []),
     ...(offlineOperationPushApplied ? offlineOperationPushTables : []),
     ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryTables : []),
+    ...(notificationUserStateApplied ? notificationUserStateTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -334,6 +363,7 @@ export async function verifyApplicationInventory(
         ? immutableSyncChangeRepresentationRoutines
         : []),
       ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryRoutines : []),
+      ...(notificationTouchApplied ? notificationTouchRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

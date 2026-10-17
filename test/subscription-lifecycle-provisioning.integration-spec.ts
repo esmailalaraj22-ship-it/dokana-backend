@@ -112,6 +112,7 @@ const settings = {
   allowNegativeStock: false,
   lowStockAlertEnabled: true,
   debtAgeAlertDays: 30,
+  customerDebtAmountAlertMinor: 50000n,
   backupEnabled: true,
   backupIntervalHours: 24,
   timezoneName: MVP_TIMEZONE_NAME,

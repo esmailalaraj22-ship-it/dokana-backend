@@ -74,6 +74,11 @@ export const appSettings = ledgerSchema.table(
       .$type<'fixed_24h' | 'custom'>()
       .notNull()
       .default('fixed_24h'),
+    customerDebtAmountAlertMinor: bigint('customer_debt_amount_alert_minor', {
+      mode: 'bigint',
+    })
+      .notNull()
+      .default(50000n),
   },
   (table) => [
     foreignKey({
@@ -96,6 +101,10 @@ export const appSettings = ledgerSchema.table(
       sql`${table.defaultCreditLimitMinor} is null or ${table.defaultCreditLimitMinor} >= 0`,
     ),
     check('app_settings_debt_age_alert_days_check', sql`${table.debtAgeAlertDays} >= 0`),
+    check(
+      'app_settings_customer_debt_amount_alert_minor_check',
+      sql`${table.customerDebtAmountAlertMinor} >= 0`,
+    ),
     check('app_settings_backup_interval_hours_check', sql`${table.backupIntervalHours} >= 1`),
     check('app_settings_version_check', sql`${table.version} >= 1`),
     check(

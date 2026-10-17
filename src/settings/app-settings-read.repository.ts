@@ -20,6 +20,7 @@ export class AppSettingsReadRepository {
           allowNegativeStock: appSettings.allowNegativeStock,
           lowStockAlertEnabled: appSettings.lowStockAlertEnabled,
           debtAgeAlertDays: appSettings.debtAgeAlertDays,
+          customerDebtAmountAlertMinor: appSettings.customerDebtAmountAlertMinor,
           backupEnabled: appSettings.backupEnabled,
           backupIntervalHours: appSettings.backupIntervalHours,
           timezoneName: appSettings.timezoneName,

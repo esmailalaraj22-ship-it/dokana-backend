@@ -568,6 +568,12 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
       [provisionedStoreId],
     );
     expect(memberships.rows).toEqual([{ userId: fixtures.users.provisionedOwner, role: 'owner' }]);
+    const settings = await adminPool.query<{ customerDebtAmountAlertMinor: string }>(
+      `select customer_debt_amount_alert_minor::text as "customerDebtAmountAlertMinor"
+       from ledger.app_settings where store_id = $1`,
+      [provisionedStoreId],
+    );
+    expect(settings.rows).toEqual([{ customerDebtAmountAlertMinor: '50000' }]);
   });
 
   it('suspends and restores Stores with versioning, audit, replay, and archive safety', async () => {

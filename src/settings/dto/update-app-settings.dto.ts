@@ -51,6 +51,12 @@ export class UpdateAppSettingsDto {
   debtAgeAlertDays?: number;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsString()
+  @MaxLength(19)
+  @Matches(/^(0|[1-9]\d*)$/)
+  customerDebtAmountAlertMinor?: string;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsBoolean()
   backupEnabled?: boolean;
 

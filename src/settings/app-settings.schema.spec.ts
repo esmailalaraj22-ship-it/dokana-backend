@@ -46,6 +46,7 @@ describe('app_settings Drizzle mapping foundation', () => {
       'business_day_start_minutes',
       'business_day_end_minutes',
       'business_day_mode',
+      'customer_debt_amount_alert_minor',
     ]);
   });
 
@@ -61,6 +62,7 @@ describe('app_settings Drizzle mapping foundation', () => {
     // bigint columns must never degrade to a JavaScript number.
     expect(appSettings.version.dataType).toBe('bigint');
     expect(appSettings.defaultCreditLimitMinor.dataType).toBe('bigint');
+    expect(appSettings.customerDebtAmountAlertMinor.dataType).toBe('bigint');
   });
 
   it('maps the tenant foreign key to ledger.stores with cascade semantics', () => {
@@ -90,6 +92,7 @@ describe('app_settings Drizzle mapping foundation', () => {
       'app_settings_business_day_end_minutes_check',
       'app_settings_business_day_mode_check',
       'app_settings_business_day_start_minutes_check',
+      'app_settings_customer_debt_amount_alert_minor_check',
       'app_settings_daily_report_time_minutes_check',
       'app_settings_debt_age_alert_days_check',
       'app_settings_default_credit_limit_minor_check',
@@ -145,6 +148,7 @@ describe('app_settings Drizzle mapping foundation', () => {
         'backupIntervalHours',
         'dailyReportTimeMinutes',
         'debtAgeAlertDays',
+        'customerDebtAmountAlertMinor',
         'defaultCreditLimitMinor',
         'defaultCreditPolicy',
         'lowStockAlertEnabled',

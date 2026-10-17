@@ -44,10 +44,12 @@ describe('SyncCursorService', () => {
   it('rejects legacy, malformed, tampered, and overflowing cursors', () => {
     const cursors = service(tokenConfig('test-v1', 2));
     const valid = cursors.issue(randomUUID(), 41n);
+    const replacement = valid.endsWith('A') ? 'B' : 'A';
+    const tampered = `${valid.slice(0, -1)}${replacement}`;
 
     expect(() => cursors.decode('41')).toThrow(LegacySyncCursorError);
     expect(() => cursors.decode('not-a-cursor')).toThrow(InvalidSyncCursorError);
-    expect(() => cursors.decode(`${valid.slice(0, -1)}A`)).toThrow(InvalidSyncCursorError);
+    expect(() => cursors.decode(tampered)).toThrow(InvalidSyncCursorError);
     expect(() => cursors.issue(randomUUID(), '9223372036854775808')).toThrow(
       InvalidSyncCursorError,
     );

@@ -42,6 +42,12 @@ export class PlatformAdminProvisionSettingsDto {
   @Max(2_147_483_647)
   debtAgeAlertDays!: number;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(19)
+  @Matches(/^(0|[1-9]\d*)$/)
+  customerDebtAmountAlertMinor?: string;
+
   @IsBoolean()
   backupEnabled!: boolean;
 

@@ -45,6 +45,7 @@ export class AppSettingsInitializationService {
         allowNegativeStock: values.allowNegativeStock,
         lowStockAlertEnabled: values.lowStockAlertEnabled,
         debtAgeAlertDays: values.debtAgeAlertDays,
+        customerDebtAmountAlertMinor: values.customerDebtAmountAlertMinor,
         backupEnabled: values.backupEnabled,
         backupIntervalHours: values.backupIntervalHours,
         exportDirectoryUri: null,
@@ -83,6 +84,13 @@ export class AppSettingsInitializationService {
       }
     }
     this.integer(input.debtAgeAlertDays, 0, 2_147_483_647);
+    if (
+      typeof input.customerDebtAmountAlertMinor !== 'bigint' ||
+      input.customerDebtAmountAlertMinor < 0n ||
+      input.customerDebtAmountAlertMinor > maximumPostgreSqlBigint
+    ) {
+      throw new TypeError('Settings initialization values are invalid.');
+    }
     this.integer(input.backupIntervalHours, 1, 2_147_483_647);
     if (input.timezoneName !== MVP_TIMEZONE_NAME || input.businessDayMode !== 'fixed_24h') {
       throw new TypeError('Settings initialization values are invalid.');

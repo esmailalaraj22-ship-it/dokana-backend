@@ -198,3 +198,7 @@ export const offlineOperationRecoveryRoutines = [
   'sync.read_offline_operation_status_v1(p_store_id uuid, p_operation_id uuid, p_provenance_hash text)',
   'sync.reject_offline_recovery_event_mutation_v1()',
 ] as const;
+
+export const notificationUserStateTables = ['ledger.notification_user_states'] as const;
+
+export const notificationTouchRoutines = ['ledger.touch_notification_row()'] as const;

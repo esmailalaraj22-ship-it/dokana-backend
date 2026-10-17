@@ -100,6 +100,7 @@ interface SettingsState {
   allowNegativeStock: boolean;
   lowStockAlertEnabled: boolean;
   debtAgeAlertDays: number;
+  customerDebtAmountAlertMinor: string;
   backupEnabled: boolean;
   backupIntervalHours: number;
   exportDirectoryUri: string | null;
@@ -136,6 +137,7 @@ const mutableFields = [
   'allowNegativeStock',
   'lowStockAlertEnabled',
   'debtAgeAlertDays',
+  'customerDebtAmountAlertMinor',
   'backupEnabled',
   'backupIntervalHours',
 ] as const;
@@ -276,6 +278,7 @@ describe('App settings write API with real PostgreSQL', () => {
         allow_negative_stock as "allowNegativeStock",
         low_stock_alert_enabled as "lowStockAlertEnabled",
         debt_age_alert_days as "debtAgeAlertDays",
+        customer_debt_amount_alert_minor::text as "customerDebtAmountAlertMinor",
         backup_enabled as "backupEnabled",
         backup_interval_hours as "backupIntervalHours",
         export_directory_uri as "exportDirectoryUri",
@@ -595,6 +598,8 @@ describe('App settings write API with real PostgreSQL', () => {
       { lowStockAlertEnabled: 'true' },
       { debtAgeAlertDays: -1 },
       { debtAgeAlertDays: 2_147_483_648 },
+      { customerDebtAmountAlertMinor: '-1' },
+      { customerDebtAmountAlertMinor: '9223372036854775808' },
       { backupEnabled: null },
       { backupIntervalHours: 0 },
       { backupIntervalHours: 2_147_483_648 },
@@ -643,6 +648,7 @@ describe('App settings write API with real PostgreSQL', () => {
         'allowNegativeStock',
         'lowStockAlertEnabled',
         'debtAgeAlertDays',
+        'customerDebtAmountAlertMinor',
         'backupEnabled',
         'backupIntervalHours',
         'timezoneName',
@@ -703,6 +709,7 @@ describe('App settings write API with real PostgreSQL', () => {
           allowNegativeStock: before.allowNegativeStock,
           lowStockAlertEnabled: before.lowStockAlertEnabled,
           debtAgeAlertDays: before.debtAgeAlertDays,
+          customerDebtAmountAlertMinor: before.customerDebtAmountAlertMinor,
           backupEnabled: before.backupEnabled,
           backupIntervalHours: before.backupIntervalHours,
         })
@@ -734,6 +741,7 @@ describe('App settings write API with real PostgreSQL', () => {
       allowNegativeStock: false,
       lowStockAlertEnabled: true,
       debtAgeAlertDays: 90,
+      customerDebtAmountAlertMinor: 50000n,
       backupEnabled: true,
       backupIntervalHours: 24,
       timezoneName: 'Asia/Hebron',
@@ -1052,6 +1060,7 @@ describe('App settings write API with real PostgreSQL', () => {
       allowNegativeStock: false,
       lowStockAlertEnabled: true,
       debtAgeAlertDays: 45,
+      customerDebtAmountAlertMinor: 50000n,
       backupEnabled: true,
       backupIntervalHours: 12,
       timezoneName: 'Asia/Hebron',
@@ -1070,6 +1079,7 @@ describe('App settings write API with real PostgreSQL', () => {
       allowNegativeStock: false,
       lowStockAlertEnabled: true,
       debtAgeAlertDays: 45,
+      customerDebtAmountAlertMinor: '50000',
       backupEnabled: true,
       backupIntervalHours: 12,
       exportDirectoryUri: null,

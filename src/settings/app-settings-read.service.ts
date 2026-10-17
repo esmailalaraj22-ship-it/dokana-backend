@@ -72,6 +72,7 @@ export class AppSettingsReadService {
       allowNegativeStock: row.allowNegativeStock,
       lowStockAlertEnabled: row.lowStockAlertEnabled,
       debtAgeAlertDays: row.debtAgeAlertDays,
+      customerDebtAmountAlertMinor: row.customerDebtAmountAlertMinor.toString(),
       backupEnabled: row.backupEnabled,
       backupIntervalHours: row.backupIntervalHours,
       timezoneName: MVP_TIMEZONE_NAME,

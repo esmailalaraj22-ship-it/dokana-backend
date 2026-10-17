@@ -21,7 +21,11 @@ export const bootstrapBusinessDatasets: readonly BootstrapDatasetDefinition[] = 
     relation: 'ledger.app_settings',
     scope: 'store',
     orderBy: 'source.store_id',
-    omittedFields: ['attachments_directory_uri', 'export_directory_uri'],
+    omittedFields: [
+      'attachments_directory_uri',
+      'customer_debt_amount_alert_minor',
+      'export_directory_uri',
+    ],
   },
   {
     id: 'document_sequences',

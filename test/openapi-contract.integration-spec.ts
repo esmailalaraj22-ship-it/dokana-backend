@@ -241,6 +241,56 @@ describe('machine-readable Dokana API contract', () => {
     }
     expect(() => JSON.stringify(document)).not.toThrow();
   });
+
+  it('documents the bounded owner notification surface and exact money settings', () => {
+    const list = operationAt(document, '/v1/notifications', 'get');
+    const readState = operationAt(
+      document,
+      '/v1/notifications/{notificationId}/read-state',
+      'patch',
+    );
+    const readSettings = operationAt(document, '/v1/notifications/settings', 'get');
+    const updateSettings = operationAt(document, '/v1/notifications/settings', 'patch');
+
+    for (const operation of [list, readState, readSettings, updateSettings]) {
+      expect(operation.security).toContainEqual({ bearer: [] });
+      expect(operation.responses).toHaveProperty('200');
+      expect(operation.responses).toHaveProperty('401');
+      expect(operation.responses).toHaveProperty('403');
+    }
+    expect(list.responses).toHaveProperty('400');
+    expect(readState.responses).toHaveProperty('404');
+    expect(updateSettings.responses).toHaveProperty('400');
+
+    const listParameters = parameters(list);
+    expect(parameter(listParameters, 'lifecycle').schema).toMatchObject({
+      enum: ['active', 'resolved'],
+    });
+    expect(parameter(listParameters, 'read').schema).toMatchObject({ enum: ['true', 'false'] });
+    expect(parameter(listParameters, 'limit').schema).toMatchObject({ minimum: 1, maximum: 100 });
+    expect(parameter(listParameters, 'cursor').schema).toMatchObject({ maxLength: 768 });
+    expect(parameter(parameters(readState), 'notificationId')).toMatchObject({
+      in: 'path',
+      required: true,
+      schema: { format: 'uuid' },
+    });
+
+    expect(responseRef(list)).toBe('#/components/schemas/NotificationListResponseDto');
+    expect(responseRef(readState)).toBe('#/components/schemas/NotificationReadStateResponseDto');
+    expect(responseRef(readSettings)).toBe('#/components/schemas/NotificationSettingsResponseDto');
+    expect(responseRef(updateSettings)).toBe(
+      '#/components/schemas/NotificationSettingsMutationResponseDto',
+    );
+    expect(
+      schemaProperty(
+        schemaAt(document, 'NotificationSettingsResponseDto'),
+        'customerDebtAmountAlertMinor',
+      ),
+    ).toMatchObject({
+      type: 'string',
+      pattern: '^(0|[1-9][0-9]*)$',
+    });
+  });
 });
 
 function allOperations(
