@@ -311,10 +311,15 @@ describe('machine-readable Dokana API contract', () => {
     expect(parameter(query, 'actorUserId').schema).toMatchObject({ format: 'uuid' });
     expect(parameter(query, 'entityId').schema).toMatchObject({ format: 'uuid' });
     expect(parameterSchema(parameter(query, 'action')).enum).toEqual(
-      expect.arrayContaining(['SALE_CREATED', 'STORE_SETTINGS_UPDATED']),
+      expect.arrayContaining([
+        'SALE_CREATED',
+        'STORE_SETTINGS_UPDATED',
+        'ATTACHMENT_ADDED',
+        'ATTACHMENT_REMOVED',
+      ]),
     );
     expect(parameterSchema(parameter(query, 'entityType')).enum).toEqual(
-      expect.arrayContaining(['sale', 'store_settings']),
+      expect.arrayContaining(['sale', 'store_settings', 'attachment']),
     );
     expect(parameter(query, 'limit').schema).toMatchObject({
       minimum: 1,
@@ -325,7 +330,12 @@ describe('machine-readable Dokana API contract', () => {
 
     const item = schemaAt(document, 'AuditBusinessItemResponseDto');
     expect(schemaProperty(item, 'action').enum).toEqual(
-      expect.arrayContaining(['SALE_CREATED', 'OWNER_LEDGER_ENTRY_CREATED']),
+      expect.arrayContaining([
+        'SALE_CREATED',
+        'OWNER_LEDGER_ENTRY_CREATED',
+        'ATTACHMENT_ADDED',
+        'ATTACHMENT_REMOVED',
+      ]),
     );
     expect(schemaProperty(item, 'occurredAt')).toMatchObject({ format: 'date-time' });
     expect(schemaProperty(item, 'businessDate')).toMatchObject({
@@ -338,6 +348,72 @@ describe('machine-readable Dokana API contract', () => {
     expect(schemaProperty(actor, 'displayName').description).toContain(
       'authentication identifiers are excluded',
     );
+  });
+
+  it('documents the bounded private attachment surface without storage internals', () => {
+    const upload = operationAt(document, '/v1/attachments', 'post');
+    const list = operationAt(document, '/v1/attachments', 'get');
+    const metadata = operationAt(document, '/v1/attachments/{attachmentId}', 'get');
+    const download = operationAt(document, '/v1/attachments/{attachmentId}/content', 'get');
+    const remove = operationAt(document, '/v1/attachments/{attachmentId}', 'delete');
+
+    for (const operation of [upload, list, metadata, download, remove]) {
+      expect(operation.security).toContainEqual({ bearer: [] });
+      expect(operation.responses).toHaveProperty('401');
+      expect(operation.responses).toHaveProperty('403');
+    }
+    expect(upload.responses).toMatchObject({
+      '201': {},
+      '400': {},
+      '404': {},
+      '409': {},
+      '413': {},
+      '422': {},
+      '503': {},
+    });
+    expect(list.responses).toMatchObject({ '200': {}, '400': {}, '404': {} });
+    expect(metadata.responses).toMatchObject({ '200': {}, '404': {} });
+    expect(download.responses).toMatchObject({ '200': {}, '404': {}, '503': {} });
+    expect(remove.responses).toMatchObject({ '200': {}, '404': {} });
+
+    const multipart = upload.requestBody;
+    if (!multipart || isReference(multipart)) throw new Error('Missing attachment multipart body.');
+    const uploadSchema = multipart.content['multipart/form-data']?.schema;
+    if (!uploadSchema || isReference(uploadSchema)) {
+      throw new Error('Missing inline attachment upload schema.');
+    }
+    expect(uploadSchema.required).toEqual(['entityType', 'entityId', 'file']);
+    expect(schemaProperty(uploadSchema, 'entityType').enum).toEqual([
+      'customer',
+      'product',
+      'supplier',
+      'expense',
+    ]);
+    expect(schemaProperty(uploadSchema, 'file')).toMatchObject({
+      type: 'string',
+      format: 'binary',
+    });
+
+    const content = responseAt(download, '200').content;
+    for (const mediaType of ['application/pdf', 'image/jpeg', 'image/png']) {
+      expect(content?.[mediaType]?.schema).toEqual({ type: 'string', format: 'binary' });
+    }
+
+    const responseSchema = schemaAt(document, 'AttachmentMetadataResponseDto');
+    expect(schemaProperty(responseSchema, 'sizeBytes')).toMatchObject({
+      type: 'string',
+      pattern: '^[1-9][0-9]*$',
+    });
+    for (const internal of [
+      'remoteKey',
+      'bucket',
+      'endpoint',
+      'scanner',
+      'checksumSha256',
+      'removedByUserId',
+    ]) {
+      expect(responseSchema.properties).not.toHaveProperty(internal);
+    }
   });
 });
 

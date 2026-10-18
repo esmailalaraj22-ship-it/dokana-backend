@@ -16,6 +16,21 @@ const optionalPostgresUrlSchema = z.preprocess(
   postgresUrlSchema.optional(),
 );
 
+const optionalNonEmptyStringSchema = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
+const optionalHttpUrlSchema = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z
+    .url()
+    .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), {
+      message: 'must be an HTTP(S) URL',
+    })
+    .optional(),
+);
+
 const signingKeyIdSchema = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/);
 
 const signingSecretSchema = z
@@ -198,6 +213,16 @@ export const environmentSchema = z
     OFFLINE_LICENSE_ACTIVE_KEY_ID: signingKeyIdSchema,
     OFFLINE_LICENSE_ACTIVE_PRIVATE_KEY_PKCS8: offlineLicensePrivateKeySchema,
     OFFLINE_LICENSE_PUBLIC_KEYS: offlineLicensePublicKeysSchema,
+    ATTACHMENT_S3_ENDPOINT: optionalHttpUrlSchema,
+    ATTACHMENT_S3_REGION: z.string().min(1).default('us-east-1'),
+    ATTACHMENT_S3_BUCKET: optionalNonEmptyStringSchema,
+    ATTACHMENT_S3_ACCESS_KEY_ID: optionalNonEmptyStringSchema,
+    ATTACHMENT_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
+    ATTACHMENT_S3_FORCE_PATH_STYLE: booleanStringSchema.default(false),
+    ATTACHMENT_STORAGE_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000),
+    ATTACHMENT_CLAMAV_HOST: optionalNonEmptyStringSchema,
+    ATTACHMENT_CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
+    ATTACHMENT_SCAN_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000),
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(2_000),
   })
   .superRefine((environment, context) => {
@@ -234,6 +259,17 @@ export const environmentSchema = z
         code: 'custom',
         path: ['OFFLINE_LICENSE_PUBLIC_KEYS'],
         message: 'must contain the active Offline License key ID',
+      });
+    }
+
+    if (
+      (environment.ATTACHMENT_S3_ACCESS_KEY_ID === undefined) !==
+      (environment.ATTACHMENT_S3_SECRET_ACCESS_KEY === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ATTACHMENT_S3_ACCESS_KEY_ID'],
+        message: 'access-key ID and secret access key must be configured together',
       });
     }
   });

@@ -75,6 +75,8 @@ const summaries: Readonly<Record<AuditBusinessAction, string>> = {
   OWNER_LEDGER_ENTRY_CREATED: 'Owner Ledger entry posted',
   OWNER_LEDGER_CORRECTION_CREATED: 'Owner Ledger correction posted',
   STORE_SETTINGS_UPDATED: 'Store operational settings updated',
+  ATTACHMENT_ADDED: 'Attachment added',
+  ATTACHMENT_REMOVED: 'Attachment removed',
 };
 
 @Injectable()

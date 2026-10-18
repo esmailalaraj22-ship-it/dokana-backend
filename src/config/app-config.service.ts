@@ -35,6 +35,22 @@ export interface OfflineLicenseSigningConfig {
   publicKeys: Readonly<Record<string, string>>;
 }
 
+export interface AttachmentStorageConfig {
+  endpoint: string | undefined;
+  region: string;
+  bucket: string;
+  accessKeyId: string | undefined;
+  secretAccessKey: string | undefined;
+  forcePathStyle: boolean;
+  timeoutMs: number;
+}
+
+export interface AttachmentScannerConfig {
+  host: string;
+  port: number;
+  timeoutMs: number;
+}
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly config: ConfigService<Environment, true>) {}
@@ -138,6 +154,32 @@ export class AppConfigService {
         infer: true,
       }),
       publicKeys: publicKeys as Readonly<Record<string, string>>,
+    };
+  }
+
+  get attachmentStorage(): AttachmentStorageConfig | null {
+    const bucket = this.config.get('ATTACHMENT_S3_BUCKET', { infer: true });
+    if (!bucket) return null;
+
+    return {
+      endpoint: this.config.get('ATTACHMENT_S3_ENDPOINT', { infer: true }),
+      region: this.config.get('ATTACHMENT_S3_REGION', { infer: true }),
+      bucket,
+      accessKeyId: this.config.get('ATTACHMENT_S3_ACCESS_KEY_ID', { infer: true }),
+      secretAccessKey: this.config.get('ATTACHMENT_S3_SECRET_ACCESS_KEY', { infer: true }),
+      forcePathStyle: this.config.get('ATTACHMENT_S3_FORCE_PATH_STYLE', { infer: true }),
+      timeoutMs: this.config.get('ATTACHMENT_STORAGE_TIMEOUT_MS', { infer: true }),
+    };
+  }
+
+  get attachmentScanner(): AttachmentScannerConfig | null {
+    const host = this.config.get('ATTACHMENT_CLAMAV_HOST', { infer: true });
+    if (!host) return null;
+
+    return {
+      host,
+      port: this.config.get('ATTACHMENT_CLAMAV_PORT', { infer: true }),
+      timeoutMs: this.config.get('ATTACHMENT_SCAN_TIMEOUT_MS', { infer: true }),
     };
   }
 }

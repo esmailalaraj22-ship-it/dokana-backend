@@ -56,6 +56,8 @@ export const auditBusinessActions = [
   'OWNER_LEDGER_ENTRY_CREATED',
   'OWNER_LEDGER_CORRECTION_CREATED',
   'STORE_SETTINGS_UPDATED',
+  'ATTACHMENT_ADDED',
+  'ATTACHMENT_REMOVED',
 ] as const;
 
 export type AuditBusinessAction = (typeof auditBusinessActions)[number];
@@ -79,6 +81,7 @@ export const auditBusinessEntityTypes = [
   'manual_inventory',
   'owner_ledger',
   'store_settings',
+  'attachment',
 ] as const;
 
 export type AuditBusinessEntityType = (typeof auditBusinessEntityTypes)[number];

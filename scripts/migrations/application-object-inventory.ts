@@ -207,3 +207,8 @@ export const sanitizedOwnerAuditRoutines = [
   'ledger.read_owner_business_audit_v1(p_limit integer, p_cursor_occurred_at timestamp with time zone, p_cursor_event_id uuid, p_occurred_from timestamp with time zone, p_occurred_to timestamp with time zone, p_actor_user_id uuid, p_action text, p_entity_type text, p_entity_id uuid)',
   'ledger.sanitize_app_settings_audit_v1(p_old jsonb, p_new jsonb)',
 ] as const;
+
+export const attachmentLifecycleAuditRoutines = [
+  'ledger.read_owner_business_audit_pre_attachments_v1(p_limit integer, p_cursor_occurred_at timestamp with time zone, p_cursor_event_id uuid, p_occurred_from timestamp with time zone, p_occurred_to timestamp with time zone, p_actor_user_id uuid, p_action text, p_entity_type text, p_entity_id uuid)',
+  'ledger.remove_attachment_v1(p_attachment_id uuid)',
+] as const;

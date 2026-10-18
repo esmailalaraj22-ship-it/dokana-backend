@@ -8,6 +8,7 @@ import {
   applicationSequences,
   applicationTables,
   applicationViews,
+  attachmentLifecycleAuditRoutines,
   commitOrderedSyncFoundationRoutines,
   commitOrderedSyncFoundationTables,
   immutableSyncChangeRepresentationRoutines,
@@ -81,6 +82,7 @@ export async function verifyApplicationInventory(
   let notificationUserStateApplied = false;
   let notificationTouchApplied = false;
   let sanitizedOwnerAuditApplied = false;
+  let attachmentLifecycleAuditApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -263,6 +265,18 @@ export async function verifyApplicationInventory(
       }
       sanitizedOwnerAuditApplied = true;
     }
+
+    const attachmentLifecycleAudit = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0032_attachment_lifecycle_audit.sql'`,
+    );
+    if (attachmentLifecycleAudit.rows[0]) {
+      const file = await readMigrationFile('0032_attachment_lifecycle_audit.sql');
+      if (attachmentLifecycleAudit.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Attachment lifecycle audit migration checksum mismatch.');
+      }
+      attachmentLifecycleAuditApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -379,6 +393,7 @@ export async function verifyApplicationInventory(
       ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryRoutines : []),
       ...(notificationTouchApplied ? notificationTouchRoutines : []),
       ...(sanitizedOwnerAuditApplied ? sanitizedOwnerAuditRoutines : []),
+      ...(attachmentLifecycleAuditApplied ? attachmentLifecycleAuditRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

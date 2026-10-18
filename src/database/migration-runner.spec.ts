@@ -55,6 +55,7 @@ describe('controlled migration runner', () => {
       '0029_notification_user_state_and_debt_threshold.sql',
       '0030_notification_touch_trigger_fix.sql',
       '0031_sanitized_owner_business_audit.sql',
+      '0032_attachment_lifecycle_audit.sql',
     ]);
   });
 
