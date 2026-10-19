@@ -452,22 +452,36 @@ export class NotificationRepository {
     causes: NotificationCause[],
   ): Promise<void> {
     const due = await transaction.execute<SupplierDuePhysicalRow>(sql`
-      select invoice.id, invoice.display_number as "displayNumber",
-             supplier.name as "supplierName",
-             outstanding.outstanding_minor::text as "outstandingMinor",
-             (invoice.due_at at time zone ${timezoneName})::date::text as "dueDate"
-      from ledger.purchase_invoices invoice
-      join ledger.suppliers supplier
-        on supplier.store_id=invoice.store_id and supplier.id=invoice.supplier_id
-      join ledger.v_supplier_invoice_outstanding outstanding
-        on outstanding.store_id=invoice.store_id
-       and outstanding.purchase_invoice_id=invoice.id
-      where invoice.store_id=${storeId}::uuid
-        and invoice.status='posted'
-        and invoice.due_at is not null
-        and (invoice.due_at at time zone ${timezoneName})::date <= ${businessDate}::date
-        and outstanding.outstanding_minor > 0
-      order by invoice.id
+      with due_invoice as (
+        select invoice.id, invoice.display_number, invoice.due_at,
+               supplier.name as supplier_name,
+               outstanding.outstanding_minor - coalesce((
+                 select sum(allocation.amount_minor)
+                 from ledger.supplier_payment_allocations allocation
+                 join ledger.supplier_payments payment
+                   on payment.store_id=allocation.store_id
+                  and payment.id=allocation.supplier_payment_id
+                 where allocation.store_id=invoice.store_id
+                   and allocation.purchase_invoice_id=invoice.id
+                   and payment.status='posted'
+               ), 0) as outstanding_minor
+        from ledger.purchase_invoices invoice
+        join ledger.suppliers supplier
+          on supplier.store_id=invoice.store_id and supplier.id=invoice.supplier_id
+        join ledger.v_supplier_invoice_outstanding outstanding
+          on outstanding.store_id=invoice.store_id
+         and outstanding.purchase_invoice_id=invoice.id
+        where invoice.store_id=${storeId}::uuid
+          and invoice.status in ('open', 'closed')
+          and invoice.due_at is not null
+          and (invoice.due_at at time zone ${timezoneName})::date <= ${businessDate}::date
+      )
+      select id, display_number as "displayNumber", supplier_name as "supplierName",
+             outstanding_minor::text as "outstandingMinor",
+             (due_at at time zone ${timezoneName})::date::text as "dueDate"
+      from due_invoice
+      where outstanding_minor > 0
+      order by id
     `);
     for (const invoice of due.rows) {
       causes.push({

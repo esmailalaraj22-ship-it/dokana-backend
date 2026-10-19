@@ -1,3 +1,6 @@
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
+
 import type { DatabaseService } from '../database/database.service';
 import type { DatabaseTransaction } from '../database/database.types';
 import { NotificationRepository } from './notification.repository';
@@ -11,6 +14,7 @@ interface CanonicalCauseReader {
 }
 
 describe('NotificationRepository canonical cause mapping', () => {
+  const dialect = new PgDialect();
   const repository = new NotificationRepository({} as DatabaseService);
   const storeId = '24000000-0000-4000-8000-000000000001';
 
@@ -141,6 +145,12 @@ describe('NotificationRepository canonical cause mapping', () => {
       ]),
     );
     expect(execute).toHaveBeenCalledTimes(8);
+    const executeCalls = execute.mock.calls as unknown as readonly (readonly [unknown])[];
+    const supplierQuery = dialect.sqlToQuery(executeCalls[3]?.[0] as SQL).sql.replace(/\s+/gu, ' ');
+    expect(supplierQuery).toContain("invoice.status in ('open', 'closed')");
+    expect(supplierQuery).toContain('allocation.purchase_invoice_id=invoice.id');
+    expect(supplierQuery).toContain("payment.status='posted'");
+    expect(supplierQuery).toContain('where outstanding_minor > 0');
   });
 
   it('does not create a subscription warning when trusted database time is outside the window', async () => {

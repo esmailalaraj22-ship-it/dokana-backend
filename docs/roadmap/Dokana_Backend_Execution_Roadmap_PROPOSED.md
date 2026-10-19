@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S20; S21.1-S21.4                |
-| Current Station           | S21.1-S21.4 CLOSED; S21.5 next / not started |
+| Closed execution history  | Stations S0-S21                              |
+| Current Station           | S21 CLOSED; S22 next / not started           |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -68,15 +68,15 @@ The roadmap was reconstructed against this verified state:
 | Migrations                      | 32 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S20                                        |
-| Current task                    | S21.4 closed; S21.5 next / not started     |
+| Last fully closed Station       | S21                                        |
+| Current task                    | S21.5 closed; S22 next / not started       |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
 remains read-only. Its all-in-one PostgreSQL schema is an initialization baseline, not
 the future migration mechanism.
 
-## 5. Completed Stations S0-S19
+## 5. Completed Stations S0-S21
 
 Completed Stations are immutable execution history. Remaining work may build on their
 foundations but must not reopen or repeat them without new concrete blocking evidence.
@@ -103,9 +103,12 @@ foundations but must not reopen or repeat them without new concrete blocking evi
 | S17 - Returns and Cross-Domain Corrections              | CLOSED | Customer Sale Returns, Supplier financial Returns, settlement/inventory orchestration, tenant-safe reads, replay, dependency protection, and immutable correction chains                | Historical returns and cross-domain correction orchestration       | Current Return implementation and S17.1-S17.7 verification                                                                                                                                                                                                            |
 | S18 - Subscription, Offline Licensing, and SaaS Admin   | CLOSED | Platform Admin, Store and Subscription lifecycle, central online entitlement, signed Offline Licenses, revocation, immutable admin audit, and the S19 entitlement handoff               | Historical subscriptions, licenses, and SaaS administration        | Current S18 implementation, migrations `0016`-`0021`, and S18.3-S18.7 verification                                                                                                                                                                                    |
 | S19 - Offline Sync and Consistent Data Bootstrap        | CLOSED | SQLite parity handoff, consistent bootstrap, canonical offline push, commit-ordered pull, conflict/quarantine/recovery, accounting equivalence, and integrated convergence verification | Historical synchronization engine and data bootstrap               | Current S19 implementation, migrations `0022`-`0028`, and S19.3-S19.9 verification                                                                                                                                                                                    |
+| S20 - Dashboard, Reports, Search, Documents, and Export | CLOSED | Authoritative dashboard, operational/accounting reports, Store search, canonical PDFs, OpenAPI, and data-dictionary coverage                                                            | Historical reports, search, documents, export, and API documentation | Current S20 implementation and S20.1-S20.6 verification                                                                                                                                                                                                               |
+| S21 - Notifications, Attachments, and Audit Access      | CLOSED | Owner-focused actionable notifications, privacy-safe business audit, and secure private attachments with integrated cross-domain verification                                           | Historical notification, attachment, and Store audit access        | Current S21 implementation, migrations `0029`-`0032`, and S21.1-S21.5 verification                                                                                                                                                                                    |
 
-The safe completed boundary includes generic synchronization through S19. It does not
-include reporting, support features, backup/restore operations, or release readiness.
+The safe completed boundary includes generic synchronization, read-side reporting, and
+owner support capabilities through S21. It does not include backup/restore operations or
+release readiness.
 
 ## 6. Historical Roadmap Reconciliation
 
@@ -212,7 +215,7 @@ backup/restore, and final release validation.
 | Subscription/offline licensing/SaaS administration | Implemented                          | S18 (closed)                 |
 | Generic sync and consistent data bootstrap         | Bootstrap implemented; sync partial  | S19                          |
 | Dashboard/reports/search/documents/export          | Implemented                          | S20 (closed)                 |
-| Notifications/attachments/audit access             | Partially implemented infrastructure | S21                          |
+| Notifications/attachments/audit access             | Implemented                          | S21 (closed)                 |
 | Backup/restore/recovery                            | Still required                       | S22                          |
 | Final security/recovery/release validation         | Still required                       | S23                          |
 | Automatic or partial invoice goods receipt         | Superseded by approved design        | No future owner              |
@@ -1799,7 +1802,7 @@ authority or attachment storage. Approved export scope is PDF; backup/restore be
 
 ### S21 - Notifications, Attachments, and Audit Access
 
-- **Status:** CURRENT - S21.1-S21.4 CLOSED; S21.5 NEXT / NOT STARTED.
+- **Status:** CLOSED - S21.1-S21.5 CLOSED.
 - **Purpose:** Complete cross-domain operational support and history access.
 - **Distinct boundary:** Notification state, secure file metadata, and audit visibility
   are cross-cutting capabilities with separate security and lifecycle requirements.
@@ -1890,9 +1893,27 @@ S19 bootstrap/pull does not currently publish these families and is not reopened
 server-side S21 behavior operates on committed canonical state. Runtime retains no direct raw
 central-audit access, and attachment lifecycle authority remains narrow and database-enforced.
 
-S22 must eventually protect attachment metadata and approved private binaries together,
-notification state, and immutable business-audit evidence. S21 does not design backup,
-restore, or recovery.
+S21.5 proves the three S21 families remain distinct while operating together across
+canonical Customer debt and Collection, Supplier payable and Payment, Expense attachments,
+Inventory alerts, offline replay, multiple Owners, `READ_ONLY`, Store lifecycle, privacy,
+retention, failure, concurrency, and cross-Store boundaries. S21 support actions create zero
+Receivable, Payable, Money, Inventory, Expense, Owner Ledger, or period delta and introduce
+no second accounting or audit authority. The final PostgreSQL state is 32 applied / 0
+pending with checksum, forced-RLS, least-privilege, residue, and idle-transaction checks
+passing.
+
+S22 must protect notification state/settings, immutable central business-audit evidence,
+attachment metadata, and approved private binaries together. PostgreSQL-only backup is
+insufficient for attachments; restore must verify metadata-to-binary consistency. S22 also
+owns the actual backup-failure notification producer. S21 does not design or implement
+backup, restore, or recovery.
+
+The real S3-compatible provider smoke test remains unrun because no environment was
+available and is an explicit S23 release-readiness item. Bounded dependency triage patched
+the S21-reachable Nest/Express multipart and proxy dependencies within compatible releases;
+the remaining production advisory is a moderate `@nestjs/swagger`/`js-yaml` path not
+exploitable by the current generated-JSON-only OpenAPI usage, with its major-version upgrade
+decision deferred to S23.
 
 | Sub-stage | Status | Purpose and in scope | Dependencies and explicit non-scope | Database and storage expectation | Security, accounting, tests, and closure |
 | --- | --- | --- | --- | --- | --- |
@@ -1900,11 +1921,11 @@ restore, or recovery.
 | S21.2 - In-App Notifications and Lifecycle | CLOSED | Added owner-focused canonical cause reconciliation, stable episode deduplication, per-user read state, bounded APIs, configurable debt thresholds, lifecycle resolution, and retention | Reuses S7 settings, S18 entitlement state, S19 committed canonical state, and S20 links; excludes email, external push, backup execution, and accounting derivation | Migrations `0029` and `0030`; PostgreSQL 30 applied / 0 pending; PostgreSQL-reference and SQLite deltas = 0 | Trigger/reconciliation correctness, replay/concurrency deduplication, Store/user isolation, read-only behavior, lifecycle/retention, least privilege, and zero accounting mutation proven |
 | S21.3 - Privacy-Safe Business Audit Access and Capture Hardening | CLOSED | Added bounded Owner business history with trusted actor/action/time context, approved filters, deterministic cursors, and transactional Store Settings and Owner Ledger capture | Reuses immutable central audit and canonical domain history; excludes Platform Admin, auth/security, raw sync, unrestricted logs, and a second ledger | Migration `0031`; PostgreSQL 31 applied / 0 pending; PostgreSQL-reference and SQLite deltas = 0; no synthetic historical backfill | Raw central audit remains private; active Owner-only and Store isolation, offline actor attribution, correction history, replay/rollback safety, privacy exclusions, seven-year retention, and zero accounting mutation proven |
 | S21.4 - Secure Attachment Metadata and Binary Access | CLOSED | Added authenticated private upload, list, metadata, download, logical removal, bounded cleanup, and sanitized audit integration for Customer, Product, Supplier, and Expense | Reuses S21.3 audit authority and approved storage/file policy; excludes S20 PDF persistence, generic file drive, mobile picker/queue, S19 sync expansion, and S22 backup | Migration `0032`; private S3-compatible binary authority with PostgreSQL metadata only; PostgreSQL 32 applied / 0 pending; PostgreSQL-reference and SQLite deltas = 0 | File signatures/types/sizes, safe names and keys, fail-closed scanning, concurrent active limit, cross-Store and parent authorization, READ_ONLY behavior, retention/cleanup, lifecycle audit, compensation, and zero accounting mutation proven |
-| S21.5 - Integrated Verification and S21 Closure | NEXT / NOT STARTED | Reconcile all three families, documentation, least privilege, durable-asset inventory, and S22 handoff | S21.2-S21.4 closed; no new product capability or S22 implementation | No new delta unless a verified closure defect is separately authorized | Run focused regression and final security/RLS/lifecycle/failure/accounting-nonmutation gates; close only with clean repository and reviewed S22 asset handoff |
+| S21.5 - Integrated Verification and S21 Closure | CLOSED | Reconciled all three families, least privilege, durable-asset inventory, dependency security, and S22/S23 handoffs | S21.2-S21.4 closed; no new product capability or S22 implementation | Database delta = 0; PostgreSQL remains 32 applied / 0 pending; PostgreSQL-reference and SQLite deltas = 0 | Integrated Customer, Supplier, Expense/Attachment, Inventory, offline/replay, multi-owner, READ_ONLY, lifecycle, privacy, retention, failure, concurrency, RLS, accounting-nonmutation, OpenAPI, and full regression gates passed |
 
 ### S22 - Backup, Restore, and Recovery
 
-- **Status:** PROPOSED - NOT STARTED.
+- **Status:** NEXT - NOT STARTED.
 - **Purpose:** Establish an operational, tested recovery story for server and new-device
   restoration.
 - **Distinct boundary:** Backup retention, encryption, restoration, and disaster recovery
@@ -1918,7 +1939,9 @@ restore, or recovery.
   unapproved cloud provider integration, and restoring uncommitted client data.
 - **Coverage:** PRD backup, restore, recovery, and failed-backup notification needs.
 - **Known risks/migrations:** Restore must preserve tenant isolation, migration checksums,
-  audit history, and only committed server data.
+  audit history, notification state/settings, and only committed server data. Attachment
+  recovery must coordinate PostgreSQL metadata with private binary objects; a PostgreSQL-only
+  backup is insufficient.
 - **Start condition:** S19-S21 closed and backup encryption/retention policy approved.
 - **Closure intent:** Demonstrated, repeatable recovery with documented limits.
 
@@ -1937,7 +1960,9 @@ restore, or recovery.
 - **Explicit non-scope:** New product features or silent acceptance of skipped tests.
 - **Coverage:** Historical final validation and PRD release-readiness requirements.
 - **Known risks/migrations:** Production readiness cannot be inferred from static checks
-  or partially skipped suites; the reference runtime test must be handled honestly.
+  or partially skipped suites; the reference runtime test must be handled honestly. Run the
+  real S3-compatible provider smoke test and reassess the remaining moderate generated-OpenAPI
+  `@nestjs/swagger`/`js-yaml` advisory before release.
 - **Start condition:** Every prior Station is formally closed with findings resolved or
   accepted by the backend owner.
 - **Closure intent:** Evidence-backed backend release decision and complete handoff.
@@ -2072,11 +2097,11 @@ new explicit owner decision.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S20 - Dashboard, Reports, Search, Documents, and Export |
+| Last fully closed Station           | S21 - Notifications, Attachments, and Audit Access |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Safe completed capabilities         | S0-S20 plus S21.1-S21.4                    |
-| First incomplete release dependency | S21 - Notifications, Attachments, and Audit Access |
-| Current Station                     | S21.1-S21.4 CLOSED; S21.5 NEXT / NOT STARTED |
+| Safe completed capabilities         | S0-S21                                     |
+| First incomplete release dependency | S22 - Backup, Restore, and Recovery         |
+| Current Station                     | S21 CLOSED; S22 NEXT / NOT STARTED          |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2102,13 +2127,13 @@ new explicit owner decision.
 | S20.4 current status                | CLOSED                                     |
 | S20.5 current status                | CLOSED                                     |
 | S20.6 current status                | CLOSED                                     |
-| S21 current status                  | CURRENT                                    |
+| S21 current status                  | CLOSED                                     |
 | S21.1 current status                | CLOSED                                     |
 | S21.2 current status                | CLOSED                                     |
 | S21.3 current status                | CLOSED                                     |
 | S21.4 current status                | CLOSED                                     |
-| S21.5 current status                | NEXT / NOT STARTED                         |
+| S21.5 current status                | CLOSED                                     |
 
-Do not start S21.5 from this document. It requires a separate execution prompt and all
+Do not start S22 from this document. It requires a separate execution prompt and all
 applicable owner decisions. Database, PostgreSQL-reference, and SQLite deltas remain 0 by
 default.
