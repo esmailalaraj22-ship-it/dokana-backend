@@ -23,6 +23,7 @@ import { OwnerLedgerModule } from './owner-ledger/owner-ledger.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { ProductsModule } from './products/products.module';
 import { ReportsModule } from './reports/reports.module';
+import { RecoveryModule } from './recovery/recovery.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SalesModule } from './sales/sales.module';
 import { SearchModule } from './search/search.module';
@@ -54,6 +55,7 @@ import { SyncModule } from './sync/sync.module';
     DocumentsModule,
     ExpensesModule,
     ProductsModule,
+    RecoveryModule,
     ReportsModule,
     ReturnsModule,
     SalesModule,

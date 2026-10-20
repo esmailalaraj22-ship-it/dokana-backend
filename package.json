@@ -35,7 +35,12 @@
     "db:check": "tsx scripts/check-database.ts runtime",
     "db:check:admin": "tsx scripts/check-database.ts admin",
     "db:check:auth": "tsx scripts/check-database.ts auth",
-    "db:check:migration": "tsx scripts/check-database.ts migration"
+    "db:check:migration": "tsx scripts/check-database.ts migration",
+    "recovery:create": "tsx scripts/recovery.ts create",
+    "recovery:verify": "tsx scripts/recovery.ts verify",
+    "recovery:health": "tsx scripts/recovery.ts health",
+    "recovery:cleanup": "tsx scripts/recovery.ts cleanup",
+    "recovery:restore-smoke": "tsx scripts/recovery.ts restore-smoke"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",

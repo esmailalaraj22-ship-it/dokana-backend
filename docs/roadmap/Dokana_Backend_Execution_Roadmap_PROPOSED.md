@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S21; S22.1 orientation         |
-| Current Station           | S22.1 CLOSED; S22.2 next / not started     |
+| Closed execution history  | Stations S0-S21; S22.1-S22.2               |
+| Current Station           | S22.2 CLOSED; S22.3 next / not started     |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S21                                        |
-| Current task                    | S22.1 closed; S22.2 next / not started     |
+| Current task                    | S22.2 closed; S22.3 next / not started     |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -1925,7 +1925,7 @@ decision deferred to S23.
 
 ### S22 - Backup, Restore, and Recovery
 
-- **Status:** IN PROGRESS - S22.1 CLOSED; S22.2 NEXT / NOT STARTED.
+- **Status:** IN PROGRESS - S22.1-S22.2 CLOSED; S22.3 NEXT / NOT STARTED.
 - **Purpose:** Create verified, encrypted recovery points and a repeatable disaster-recovery
   path that reconstructs coherent canonical business state without duplicating accounting,
   weakening tenant isolation, or making offline synchronization unsafe.
@@ -2037,30 +2037,63 @@ proof and compatibility review.
 
 #### S22 Owner and Deployment Decisions
 
-No authority currently defines RPO, RTO, backup-generation retention, PITR window,
-production database model, backup destination, encryption-key custody, restore-operator policy,
-or Store Owner backup-status semantics. These decisions block S22.2 implementation.
+The backend owner approved the S22.2 platform-wide recovery policy: a 15-minute design RPO,
+4-hour design RTO, 7-day production PITR target, 35-day daily logical retention, 12-month
+monthly logical retention, a dedicated private backup destination, and Owner-only safe backup
+status. These are engineering targets, not customer SLA claims. Production deployment,
+restore-operator, provider, IAM, KMS/key-custody, and measured RPO/RTO evidence remain S22.3-S23
+gates where applicable.
 
-| Decision                      | Recommended default                                                                                                                                                                                  | Cost and risk tradeoff                                                                                                                   |
+| Decision                      | Approved S22.2 direction                                                                                                                                                                             | Cost and risk tradeoff                                                                                                                   |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| RPO                           | Prefer 15 minutes through managed PITR or continuous WAL, with 1 hour and 24 hours as lower-cost alternatives                                                                                        | Lower RPO increases provider/storage/operations cost; daily logical backup alone can lose a full day of accepted accounting data.        |
-| RTO                           | Prefer several hours for v1 with a measured drill; 1 hour or 30 minutes require automated warm infrastructure and stronger operations                                                                | Lower RTO increases automation, standby, staffing, and rehearsal cost.                                                                   |
-| Retention/PITR window         | Approve separate daily/weekly/monthly generation retention and PITR window based on recovery objectives; do not equate seven-year business/audit retention with seven years of every backup          | Longer retention increases cost and secret/data exposure; short retention weakens delayed-corruption recovery.                           |
+| RPO                           | 15-minute design target through managed PITR or continuous WAL; achievement is unverified until deployment/S23 evidence                                                                              | Lower RPO increases provider/storage/operations cost; daily logical backup alone cannot satisfy this target.                             |
+| RTO                           | 4-hour design target, to be measured in S22.5/S23                                                                                                                                                    | Lower RTO increases automation, standby, staffing, and rehearsal cost.                                                                   |
+| Retention/PITR window         | Verified daily logical points for 35 days, monthly points for 12 months, and a 7-day production PITR target                                                                                          | Longer retention increases cost and secret/data exposure; short retention weakens delayed-corruption recovery.                           |
 | Deployment model              | Prefer a managed PostgreSQL service with encrypted snapshots and PITR if available; otherwise explicitly fund self-managed base backups, WAL archiving, monitoring, and off-host restore drills      | Managed service reduces operational burden but creates provider dependency; self-managed recovery requires substantially more expertise. |
 | Destination/object protection | Use a private, versioned/immutable backup bucket or account separated from the ordinary attachment bucket and runtime IAM; approve replication region/provider as needed                             | Separation limits compromise and deletion blast radius but adds storage and operational cost.                                            |
 | Encryption/key custody        | Require provider/KMS or envelope encryption with recoverable, access-logged keys held outside the database and backup bucket                                                                         | Strong separation protects artifacts but key loss makes every backup unrecoverable; custody and rotation must be drilled.                |
 | Restore operators             | Limit to designated infrastructure recovery operators; require explicit production target confirmation and preferably two-person approval for cutover                                                | Dual control slows emergency action but materially reduces wrong-target and wrong-point risk.                                            |
-| Owner-visible status          | Platform operators always receive detailed failures. Decide whether Store Owners see a generic protection-degraded notice only after an approved freshness threshold, without infrastructure details | Early Owner alerts improve transparency but can cause noise and disclose operational details; silent prolonged failure is unacceptable.  |
+| Owner-visible status          | Matching Store Owners, including READ_ONLY, see only generic high-level protection status after the approved freshness threshold; infrastructure details remain hidden                              | Early Owner alerts improve transparency but can cause noise and disclose operational details; silent prolonged failure is unacceptable.  |
 
 #### S22 Delivery Stages
 
 | Stage                                                                  | Purpose, scope, dependencies, and code areas                                                                                                                                                                                                                                                                                                                                                                                                                              | Database/storage expectation and cross-domain impact                                                                                                                                                                                                                                                                                                                 | Security, accounting, tests, decisions, and closure                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | S22.1 - Backup, Restore, and Recovery Orientation                      | **CLOSED.** Defined authority, assets, granularity, failure model, consistency problem, decision gates, and stages. No backup, restore, notification producer, or infrastructure implementation. Depends on S19-S21 closure; Roadmap only.                                                                                                                                                                                                                                | Database/reference/SQLite/application/test deltas = 0. PostgreSQL remains 32 applied / 0 pending.                                                                                                                                                                                                                                                                    | Bounded repository/catalog inspection and migration verification only; no broad tests or drill. Closure is this reviewed orientation record.                                                                                                                                                                                                                                                                                                            |
-| S22.2 - PostgreSQL Recovery Points, Integrity, and Backup Health       | Create and verify encrypted PostgreSQL recovery points, immutable identity, freshness/integrity status, bounded validation, and authoritative backup-failure production. Excludes production restore/cutover and attachment copying. Reuses migration verification, readiness, notification presentation, audit/admin boundaries; expected areas are future recovery tooling/config/health/notification integration.                                                      | PostgreSQL owns the coherent database point; object storage holds protected DB artifacts only when selected. **POTENTIAL DATABASE NEED - MUST BE PROVEN IN IMPLEMENTATION STAGE** for a platform-wide catalog/health condition because existing Store-scoped tables may be unsuitable. No S19/S18 semantics change.                                                  | Least-privileged backup identity, encrypted destination, no app runtime/admin credentials, immutable checksums, no accounting writes. Focused real-PostgreSQL backup creation/failure/integrity/isolated-validation tests. Requires approved RPO/RTO, retention, deployment, destination, encryption, and alert policy. Closes with repeatable verified recovery-point creation, not production restore.                                                |
+| S22.2 - PostgreSQL Recovery Points, Integrity, and Backup Health       | **CLOSED.** Added PostgreSQL custom-format recovery-point creation, immutable UUID identity, external versioned manifests/catalog, SHA-256 integrity, stored-artifact verification, bounded retention cleanup, isolated restore-smoke, safe Owner status, and S21 `backup_failure` reconciliation. Excludes production restore/cutover and attachment copying.                                                                                                                             | Database delta = 0; PostgreSQL remains 32 applied / 0 pending. The dedicated recovery destination holds encrypted private artifacts and manifests under a controlled namespace; no catalog table, PostgreSQL-reference change, SQLite change, S19 mutation, S18 entitlement mutation, or accounting mutation was introduced.                                                   | Daily retention is 35 days and monthly retention is 12 calendar months. PITR target is 7 days, but provider PITR, the 15-minute RPO, production KMS/IAM, scheduler, and real storage-provider behavior remain unverified deployment/S23 gates. Focused recovery, notification, privacy, full unit, broad integration, migration, role, residue, and isolated PostgreSQL restore checks passed. |
 | S22.3 - Attachment Protection, Manifest, and Recovery Consistency      | Protect private binary generations and bind them to database recovery identity through a sanitized manifest/reconciliation model. Excludes broad database restore and user access to backup artifacts. Reuses the S3 adapter, attachment checksums/keys/tombstones, and S21 authorization. Expected areas are a dedicated recovery storage adapter, manifest/reconciliation, and backup-health integration.                                                               | PostgreSQL metadata remains authorization authority; object storage owns versioned/replicated binary recovery copies. **POTENTIAL DATABASE NEED - MUST BE PROVEN IN IMPLEMENTATION STAGE** for manifest/catalog persistence; an encrypted immutable external manifest is preferred when sufficient. S19 remains unchanged; S21 lifecycle rules remain authoritative. | Separate IAM/destination, encryption, no public/Store APIs, access logging, lifecycle-aware reconciliation, and zero accounting mutation. Use deterministic adapters and MinIO/S3-compatible integration where available; prove active/missing/orphan/removed/version mismatch cases. Requires approved object-versioning/replication and destination policy. Closes when every protected binary set is identifiable and verifiable against a DB point. |
 | S22.4 - Isolated Restore, Recovery Fencing, and Offline Reconciliation | Restore immutable points to isolated/empty targets, verify and reconcile PostgreSQL plus binaries, enforce traffic/sync fencing, define client invalidation/rebootstrap, and cut over only after gates pass. Excludes live single-Store rollback and accounting reconstruction. Reuses S19 bootstrap/pull, S18 validation, S21 reconciliation, health, migrations, and RLS checks. Expected areas are recovery orchestration, validation, fencing, and operator controls. | PostgreSQL is restored canonical authority; object versions are reconciled to the selected manifest. **POTENTIAL DATABASE NEED - MUST BE PROVEN IN IMPLEMENTATION STAGE** for recovery epoch/generation, durable fence, or status. S19 cursors/idempotency and S18 licenses are validated, not recreated opportunistically.                                          | Designated operator only, wrong-target guard, repeatable empty-target restore, current server time, no second accounting engine. Focused isolated PostgreSQL/object-store restore, RLS, role, accounting invariant, cursor/replay, entitlement, notification, and attachment tests. Requires restore-operator/cutover and post-restore client policy. Closes with a restartable fenced restore and explicit pass/fail cutover gate.                     |
 | S22.5 - Integrated Disaster-Recovery Drill and S22 Closure             | Execute backup, verification, failure injection, isolated restore, backend startup, reconciliation, and measured recovery. No new product capability. Depends on S22.2-S22.4 closure and approved production-like test environment.                                                                                                                                                                                                                                       | Database delta expected = 0; no new recovery semantics. PostgreSQL, manifest, and protected binaries must identify the same verified point.                                                                                                                                                                                                                          | Prove migration checksums, roles/RLS/tenant isolation, representative accounting/inventory balances and corrections, operationId/replay and sync safety, subscriptions/licenses, S21 state, backup-failure notifications, zero test residue, and measured RPO/RTO. Real S3-compatible/provider validation remains an S23 handoff if unavailable. Closes S22 only with an evidence-backed repeatable drill.                                              |
+
+#### S22.2 Closure Evidence and Handoffs
+
+- Recovery scope is platform-wide v1; live single-Store restore remains unsupported. Daily
+  `pg_dump` custom-format artifacts protect coherent `platform`, `ledger`, `sync`, and `audit`
+  state, including central Store/device, Subscription/License, notification, attachment
+  metadata, audit, migration, and synchronization authority. Cluster roles/globals and secrets
+  remain deployment-managed and must be reprovisioned and verified during full restore.
+- Only complete `VERIFIED` manifests with matching encrypted artifact metadata count as healthy.
+  CREATING and FAILED states remain distinct, corrupt stored artifacts fail SHA-256 verification,
+  and the external catalog is rediscoverable after process restart. Filesystem storage is
+  test/local only; production requires the separately configured private S3-compatible boundary.
+- `GET /v1/backup-status` exposes high-level state only to the matching Store Owner, including
+  READ_ONLY Stores. Non-Owners are blocked. Material loss of fresh verified protection produces
+  one Store-scoped S21 `backup_failure` episode and recovery resolves it; transient failed
+  attempts do not invalidate a still-fresh verified generation.
+- The 15-minute RPO and 4-hour RTO remain design targets, not SLAs. Production PITR is
+  `UNVERIFIED - DEPLOYMENT/S23 GATE`; the repository does not claim the 15-minute RPO. Real
+  provider storage, versioning/Object Lock, IAM, KMS/key custody, scheduling/monitoring, PITR,
+  and measured RPO/RTO remain deployment/S23 verification items.
+- Central device and Offline License authority is inside the PostgreSQL recovery point. New-phone
+  recovery remains same account and Store with a new device identity and fresh S19 bootstrap;
+  server backup cannot guarantee unsynchronized phone-only data. Central device revocation is
+  enforced where recorded, but an Owner-facing revoke/replace workflow remains a dedicated
+  future product enhancement.
+- S22.3 must bind protected attachment-binary generations to this recovery-point identity,
+  manifest version, timestamps, verification state, retention model, and separate storage
+  boundary. S22.4 retains isolated/fenced restore, a new recovery generation, cursor safety,
+  rebootstrap, replacement-device authorization, and no automatic reauthorization of revoked
+  devices. S22.5/S23 own the production-like integrated drill and release evidence.
 
 #### S23 Recovery Handoffs
 
@@ -2224,9 +2257,9 @@ new explicit owner decision.
 | ----------------------------------- | -------------------------------------------------- |
 | Last fully closed Station           | S21 - Notifications, Attachments, and Audit Access |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e`         |
-| Safe completed capabilities         | S0-S21                                             |
+| Safe completed capabilities         | S0-S21 plus S22.1-S22.2                            |
 | First incomplete release dependency | S22 - Backup, Restore, and Recovery                |
-| Current Station                     | S22.1 CLOSED; S22.2 NEXT / NOT STARTED             |
+| Current Station                     | S22.2 CLOSED; S22.3 NEXT / NOT STARTED             |
 | S18 current status                  | CLOSED                                             |
 | S18.1 current status                | CLOSED                                             |
 | S18.2 current status                | CLOSED                                             |
@@ -2260,11 +2293,12 @@ new explicit owner decision.
 | S21.5 current status                | CLOSED                                             |
 | S22 current status                  | IN PROGRESS                                        |
 | S22.1 current status                | CLOSED                                             |
-| S22.2 current status                | NEXT / NOT STARTED                                 |
-| S22.3 current status                | NOT STARTED                                        |
+| S22.2 current status                | CLOSED                                             |
+| S22.3 current status                | NEXT / NOT STARTED                                 |
 | S22.4 current status                | NOT STARTED                                        |
 | S22.5 current status                | NOT STARTED                                        |
 
-Do not start S22.2 from this document. It requires a separate execution prompt and approval of
-the S22.1 recovery-objective, retention, deployment, encryption, destination, operator, and
-notification decisions. Database, PostgreSQL-reference, and SQLite deltas remain 0 by default.
+Do not start S22.3 from this document. It requires a separate execution prompt and confirmation
+of the attachment-protection, object-versioning/replication, destination, encryption, operator,
+and consistency decisions. Database, PostgreSQL-reference, and SQLite deltas remain 0 by
+default.

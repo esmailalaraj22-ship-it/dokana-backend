@@ -90,6 +90,7 @@ describe('machine-readable Dokana API contract', () => {
     expect(document.paths).toHaveProperty('/v1/audit');
     expect(document.paths).toHaveProperty('/v1/sync/pull');
     expect(document.paths).toHaveProperty('/v1/admin/stores');
+    expect(document.paths).toHaveProperty('/v1/backup-status');
     expect(operationIds.every((operationId) => typeof operationId === 'string')).toBe(true);
     expect(new Set(operationIds).size).toBe(operationIds.length);
     expect(Object.keys(document.paths).some((path) => path.includes('openapi'))).toBe(false);
@@ -413,6 +414,25 @@ describe('machine-readable Dokana API contract', () => {
       'removedByUserId',
     ]) {
       expect(responseSchema.properties).not.toHaveProperty(internal);
+    }
+  });
+
+  it('documents only the safe Owner backup-health read surface', () => {
+    const path = document.paths['/v1/backup-status'];
+    const read = operationAt(document, '/v1/backup-status', 'get');
+    expect(path?.post).toBeUndefined();
+    expect(path?.delete).toBeUndefined();
+    expect(read.operationId).toBe('recovery.backupStatus.read');
+    expect(read.security).toContainEqual({ bearer: [] });
+    expect(read.responses).toMatchObject({ '200': {}, '401': {}, '403': {} });
+    expect(responseRef(read)).toBe('#/components/schemas/BackupStatusResponseDto');
+    const schema = schemaAt(document, 'BackupStatusResponseDto');
+    expect(schemaProperty(schema, 'lastVerifiedRecoveryPointAt')).toMatchObject({
+      format: 'date-time',
+      nullable: true,
+    });
+    for (const internal of ['bucket', 'artifact', 'manifest', 'databaseHost', 'kmsKey']) {
+      expect(schema.properties).not.toHaveProperty(internal);
     }
   });
 });

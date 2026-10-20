@@ -721,6 +721,70 @@ describe('Owner-focused notifications with real PostgreSQL', () => {
       .expect(({ body }) => expect(body).toMatchObject({ code: 'BUSINESS_WRITE_NOT_ALLOWED' }));
   });
 
+  it('exposes only safe backup status to Owners, including READ_ONLY, and blocks non-Owners', async () => {
+    const ownerA = responseBody(
+      await authorized(access.ownerA, 'get', '/v1/backup-status').expect(200),
+    );
+    expect(ownerA).toEqual({
+      protectionStatus: 'configuration_required',
+      logicalBackupStatus: 'unconfigured',
+      pitrStatus: 'unverified',
+      lastVerifiedRecoveryPointAt: null,
+      attentionRequired: false,
+    });
+    expect(ownerA).not.toHaveProperty('bucket');
+    expect(ownerA).not.toHaveProperty('artifact');
+    expect(ownerA).not.toHaveProperty('manifest');
+    await authorized(access.managerA, 'get', '/v1/backup-status')
+      .expect(403)
+      .expect(({ body }) =>
+        expect(body).toMatchObject({ code: 'BACKUP_STATUS_ACCESS_NOT_ALLOWED' }),
+      );
+    await authorized(access.readOnly, 'get', '/v1/backup-status').expect(200);
+    await authorized(access.ownerB, 'get', '/v1/backup-status')
+      .expect(200)
+      .expect(({ body }) => expect(body).toEqual(ownerA));
+  });
+
+  it('deduplicates and resolves the external backup-protection notification episode', async () => {
+    if (!app) throw new Error('The notification integration application is unavailable.');
+    const repository = app.get(NotificationRepository);
+    const cause = {
+      key: `s21:v1:backup_failure:backup_protection:${fixture.stores.a}`,
+      type: 'backup_failure' as const,
+      severity: 'critical' as const,
+      title: 'Backup protection needs attention',
+      body: 'There is a problem protecting your Store data backup.',
+      entityType: 'backup_protection',
+      entityId: fixture.stores.a,
+    };
+    await Promise.all([
+      repository.reconcile(context('ownerA'), [cause]),
+      repository.reconcile(context('ownerA2'), [cause]),
+    ]);
+    const active = await fixturePool.query<{ id: string }>(
+      `select id from ledger.notifications
+       where store_id=$1 and notification_key=$2 and resolved_at is null`,
+      [fixture.stores.a, cause.key],
+    );
+    expect(active.rowCount).toBe(1);
+
+    await repository.reconcile(context('ownerA'), []);
+    const resolved = await fixturePool.query<{ count: number }>(
+      `select count(*)::integer as count from ledger.notifications
+       where store_id=$1 and notification_type='backup_failure' and resolved_at is not null`,
+      [fixture.stores.a],
+    );
+    expect(resolved.rows[0]?.count).toBe(1);
+    const otherStore = await fixturePool.query<{ count: number }>(
+      `select count(*)::integer as count from ledger.notifications
+       where store_id=$1 and notification_type='backup_failure'`,
+      [fixture.stores.b],
+    );
+    expect(otherStore.rows[0]?.count).toBe(0);
+    expect(await accountingSnapshot()).toEqual(accountingBefore);
+  });
+
   it('deduplicates concurrent canonical causes and preserves history/read state across resolution and recurrence', async () => {
     if (!app) throw new Error('The notification integration application is unavailable.');
     const repository = app.get(NotificationRepository);

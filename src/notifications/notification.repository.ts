@@ -98,7 +98,10 @@ const managedKeyPrefix = 's21:v1:';
 export class NotificationRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  reconcile(context: TenantTransactionContext): Promise<void> {
+  reconcile(
+    context: TenantTransactionContext,
+    externalCauses: readonly NotificationCause[] = [],
+  ): Promise<void> {
     return this.database.withTenantTransaction(context, async (transaction) => {
       await transaction.execute(sql`
         select pg_advisory_xact_lock(
@@ -107,6 +110,17 @@ export class NotificationRepository {
       `);
 
       const causes = await this.readCanonicalCauses(transaction, context.storeId);
+      for (const cause of externalCauses) {
+        if (
+          !cause.key.startsWith(managedKeyPrefix) ||
+          cause.entityId !== context.storeId ||
+          causes.some((existing) => existing.key === cause.key)
+        ) {
+          throw new Error('External notification cause is not valid for this Store.');
+        }
+        causes.push(cause);
+      }
+      causes.sort((left, right) => left.key.localeCompare(right.key));
       const existingResult = await transaction.execute<ExistingNotificationRow>(sql`
         select
           id,

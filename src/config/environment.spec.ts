@@ -37,6 +37,8 @@ describe('validateEnvironment', () => {
       DB_POOL_MAX: 10,
       AUTH_DB_POOL_MAX: 5,
       AUTH_ACCESS_TOKEN_TTL_SECONDS: 900,
+      RECOVERY_STORAGE_DRIVER: 'unconfigured',
+      RECOVERY_LOGICAL_MAX_AGE_HOURS: 36,
       HEALTH_CHECK_TIMEOUT_MS: 2000,
     });
   });
@@ -112,5 +114,47 @@ describe('validateEnvironment', () => {
         OFFLINE_LICENSE_PUBLIC_KEYS: JSON.stringify({ historical: offlineLicensePublicKey }),
       }),
     ).toThrow('must contain the active Offline License key ID');
+  });
+
+  it('requires isolated encrypted recovery storage configuration', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'production',
+        ATTACHMENT_S3_BUCKET: 'shared-data',
+        RECOVERY_STORAGE_DRIVER: 's3',
+        RECOVERY_S3_BUCKET: 'shared-data',
+      }),
+    ).toThrow('must use a bucket distinct from business attachments');
+
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'production',
+        RECOVERY_STORAGE_DRIVER: 's3',
+        RECOVERY_S3_BUCKET: 'private-recovery',
+        RECOVERY_S3_ENDPOINT: 'http://objects.example.test',
+      }),
+    ).toThrow('must use HTTPS in production');
+  });
+
+  it('permits filesystem recovery storage only outside production', () => {
+    expect(
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'test',
+        RECOVERY_STORAGE_DRIVER: 'filesystem',
+        RECOVERY_FILESYSTEM_ROOT: 'C:\\temporary\\recovery',
+      }).RECOVERY_STORAGE_DRIVER,
+    ).toBe('filesystem');
+
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'production',
+        RECOVERY_STORAGE_DRIVER: 'filesystem',
+        RECOVERY_FILESYSTEM_ROOT: 'C:\\temporary\\recovery',
+      }),
+    ).toThrow('filesystem recovery storage is forbidden in production');
   });
 });

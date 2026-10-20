@@ -31,6 +31,15 @@ const optionalHttpUrlSchema = z.preprocess(
     .optional(),
 );
 
+const optionalAbsolutePathSchema = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z
+    .string()
+    .min(1)
+    .refine((value) => /^(?:[A-Za-z]:[\\/]|\/)/.test(value), 'must be an absolute path')
+    .optional(),
+);
+
 const signingKeyIdSchema = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/);
 
 const signingSecretSchema = z
@@ -223,6 +232,30 @@ export const environmentSchema = z
     ATTACHMENT_CLAMAV_HOST: optionalNonEmptyStringSchema,
     ATTACHMENT_CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
     ATTACHMENT_SCAN_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(10_000),
+    RECOVERY_DATABASE_URL: optionalPostgresUrlSchema,
+    RECOVERY_POSTGRES_BIN_DIR: optionalAbsolutePathSchema,
+    RECOVERY_ENVIRONMENT_ID: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}$/)
+      .default('local-development'),
+    RECOVERY_SOURCE_REVISION: z.preprocess(
+      (value) => (value === '' ? undefined : value),
+      z
+        .string()
+        .regex(/^[0-9a-f]{7,64}$/)
+        .optional(),
+    ),
+    RECOVERY_STORAGE_DRIVER: z.enum(['unconfigured', 'filesystem', 's3']).default('unconfigured'),
+    RECOVERY_FILESYSTEM_ROOT: optionalAbsolutePathSchema,
+    RECOVERY_S3_ENDPOINT: optionalHttpUrlSchema,
+    RECOVERY_S3_REGION: z.string().min(1).default('us-east-1'),
+    RECOVERY_S3_BUCKET: optionalNonEmptyStringSchema,
+    RECOVERY_S3_ACCESS_KEY_ID: optionalNonEmptyStringSchema,
+    RECOVERY_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
+    RECOVERY_S3_FORCE_PATH_STYLE: booleanStringSchema.default(false),
+    RECOVERY_S3_KMS_KEY_ID: optionalNonEmptyStringSchema,
+    RECOVERY_STORAGE_TIMEOUT_MS: z.coerce.number().int().min(100).max(600_000).default(30_000),
+    RECOVERY_LOGICAL_MAX_AGE_HOURS: z.coerce.number().int().min(24).max(72).default(36),
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(2_000),
   })
   .superRefine((environment, context) => {
@@ -270,6 +303,73 @@ export const environmentSchema = z
         code: 'custom',
         path: ['ATTACHMENT_S3_ACCESS_KEY_ID'],
         message: 'access-key ID and secret access key must be configured together',
+      });
+    }
+
+    if (
+      (environment.RECOVERY_S3_ACCESS_KEY_ID === undefined) !==
+      (environment.RECOVERY_S3_SECRET_ACCESS_KEY === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_S3_ACCESS_KEY_ID'],
+        message: 'access-key ID and secret access key must be configured together',
+      });
+    }
+
+    if (
+      environment.RECOVERY_STORAGE_DRIVER === 'filesystem' &&
+      environment.RECOVERY_FILESYSTEM_ROOT === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_FILESYSTEM_ROOT'],
+        message: 'is required when RECOVERY_STORAGE_DRIVER is filesystem',
+      });
+    }
+
+    if (
+      environment.RECOVERY_STORAGE_DRIVER === 'filesystem' &&
+      environment.APP_ENV === 'production'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_STORAGE_DRIVER'],
+        message: 'filesystem recovery storage is forbidden in production',
+      });
+    }
+
+    if (
+      environment.RECOVERY_STORAGE_DRIVER === 's3' &&
+      environment.RECOVERY_S3_BUCKET === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_S3_BUCKET'],
+        message: 'is required when RECOVERY_STORAGE_DRIVER is s3',
+      });
+    }
+
+    if (
+      environment.RECOVERY_S3_BUCKET !== undefined &&
+      environment.RECOVERY_S3_BUCKET === environment.ATTACHMENT_S3_BUCKET
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_S3_BUCKET'],
+        message: 'must use a bucket distinct from business attachments',
+      });
+    }
+
+    if (
+      environment.APP_ENV === 'production' &&
+      environment.RECOVERY_STORAGE_DRIVER === 's3' &&
+      environment.RECOVERY_S3_ENDPOINT?.startsWith('http:')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_S3_ENDPOINT'],
+        message: 'must use HTTPS in production',
       });
     }
   });

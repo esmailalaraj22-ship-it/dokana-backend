@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { Environment } from './environment';
+import {
+  recoveryRuntimeConfigFromEnvironment,
+  type RecoveryRuntimeConfig,
+} from '../recovery/recovery-config';
 
 export interface RuntimeDatabaseConfig {
   connectionString: string;
@@ -181,5 +185,32 @@ export class AppConfigService {
       port: this.config.get('ATTACHMENT_CLAMAV_PORT', { infer: true }),
       timeoutMs: this.config.get('ATTACHMENT_SCAN_TIMEOUT_MS', { infer: true }),
     };
+  }
+
+  get recovery(): RecoveryRuntimeConfig {
+    return recoveryRuntimeConfigFromEnvironment({
+      APP_ENV: this.config.get('APP_ENV', { infer: true }),
+      RECOVERY_ENVIRONMENT_ID: this.config.get('RECOVERY_ENVIRONMENT_ID', { infer: true }),
+      RECOVERY_SOURCE_REVISION: this.config.get('RECOVERY_SOURCE_REVISION', { infer: true }),
+      RECOVERY_STORAGE_DRIVER: this.config.get('RECOVERY_STORAGE_DRIVER', { infer: true }),
+      RECOVERY_FILESYSTEM_ROOT: this.config.get('RECOVERY_FILESYSTEM_ROOT', { infer: true }),
+      RECOVERY_S3_ENDPOINT: this.config.get('RECOVERY_S3_ENDPOINT', { infer: true }),
+      RECOVERY_S3_REGION: this.config.get('RECOVERY_S3_REGION', { infer: true }),
+      RECOVERY_S3_BUCKET: this.config.get('RECOVERY_S3_BUCKET', { infer: true }),
+      RECOVERY_S3_ACCESS_KEY_ID: this.config.get('RECOVERY_S3_ACCESS_KEY_ID', { infer: true }),
+      RECOVERY_S3_SECRET_ACCESS_KEY: this.config.get('RECOVERY_S3_SECRET_ACCESS_KEY', {
+        infer: true,
+      }),
+      RECOVERY_S3_FORCE_PATH_STYLE: this.config.get('RECOVERY_S3_FORCE_PATH_STYLE', {
+        infer: true,
+      }),
+      RECOVERY_S3_KMS_KEY_ID: this.config.get('RECOVERY_S3_KMS_KEY_ID', { infer: true }),
+      RECOVERY_STORAGE_TIMEOUT_MS: this.config.get('RECOVERY_STORAGE_TIMEOUT_MS', {
+        infer: true,
+      }),
+      RECOVERY_LOGICAL_MAX_AGE_HOURS: this.config.get('RECOVERY_LOGICAL_MAX_AGE_HOURS', {
+        infer: true,
+      }),
+    });
   }
 }
