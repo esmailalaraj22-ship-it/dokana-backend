@@ -100,10 +100,15 @@ describe('RecoveryCatalogService', () => {
     await expect(catalog.classifyRetention(new Date('2025-09-15T00:00:00.000Z'))).resolves.toBe(
       'DAILY',
     );
-    await expect(catalog.cleanupExpired(new Date('2026-10-19T12:00:00.000Z'))).resolves.toEqual({
-      deleted: 2,
-      retained: 1,
-    });
+    const plan = await catalog.planRetention(new Date('2026-10-19T12:00:00.000Z'));
+    expect(plan.expired.map((manifest) => manifest.recoveryPointId)).toEqual([
+      '42000000-0000-4000-8000-000000000005',
+      '42000000-0000-4000-8000-000000000006',
+    ]);
+    expect(plan.retained.map((manifest) => manifest.recoveryPointId)).toEqual([
+      newest.recoveryPointId,
+    ]);
+    for (const manifest of plan.expired) await catalog.deleteRecoveryPoint(manifest);
     await expect(storage.headObject(newest.artifact.key)).resolves.not.toBeNull();
     await expect(storage.headObject(recoveryManifestKey(newest))).resolves.not.toBeNull();
   });

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { AppConfigService } from '../config/app-config.service';
 import type { NotificationCause } from '../notifications/notification.types';
+import { AttachmentRecoveryCatalogService } from './attachment-recovery-catalog.service';
 import { PITR_STATUS, type PitrStatusPort } from './pitr-status.port';
 import { RecoveryCatalogService } from './recovery-catalog.service';
 
@@ -18,6 +19,7 @@ export class RecoveryHealthService {
   constructor(
     private readonly config: AppConfigService,
     private readonly catalog: RecoveryCatalogService,
+    private readonly attachmentCatalog: AttachmentRecoveryCatalogService,
     @Inject(PITR_STATUS) private readonly pitr: PitrStatusPort,
   ) {}
 
@@ -35,9 +37,9 @@ export class RecoveryHealthService {
     }
 
     try {
-      const catalog = await this.catalog.inspectVerifiedCatalog();
+      const catalog = await this.attachmentCatalog.inspectCoherentCatalog();
       const lastVerified = catalog.latestVerified
-        ? new Date(catalog.latestVerified.verification.verifiedAt)
+        ? new Date(catalog.latestVerified.verifiedAt)
         : null;
       const maximumAgeMs = this.config.recovery.logicalMaximumAgeHours * 60 * 60 * 1_000;
       const logicalHealthy =

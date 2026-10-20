@@ -1,6 +1,7 @@
 import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Pool } from 'pg';
 
 import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-artifact-storage.port';
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
@@ -16,6 +17,7 @@ import { runIsolatedRestoreSmoke, type RestoreSmokeResult } from './restore-smok
 export async function withLatestVerifiedArtifact<T>(input: {
   storage: RecoveryArtifactStoragePort;
   toolchain: PostgresToolchain;
+  recoveryPointId?: string;
   work: (value: {
     artifactPath: string;
     manifest: NonNullable<
@@ -24,8 +26,9 @@ export async function withLatestVerifiedArtifact<T>(input: {
   }) => Promise<T>;
 }): Promise<T> {
   const catalog = new RecoveryCatalogService(input.storage);
-  const state = await catalog.inspectVerifiedCatalog();
-  const manifest = state.latestVerified;
+  const manifest = input.recoveryPointId
+    ? (await catalog.readVerifiedRecoveryPoint(input.recoveryPointId))?.manifest
+    : (await catalog.inspectVerifiedCatalog()).latestVerified;
   if (!manifest) throw new Error('No valid verified recovery point is available.');
   const directory = await mkdtemp(join(tmpdir(), 'dokana-recovery-verify-'));
   await chmod(directory, 0o700);
@@ -49,6 +52,7 @@ export async function withLatestVerifiedArtifact<T>(input: {
 export function verifyLatestStoredRecoveryPoint(input: {
   storage: RecoveryArtifactStoragePort;
   toolchain: PostgresToolchain;
+  recoveryPointId?: string;
 }): Promise<{ recoveryPointId: string; verifiedAt: string }> {
   return withLatestVerifiedArtifact({
     ...input,
@@ -64,11 +68,14 @@ export function restoreSmokeLatestRecoveryPoint(input: {
   storage: RecoveryArtifactStoragePort;
   toolchain: PostgresToolchain;
   adminConnectionString: string;
+  recoveryPointId?: string;
   expectedRepresentativeCounts?: Record<string, string>;
+  verifyRestoredState?: (pool: Pool) => Promise<void>;
 }): Promise<RestoreSmokeResult> {
   return withLatestVerifiedArtifact({
     storage: input.storage,
     toolchain: input.toolchain,
+    recoveryPointId: input.recoveryPointId,
     work: ({ artifactPath, manifest }) =>
       runIsolatedRestoreSmoke({
         adminConnectionString: input.adminConnectionString,
@@ -76,6 +83,7 @@ export function restoreSmokeLatestRecoveryPoint(input: {
         manifest,
         toolchain: input.toolchain,
         expectedRepresentativeCounts: input.expectedRepresentativeCounts,
+        verifyRestoredState: input.verifyRestoredState,
       }),
   });
 }

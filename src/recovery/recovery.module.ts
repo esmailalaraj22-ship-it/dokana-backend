@@ -4,6 +4,7 @@ import { AuthenticationModule } from '../auth/auth.module';
 import { AppConfigService } from '../config/app-config.service';
 import { BackupStatusController } from './backup-status.controller';
 import { BackupStatusService } from './backup-status.service';
+import { AttachmentRecoveryCatalogService } from './attachment-recovery-catalog.service';
 import { PITR_STATUS, UnverifiedPitrStatus } from './pitr-status.port';
 import { RECOVERY_ARTIFACT_STORAGE } from './recovery-artifact-storage.port';
 import { RecoveryCatalogService } from './recovery-catalog.service';
@@ -15,6 +16,7 @@ import { createRecoveryArtifactStorage } from './recovery-storage.factory';
   controllers: [BackupStatusController],
   providers: [
     BackupStatusService,
+    AttachmentRecoveryCatalogService,
     RecoveryCatalogService,
     RecoveryHealthService,
     { provide: PITR_STATUS, useClass: UnverifiedPitrStatus },
@@ -25,6 +27,6 @@ import { createRecoveryArtifactStorage } from './recovery-storage.factory';
         createRecoveryArtifactStorage(config.recovery.storage),
     },
   ],
-  exports: [RecoveryCatalogService, RecoveryHealthService],
+  exports: [AttachmentRecoveryCatalogService, RecoveryCatalogService, RecoveryHealthService],
 })
 export class RecoveryModule {}

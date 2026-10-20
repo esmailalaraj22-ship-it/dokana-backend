@@ -37,6 +37,7 @@
     "db:check:auth": "tsx scripts/check-database.ts auth",
     "db:check:migration": "tsx scripts/check-database.ts migration",
     "recovery:create": "tsx scripts/recovery.ts create",
+    "recovery:protect-attachments": "tsx scripts/recovery.ts protect-attachments",
     "recovery:verify": "tsx scripts/recovery.ts verify",
     "recovery:health": "tsx scripts/recovery.ts health",
     "recovery:cleanup": "tsx scripts/recovery.ts cleanup",

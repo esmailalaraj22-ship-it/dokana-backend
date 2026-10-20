@@ -211,6 +211,16 @@ export class AppConfigService {
       RECOVERY_LOGICAL_MAX_AGE_HOURS: this.config.get('RECOVERY_LOGICAL_MAX_AGE_HOURS', {
         infer: true,
       }),
+      RECOVERY_ATTACHMENT_BATCH_SIZE: this.config.get('RECOVERY_ATTACHMENT_BATCH_SIZE', {
+        infer: true,
+      }),
+      RECOVERY_ATTACHMENT_CONCURRENCY: this.config.get('RECOVERY_ATTACHMENT_CONCURRENCY', {
+        infer: true,
+      }),
+      RECOVERY_ATTACHMENT_ORPHAN_GRACE_HOURS: this.config.get(
+        'RECOVERY_ATTACHMENT_ORPHAN_GRACE_HOURS',
+        { infer: true },
+      ),
     });
   }
 }

@@ -27,10 +27,12 @@ export async function createCustomFormatDump(
   toolchain: PostgresToolchain,
   connectionString: string,
   targetPath: string,
+  snapshotId?: string,
 ): Promise<void> {
+  const snapshotArguments = snapshotId ? ['--snapshot', snapshotId] : [];
   await runTool(
     toolchain.pgDump,
-    ['--format=custom', '--file', targetPath, '--no-password'],
+    ['--format=custom', '--file', targetPath, '--no-password', ...snapshotArguments],
     postgresEnvironment(connectionString),
   );
 }

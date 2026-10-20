@@ -26,6 +26,9 @@ export interface RecoveryRuntimeConfig {
   sourceRevision: string | null;
   storage: RecoveryStorageConfig;
   logicalMaximumAgeHours: number;
+  attachmentBatchSize: number;
+  attachmentConcurrency: number;
+  attachmentOrphanGraceHours: number;
 }
 
 export type RecoveryEnvironment = Pick<
@@ -44,6 +47,9 @@ export type RecoveryEnvironment = Pick<
   | 'RECOVERY_S3_KMS_KEY_ID'
   | 'RECOVERY_STORAGE_TIMEOUT_MS'
   | 'RECOVERY_LOGICAL_MAX_AGE_HOURS'
+  | 'RECOVERY_ATTACHMENT_BATCH_SIZE'
+  | 'RECOVERY_ATTACHMENT_CONCURRENCY'
+  | 'RECOVERY_ATTACHMENT_ORPHAN_GRACE_HOURS'
 >;
 
 export function recoveryRuntimeConfigFromEnvironment(
@@ -83,5 +89,8 @@ export function recoveryRuntimeConfigFromEnvironment(
     sourceRevision: environment.RECOVERY_SOURCE_REVISION ?? null,
     storage,
     logicalMaximumAgeHours: environment.RECOVERY_LOGICAL_MAX_AGE_HOURS,
+    attachmentBatchSize: environment.RECOVERY_ATTACHMENT_BATCH_SIZE,
+    attachmentConcurrency: environment.RECOVERY_ATTACHMENT_CONCURRENCY,
+    attachmentOrphanGraceHours: environment.RECOVERY_ATTACHMENT_ORPHAN_GRACE_HOURS,
   };
 }

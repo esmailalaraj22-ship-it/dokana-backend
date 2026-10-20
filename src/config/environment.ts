@@ -256,6 +256,9 @@ export const environmentSchema = z
     RECOVERY_S3_KMS_KEY_ID: optionalNonEmptyStringSchema,
     RECOVERY_STORAGE_TIMEOUT_MS: z.coerce.number().int().min(100).max(600_000).default(30_000),
     RECOVERY_LOGICAL_MAX_AGE_HOURS: z.coerce.number().int().min(24).max(72).default(36),
+    RECOVERY_ATTACHMENT_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+    RECOVERY_ATTACHMENT_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),
+    RECOVERY_ATTACHMENT_ORPHAN_GRACE_HOURS: z.coerce.number().int().min(24).max(720).default(168),
     HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(2_000),
   })
   .superRefine((environment, context) => {

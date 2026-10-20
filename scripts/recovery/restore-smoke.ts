@@ -22,6 +22,7 @@ export async function runIsolatedRestoreSmoke(input: {
   manifest: VerifiedRecoveryManifest;
   toolchain: PostgresToolchain;
   expectedRepresentativeCounts?: Record<string, string>;
+  verifyRestoredState?: (pool: Pool) => Promise<void>;
 }): Promise<RestoreSmokeResult> {
   assertSafeLocalAdminConnection(input.adminConnectionString);
   const databaseName = `dokana_recovery_smoke_${randomUUID().replaceAll('-', '')}`;
@@ -120,6 +121,7 @@ export async function runIsolatedRestoreSmoke(input: {
       if (securityState.securityDefinerFunctions <= 0 || securityState.triggers <= 0) {
         throw new Error('Isolated restore is missing required database execution authority.');
       }
+      await input.verifyRestoredState?.(targetPool);
       return {
         databaseName,
         schemas: schemaNames,

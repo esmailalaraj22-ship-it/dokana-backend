@@ -1,4 +1,6 @@
 import type { AppConfigService } from '../config/app-config.service';
+import type { VerifiedAttachmentRecoveryManifest } from './attachment-recovery-manifest';
+import type { AttachmentRecoveryCatalogService } from './attachment-recovery-catalog.service';
 import type { PitrStatusPort } from './pitr-status.port';
 import type { RecoveryCatalogService } from './recovery-catalog.service';
 import { RecoveryHealthService } from './recovery-health.service';
@@ -9,16 +11,18 @@ describe('RecoveryHealthService', () => {
   const pitr = {
     readStatus: jest.fn(),
   } as jest.Mocked<PitrStatusPort>;
-  const catalog = {
+  const databaseCatalog = {
     configured: true,
-    inspectVerifiedCatalog: jest.fn(),
-  } as unknown as jest.Mocked<Pick<RecoveryCatalogService, 'inspectVerifiedCatalog'>> & {
+  } as unknown as RecoveryCatalogService & {
     configured: boolean;
   };
+  const attachmentCatalog = {
+    inspectCoherentCatalog: jest.fn(),
+  } as unknown as jest.Mocked<Pick<AttachmentRecoveryCatalogService, 'inspectCoherentCatalog'>>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    catalog.configured = true;
+    databaseCatalog.configured = true;
     pitr.readStatus.mockResolvedValue({
       status: 'unverified',
       retentionDays: null,
@@ -27,7 +31,7 @@ describe('RecoveryHealthService', () => {
   });
 
   it('keeps recent verified logical protection healthy without claiming PITR', async () => {
-    catalog.inspectVerifiedCatalog.mockResolvedValue({
+    attachmentCatalog.inspectCoherentCatalog.mockResolvedValue({
       latestVerified: manifest('2026-10-19T00:00:00.000Z'),
       verifiedCount: 1,
       invalidCount: 0,
@@ -46,7 +50,7 @@ describe('RecoveryHealthService', () => {
   });
 
   it('creates one stable Store-scoped cause only after verified protection is lost', async () => {
-    catalog.inspectVerifiedCatalog.mockResolvedValue({
+    attachmentCatalog.inspectCoherentCatalog.mockResolvedValue({
       latestVerified: manifest('2026-10-15T00:00:00.000Z'),
       verifiedCount: 1,
       invalidCount: 0,
@@ -63,7 +67,7 @@ describe('RecoveryHealthService', () => {
   });
 
   it('does not create false development alerts for an unconfigured PITR environment', async () => {
-    catalog.configured = false;
+    databaseCatalog.configured = false;
     const service = createService('development');
     await expect(service.notificationCause(storeId)).resolves.toBeNull();
     await expect(service.evaluate()).resolves.toMatchObject({
@@ -83,37 +87,43 @@ describe('RecoveryHealthService', () => {
           sourceRevision: null,
           storage: { driver: 'unconfigured' },
           logicalMaximumAgeHours: 36,
+          attachmentBatchSize: 100,
+          attachmentConcurrency: 4,
+          attachmentOrphanGraceHours: 168,
         },
       } as AppConfigService,
-      catalog as unknown as RecoveryCatalogService,
+      databaseCatalog,
+      attachmentCatalog as unknown as AttachmentRecoveryCatalogService,
       pitr,
     );
   }
 });
 
-function manifest(verifiedAt: string) {
+function manifest(verifiedAt: string): VerifiedAttachmentRecoveryManifest {
   return {
     manifestVersion: '1' as const,
     recoveryPointId: '43000000-0000-4000-8000-000000000010',
-    state: 'VERIFIED' as const,
-    createdAt: verifiedAt,
-    completedAt: verifiedAt,
-    environmentId: 'test',
-    sourceRevision: null,
-    backupType: 'postgresql-custom' as const,
-    artifact: {
-      key: 'recovery/v1/database/43000000-0000-4000-8000-000000000010.dump',
-      sizeBytes: 100,
+    databaseManifest: {
+      key: 'recovery/v1/manifests/verified/43000000-0000-4000-8000-000000000010.json',
       sha256: 'a'.repeat(64),
     },
-    postgres: { serverVersion: '18', toolVersion: 'pg_dump 18' },
-    migrations: {
-      appliedCount: 32,
-      latestFilename: '0032_attachment_lifecycle_audit.sql',
-      checksumStatus: 'PASS' as const,
-      checksumAggregateSha256: 'b'.repeat(64),
+    databaseArtifactSha256: 'b'.repeat(64),
+    snapshotInventory: {
+      method: 'SHARED_POSTGRESQL_SNAPSHOT',
+      key: 'recovery/v1/attachments/inventory/43000000-0000-4000-8000-000000000010.ndjson',
+      sizeBytes: 100,
+      sha256: 'c'.repeat(64),
     },
-    verification: { status: 'VERIFIED' as const, structuralCheck: 'PASS' as const, verifiedAt },
-    retentionClass: 'DAILY' as const,
+    createdAt: verifiedAt,
+    verifiedAt,
+    digestAlgorithm: 'SHA-256',
+    verificationStatus: 'VERIFIED',
+    attachmentEntryCount: 0,
+    totalProtectedBytes: '0',
+    entries: {
+      key: 'recovery/v1/attachments/entries/43000000-0000-4000-8000-000000000010.ndjson',
+      sizeBytes: 100,
+      sha256: 'd'.repeat(64),
+    },
   };
 }

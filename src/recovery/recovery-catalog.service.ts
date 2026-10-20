@@ -14,18 +14,28 @@ import {
   recoveryManifestKey,
   serializeRecoveryManifest,
   sha256,
+  verifiedRecoveryManifestKey,
   type RecoveryManifest,
   type VerifiedRecoveryManifest,
 } from './recovery-manifest';
 
 const VERIFIED_MANIFEST_PREFIX = `${RECOVERY_CATALOG_PREFIX}/manifests/verified/`;
 const CATALOG_SCAN_LIMIT = 1_000;
-const RETENTION_DELETE_LIMIT = 25;
 
 export interface RecoveryCatalogState {
   latestVerified: VerifiedRecoveryManifest | null;
   verifiedCount: number;
   invalidCount: number;
+}
+
+export interface VerifiedRecoveryPointCatalogEntry {
+  manifest: VerifiedRecoveryManifest;
+  manifestSha256: string;
+}
+
+export interface RecoveryRetentionPlan {
+  retained: VerifiedRecoveryManifest[];
+  expired: VerifiedRecoveryManifest[];
 }
 
 @Injectable()
@@ -66,6 +76,39 @@ export class RecoveryCatalogService {
       verifiedCount: valid.length,
       invalidCount,
     };
+  }
+
+  async readVerifiedRecoveryPoint(
+    recoveryPointId: string,
+  ): Promise<VerifiedRecoveryPointCatalogEntry | null> {
+    const key = verifiedRecoveryManifestKey(recoveryPointId);
+    try {
+      const body = await this.storage.readBuffer(key, RECOVERY_MANIFEST_MAXIMUM_BYTES);
+      const metadata = await this.storage.headObject(key);
+      if (!body || metadata?.checksumSha256 !== sha256(body) || !metadata.encryption) {
+        return null;
+      }
+      const manifest = parseRecoveryManifest(body);
+      if (
+        manifest.state !== 'VERIFIED' ||
+        manifest.recoveryPointId !== recoveryPointId ||
+        !(await this.artifactMatches(manifest))
+      ) {
+        return null;
+      }
+      return { manifest, manifestSha256: sha256(body) };
+    } catch {
+      return null;
+    }
+  }
+
+  async listVerifiedRecoveryPoints(): Promise<VerifiedRecoveryManifest[]> {
+    const manifests = await this.readVerifiedManifests();
+    const valid: VerifiedRecoveryManifest[] = [];
+    for (const manifest of manifests) {
+      if (await this.artifactMatches(manifest)) valid.push(manifest);
+    }
+    return valid.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   async classifyRetention(createdAt: Date): Promise<'DAILY' | 'MONTHLY'> {
@@ -116,23 +159,27 @@ export class RecoveryCatalogService {
     await this.storage.deleteObject(recoveryJobLockKey());
   }
 
-  async cleanupExpired(now: Date): Promise<{ deleted: number; retained: number }> {
-    const state = await this.inspectVerifiedCatalog();
-    const manifests = await this.readVerifiedManifests();
-    const valid = manifests
-      .filter((manifest) => manifest.recoveryPointId !== state.latestVerified?.recoveryPointId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    const deletable = valid
-      .filter((manifest) => isRetentionExpired(manifest, now))
-      .slice(0, RETENTION_DELETE_LIMIT);
-    let deleted = 0;
-    for (const manifest of deletable) {
-      if (!(await this.artifactMatches(manifest))) continue;
-      await this.storage.deleteObject(recoveryManifestKey(manifest));
-      await this.storage.deleteObject(manifest.artifact.key);
-      deleted += 1;
+  async planRetention(now: Date): Promise<RecoveryRetentionPlan> {
+    const manifests = await this.listVerifiedRecoveryPoints();
+    const latest = manifests.at(-1)?.recoveryPointId ?? null;
+    const retained: VerifiedRecoveryManifest[] = [];
+    const expired: VerifiedRecoveryManifest[] = [];
+    for (const manifest of manifests) {
+      if (manifest.recoveryPointId !== latest && isRetentionExpired(manifest, now)) {
+        expired.push(manifest);
+      } else {
+        retained.push(manifest);
+      }
     }
-    return { deleted, retained: manifests.length - deleted };
+    return { retained, expired };
+  }
+
+  async deleteRecoveryPoint(manifest: VerifiedRecoveryManifest): Promise<void> {
+    if (!(await this.artifactMatches(manifest))) {
+      throw new Error('Recovery point cannot be deleted because its artifact is invalid.');
+    }
+    await this.storage.deleteObject(recoveryManifestKey(manifest));
+    await this.storage.deleteObject(manifest.artifact.key);
   }
 
   private async readVerifiedManifests(): Promise<VerifiedRecoveryManifest[]> {

@@ -40,6 +40,8 @@ export const failedRecoveryManifestSchema = manifestBaseSchema.extend({
     'BACKUP_INTEGRITY_FAILED',
     'BACKUP_VERIFICATION_RESTORE_FAILED',
     'BACKUP_DESTINATION_UNAVAILABLE',
+    'ATTACHMENT_INVENTORY_CAPTURE_FAILED',
+    'ATTACHMENT_INVENTORY_UPLOAD_FAILED',
   ]),
 });
 
@@ -86,6 +88,10 @@ export function recoveryArtifactKey(recoveryPointId: string): string {
 
 export function recoveryManifestKey(manifest: RecoveryManifest): string {
   return `${RECOVERY_CATALOG_PREFIX}/manifests/${manifest.state.toLowerCase()}/${manifest.recoveryPointId}.json`;
+}
+
+export function verifiedRecoveryManifestKey(recoveryPointId: string): string {
+  return `${RECOVERY_CATALOG_PREFIX}/manifests/verified/${assertRecoveryPointId(recoveryPointId)}.json`;
 }
 
 export function recoveryJobLockKey(): string {

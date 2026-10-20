@@ -7,6 +7,10 @@ import type { RecoveryRuntimeConfig } from '../../src/recovery/recovery-config';
 import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-artifact-storage.port';
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
 import {
+  ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES,
+  attachmentRecoveryInventoryKey,
+} from '../../src/recovery/attachment-recovery-manifest';
+import {
   RECOVERY_ARTIFACT_MAXIMUM_BYTES,
   recoveryArtifactKey,
   type FailedRecoveryManifest,
@@ -14,11 +18,11 @@ import {
 } from '../../src/recovery/recovery-manifest';
 import {
   assertCompleteDokanaArchiveList,
-  createCustomFormatDump,
   listCustomFormatDump,
   readPgDumpVersion,
   type PostgresToolchain,
 } from './postgres-tools';
+import { createDumpWithAttachmentSnapshot } from './attachment-recovery-inventory';
 import {
   equalMigrationState,
   readVerifiedMigrationState,
@@ -57,7 +61,17 @@ export async function createVerifiedRecoveryPoint(
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'dokana-recovery-'));
     await chmod(temporaryDirectory, 0o700);
     const localArtifact = join(temporaryDirectory, `${recoveryPointId}.dump`);
-    await createCustomFormatDump(input.toolchain, input.connectionString, localArtifact);
+    const localInventory = join(temporaryDirectory, `${recoveryPointId}.attachments.ndjson`);
+    phase = 'ATTACHMENT_INVENTORY_CAPTURE_FAILED';
+    await createDumpWithAttachmentSnapshot({
+      connectionString: input.connectionString,
+      toolchain: input.toolchain,
+      dumpPath: localArtifact,
+      inventoryPath: localInventory,
+      recoveryPointId,
+      createdAt,
+      batchSize: input.config.attachmentBatchSize,
+    });
     phase = 'BACKUP_ARTIFACT_INVALID';
     const details = await stat(localArtifact);
     if (!details.isFile() || details.size <= 0 || details.size > RECOVERY_ARTIFACT_MAXIMUM_BYTES) {
@@ -94,6 +108,38 @@ export async function createVerifiedRecoveryPoint(
     assertCompleteDokanaArchiveList(
       await listCustomFormatDump(input.toolchain, downloadedArtifact),
     );
+
+    phase = 'ATTACHMENT_INVENTORY_UPLOAD_FAILED';
+    const inventoryDetails = await stat(localInventory);
+    if (
+      !inventoryDetails.isFile() ||
+      inventoryDetails.size <= 0 ||
+      inventoryDetails.size > ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES
+    ) {
+      throw new Error('Attachment recovery inventory has an invalid size.');
+    }
+    const inventoryDigest = await sha256File(localInventory);
+    const inventoryKey = attachmentRecoveryInventoryKey(recoveryPointId);
+    await input.storage.putFile({
+      key: inventoryKey,
+      sourcePath: localInventory,
+      contentType: 'application/x-ndjson',
+      contentLength: inventoryDetails.size,
+      checksumSha256: inventoryDigest,
+    });
+    const downloadedInventory = join(
+      temporaryDirectory,
+      `${recoveryPointId}.stored.attachments.ndjson`,
+    );
+    const inventoryDownloaded = await input.storage.downloadToFile(
+      inventoryKey,
+      downloadedInventory,
+      ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES,
+    );
+    if (!inventoryDownloaded || (await sha256File(downloadedInventory)) !== inventoryDigest) {
+      throw new Error('Stored attachment recovery inventory failed digest verification.');
+    }
+
     const retentionClass = await catalog.classifyRetention(createdAt);
     const verifiedAt = new Date();
     const manifest: VerifiedRecoveryManifest = {
