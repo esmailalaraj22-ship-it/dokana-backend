@@ -54,6 +54,7 @@ export class OfflineLicenseService {
 
     try {
       const record = await this.database.withTenantTransaction(context, async (transaction) => {
+        await this.database.assertPlatformWriteAuthority(transaction);
         const prepared = await this.repository.prepare(transaction, context, input);
         if (!prepared.requiresSignature) return prepared;
         const signed = this.crypto.sign(prepared.signedPayload);

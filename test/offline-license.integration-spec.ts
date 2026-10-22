@@ -117,7 +117,13 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
   const subscriptionIds = new Map<string, string>();
 
   function directContext(storeId: string, deviceId: string): TenantTransactionContext {
-    return { storeId, userId: fixtures.users.owner, deviceId, requestId: randomUUID() };
+    return {
+      storeId,
+      userId: fixtures.users.owner,
+      deviceId,
+      requestId: randomUUID(),
+      recoveryGenerationId: undefined,
+    };
   }
 
   function principal(context: TenantTransactionContext): AuthenticatedPrincipal {
@@ -133,6 +139,7 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       deviceId: context.deviceId,
       sessionId: randomUUID(),
       sessionExpiresAt: new Date(Date.now() + 60_000),
+      recoveryGenerationId: context.recoveryGenerationId ?? '44a15e52-f6d1-41c7-b282-3c5576678dc1',
     };
   }
 

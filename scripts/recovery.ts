@@ -17,13 +17,26 @@ import {
 import { cleanupAttachmentRecovery } from './recovery/attachment-recovery-retention';
 import { verifyIsolatedAttachmentRecovery } from './recovery/attachment-recovery-smoke';
 import { createVerifiedRecoveryPoint } from './recovery/recovery-point-job';
+import { RecoveryExecutionService } from './recovery/recovery-execution';
 import {
   restoreSmokeLatestRecoveryPoint,
   verifyLatestStoredRecoveryPoint,
 } from './recovery/stored-recovery-verification';
 
 type RecoveryCommand =
-  'create' | 'protect-attachments' | 'verify' | 'health' | 'cleanup' | 'restore-smoke';
+  | 'create'
+  | 'protect-attachments'
+  | 'verify'
+  | 'health'
+  | 'cleanup'
+  | 'restore-smoke'
+  | 'prepare'
+  | 'restore-database'
+  | 'restore-attachments'
+  | 'verify-attempt'
+  | 'approve'
+  | 'activate'
+  | 'abort';
 
 loadEnvironment({ path: resolve(process.cwd(), '.env') });
 
@@ -69,6 +82,45 @@ async function main(): Promise<void> {
   }
 
   const toolchain = await resolvePostgresToolchain(environment.RECOVERY_POSTGRES_BIN_DIR);
+  if (
+    command === 'prepare' ||
+    command === 'restore-database' ||
+    command === 'restore-attachments' ||
+    command === 'verify-attempt' ||
+    command === 'approve' ||
+    command === 'activate' ||
+    command === 'abort'
+  ) {
+    const execution = new RecoveryExecutionService({
+      storage,
+      toolchain,
+      adminConnectionString: requiredAdminUrl(environment),
+      migrationConnectionString: requiredMigrationUrl(environment),
+      runtimeConnectionString: environment.DATABASE_URL,
+      applicationEnvironment: environment.APP_ENV,
+      environmentId: environment.RECOVERY_ENVIRONMENT_ID,
+    });
+    const identifier = requiredRecoveryIdentifier(process.argv[3]);
+    const result =
+      command === 'prepare'
+        ? await execution.prepare(identifier)
+        : command === 'restore-database'
+          ? await execution.restoreDatabase(identifier)
+          : command === 'restore-attachments'
+            ? await execution.restoreAttachments(identifier)
+            : command === 'verify-attempt'
+              ? await execution.verify(identifier)
+              : command === 'approve'
+                ? await execution.approve(identifier, requiredRecoveryIdentifier(process.argv[4]))
+                : command === 'activate'
+                  ? await execution.activate(
+                      identifier,
+                      requiredRecoveryIdentifier(process.argv[4]),
+                    )
+                  : await execution.abortPrepared(identifier);
+    writeResult({ command, ...result });
+    return;
+  }
   if (command === 'create') {
     const manifest = await createVerifiedRecoveryPoint({
       connectionString: recoveryDatabaseUrl(environment),
@@ -153,17 +205,32 @@ function parseCommand(value: string | undefined): RecoveryCommand {
     value === 'verify' ||
     value === 'health' ||
     value === 'cleanup' ||
-    value === 'restore-smoke'
+    value === 'restore-smoke' ||
+    value === 'prepare' ||
+    value === 'restore-database' ||
+    value === 'restore-attachments' ||
+    value === 'verify-attempt' ||
+    value === 'approve' ||
+    value === 'activate' ||
+    value === 'abort'
   ) {
     return value;
   }
-  throw new Error(
-    'Expected recovery command: create, protect-attachments, verify, health, cleanup, or restore-smoke.',
-  );
+  throw new Error('Expected a supported recovery command.');
 }
 
 function requiredRecoveryPointId(value: string | undefined): string {
   if (!value) throw new Error('A recoveryPointId argument is required.');
+  return value;
+}
+
+function requiredRecoveryIdentifier(value: string | undefined): string {
+  if (
+    !value ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ) {
+    throw new Error('A valid recovery identifier argument is required.');
+  }
   return value;
 }
 
@@ -180,6 +247,13 @@ function requiredAdminUrl(environment: Environment): string {
     throw new Error('Restore-smoke requires a local non-production administrative URL.');
   }
   return environment.DATABASE_ADMIN_URL;
+}
+
+function requiredMigrationUrl(environment: Environment): string {
+  if (!environment.DATABASE_MIGRATION_URL || environment.APP_ENV === 'production') {
+    throw new Error('Recovery execution requires the local migration connection.');
+  }
+  return environment.DATABASE_MIGRATION_URL;
 }
 
 function writeResult(value: Record<string, unknown>): void {

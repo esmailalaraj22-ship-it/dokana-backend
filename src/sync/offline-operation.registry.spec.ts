@@ -212,11 +212,13 @@ const accountingCoverage = {
   ],
 } as const satisfies Record<string, readonly OfflineOperationType[]>;
 
+const recoveryGenerationId = randomUUID();
 const context: TenantTransactionContext = {
   storeId: randomUUID(),
   userId: randomUUID(),
   deviceId: randomUUID(),
   requestId: randomUUID(),
+  recoveryGenerationId,
 };
 const principal: SyncAuthenticatedPrincipal = {
   userId: context.userId,
@@ -230,6 +232,7 @@ const principal: SyncAuthenticatedPrincipal = {
   deviceId: context.deviceId,
   sessionId: randomUUID(),
   sessionExpiresAt: new Date('2026-01-10T00:00:00.000Z'),
+  recoveryGenerationId,
 };
 
 function envelope(operationType: OfflineOperationType): OfflineOperationEnvelopeV1 {
@@ -241,6 +244,7 @@ function envelope(operationType: OfflineOperationType): OfflineOperationEnvelope
     operationType,
     storeId: context.storeId,
     deviceId: context.deviceId,
+    recoveryGenerationId,
     aggregateId: randomUUID(),
     expectedVersion: '1',
     clientRecordedAt: '2026-01-02T00:00:00.000Z',

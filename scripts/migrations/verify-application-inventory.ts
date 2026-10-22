@@ -23,6 +23,8 @@ import {
   platformAdminStoreLifecycleRoutines,
   platformAuthorityFoundationRoutines,
   platformAuthorityFoundationTables,
+  platformRecoveryFoundationRoutines,
+  platformRecoveryFoundationTables,
   sanitizedOwnerAuditRoutines,
   station2ContextFunctions,
   subscriptionLifecycleProvisioningRoutines,
@@ -83,6 +85,7 @@ export async function verifyApplicationInventory(
   let notificationTouchApplied = false;
   let sanitizedOwnerAuditApplied = false;
   let attachmentLifecycleAuditApplied = false;
+  let platformRecoveryFoundationApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -277,6 +280,18 @@ export async function verifyApplicationInventory(
       }
       attachmentLifecycleAuditApplied = true;
     }
+
+    const platformRecoveryFoundation = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0033_platform_recovery_generation_fencing.sql'`,
+    );
+    if (platformRecoveryFoundation.rows[0]) {
+      const file = await readMigrationFile('0033_platform_recovery_generation_fencing.sql');
+      if (platformRecoveryFoundation.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Platform recovery foundation migration checksum mismatch.');
+      }
+      platformRecoveryFoundationApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -326,6 +341,7 @@ export async function verifyApplicationInventory(
     ...(offlineOperationPushApplied ? offlineOperationPushTables : []),
     ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryTables : []),
     ...(notificationUserStateApplied ? notificationUserStateTables : []),
+    ...(platformRecoveryFoundationApplied ? platformRecoveryFoundationTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -394,6 +410,7 @@ export async function verifyApplicationInventory(
       ...(notificationTouchApplied ? notificationTouchRoutines : []),
       ...(sanitizedOwnerAuditApplied ? sanitizedOwnerAuditRoutines : []),
       ...(attachmentLifecycleAuditApplied ? attachmentLifecycleAuditRoutines : []),
+      ...(platformRecoveryFoundationApplied ? platformRecoveryFoundationRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

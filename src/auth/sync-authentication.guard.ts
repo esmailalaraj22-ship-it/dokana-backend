@@ -31,7 +31,9 @@ export class SyncAuthenticationGuard implements CanActivate {
         claims.storeId,
         claims.deviceId,
       );
-      if (!principal) throw new Error('Sync session validation failed.');
+      if (!principal || !isUuid(principal.recoveryGenerationId)) {
+        throw new Error('Sync session validation failed.');
+      }
 
       const requestId = request.id;
       if (typeof requestId !== 'string' || !isUuid(requestId)) {
@@ -45,6 +47,7 @@ export class SyncAuthenticationGuard implements CanActivate {
         userId: principal.userId,
         deviceId: principal.deviceId,
         requestId,
+        recoveryGenerationId: principal.recoveryGenerationId,
       };
       return true;
     } catch {

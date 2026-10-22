@@ -110,7 +110,8 @@ export class AuthenticationService {
       !rotation.membershipVersion ||
       !rotation.deviceId ||
       !rotation.sessionId ||
-      !rotation.sessionExpiresAt
+      !rotation.sessionExpiresAt ||
+      !rotation.recoveryGenerationId
     ) {
       throw new UnauthorizedException(authenticationFailure);
     }
@@ -127,6 +128,7 @@ export class AuthenticationService {
       deviceId: rotation.deviceId,
       sessionId: rotation.sessionId,
       sessionExpiresAt: rotation.sessionExpiresAt,
+      recoveryGenerationId: rotation.recoveryGenerationId,
     };
     const accessToken = await this.tokens.issueAccessToken(principal, newAccessTokenJti);
 
@@ -190,6 +192,7 @@ export class AuthenticationService {
       },
       deviceId: principal.deviceId,
       sessionId: principal.sessionId,
+      recoveryGenerationId: principal.recoveryGenerationId,
     };
   }
 }

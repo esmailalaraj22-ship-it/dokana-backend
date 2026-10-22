@@ -35,7 +35,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0028_offline_operation_recovery_authority.sql';
+const migrationFilename = '0033_platform_recovery_generation_fencing.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
 
@@ -176,6 +176,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       operationType: input.operationType,
       storeId: fixture.storeId,
       deviceId: fixture.deviceId,
+      recoveryGenerationId: syncAuthentication.recoveryGenerationId,
       ...(input.aggregateId ? { aggregateId: input.aggregateId } : {}),
       ...(input.expectedVersion ? { expectedVersion: input.expectedVersion } : {}),
       clientRecordedAt: occurredAt,
@@ -320,7 +321,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
 
   function issueCursor(sequence: string): string {
     if (!app) throw new Error('S19 application is unavailable.');
-    return app.get(SyncCursorService).issue(fixture.storeId, sequence);
+    return app.get(SyncCursorService).issue(fixture.storeId, login.recoveryGenerationId, sequence);
   }
 
   async function pull(cursor: string, limit = 100): Promise<PullResponse> {
@@ -1641,6 +1642,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       status: 'ready',
     });
     expect(basePosition.storeId).toBe(fixture.storeId);
+    expect(basePosition.recoveryGenerationId).toBe(manifest.recoveryGenerationId);
 
     const storesDataset = manifest.datasets.find((dataset) => dataset.id === 'stores');
     if (storesDataset?.pageCount !== 1) {

@@ -64,11 +64,24 @@ export class OfflineEntitlementHandoffService {
       return { disposition: 'reject', reason: 'outside_license_window' };
     }
 
-    const record = await this.database.withTenantTransaction(context, (transaction) =>
-      this.repository.readForValidation(transaction, context, envelope.licenseId),
-    );
+    const validation = await this.database.withTenantTransaction(context, async (transaction) => {
+      const authority = await this.database.capturePlatformRecoveryAuthority(transaction);
+      const record = await this.repository.readForValidation(
+        transaction,
+        context,
+        envelope.licenseId,
+      );
+      return { authority, record };
+    });
+    const { authority, record } = validation;
     if (!record) return { disposition: 'reject', reason: 'unknown_license' };
     if (record.revokedAt) return { disposition: 'reject', reason: 'revoked_license' };
+    if (
+      authority.authorityNotBefore !== null &&
+      Date.parse(payload.issuedAt) < authority.authorityNotBefore.getTime()
+    ) {
+      return { disposition: 'reject', reason: 'invalid_license' };
+    }
     if (
       record.deviceId !== envelope.deviceId ||
       record.subscriptionId !== envelope.subscriptionId ||

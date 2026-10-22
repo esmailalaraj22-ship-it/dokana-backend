@@ -16,6 +16,7 @@ import { isUuid } from '../common/logging/request-id';
 import { DATABASE_POOL, DRIZZLE_DATABASE } from './database.constants';
 import type {
   DatabaseClient,
+  PlatformRecoveryAuthority,
   DatabaseReadiness,
   DatabaseTransaction,
   OfflineOperationTransactionIdentity,
@@ -215,6 +216,7 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   ): Promise<void> {
     let result;
     try {
+      await this.assertPlatformWriteAuthority(transaction);
       const scope = this.offlineOperationScope.getStore();
       if (scope) {
         if (scope.context.storeId !== storeId) {
@@ -242,6 +244,55 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     if (authority?.writeEligible !== true) {
       this.throwBusinessWriteNotAllowed();
     }
+  }
+
+  async assertPlatformWriteAuthority(transaction: DatabaseTransaction): Promise<void> {
+    const result = await transaction.execute(sql`
+      select recovery_generation_id as "recoveryGenerationId"
+      from ledger.assert_platform_write_authority_v1(
+        nullif(current_setting('app.recovery_generation_id', true), '')::uuid
+      )
+    `);
+    const row = result.rows[0] as { recoveryGenerationId?: unknown } | undefined;
+    if (!row || typeof row.recoveryGenerationId !== 'string' || !isUuid(row.recoveryGenerationId)) {
+      throw new Error('Platform recovery write authority is unavailable.');
+    }
+  }
+
+  async capturePlatformRecoveryAuthority(
+    transaction: DatabaseTransaction,
+  ): Promise<PlatformRecoveryAuthority> {
+    const result = await transaction.execute(sql`
+      select
+        recovery_generation_id as "recoveryGenerationId",
+        authority_not_before as "authorityNotBefore"
+      from sync.capture_platform_recovery_authority_v1()
+    `);
+    const row = result.rows[0] as PlatformRecoveryAuthority | undefined;
+    if (!row || !isUuid(row.recoveryGenerationId)) {
+      throw new Error('Platform recovery authority is unavailable.');
+    }
+    return row;
+  }
+
+  async assertSyncRecoveryAuthority(
+    transaction: DatabaseTransaction,
+    recoveryGenerationId: string,
+  ): Promise<PlatformRecoveryAuthority> {
+    if (!isUuid(recoveryGenerationId)) {
+      throw new TypeError('Recovery generation identifier is invalid.');
+    }
+    const result = await transaction.execute(sql`
+      select
+        recovery_generation_id as "recoveryGenerationId",
+        authority_not_before as "authorityNotBefore"
+      from sync.assert_platform_recovery_authority_v1(${recoveryGenerationId}::uuid)
+    `);
+    const row = result.rows[0] as PlatformRecoveryAuthority | undefined;
+    if (!row || !isUuid(row.recoveryGenerationId)) {
+      throw new Error('Platform recovery authority is unavailable.');
+    }
+    return row;
   }
 
   private throwBusinessWriteNotAllowed(): never {
@@ -373,7 +424,10 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   private assertTenantContext(context: TenantTransactionContext): void {
     const values = [context.storeId, context.userId, context.deviceId, context.requestId];
 
-    if (!values.every(isUuid)) {
+    if (
+      !values.every(isUuid) ||
+      (context.recoveryGenerationId !== undefined && !isUuid(context.recoveryGenerationId))
+    ) {
       throw new TypeError('Tenant transaction context values must be UUIDs.');
     }
   }
@@ -386,7 +440,8 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
       expected.storeId !== actual.storeId ||
       expected.userId !== actual.userId ||
       expected.deviceId !== actual.deviceId ||
-      expected.requestId !== actual.requestId
+      expected.requestId !== actual.requestId ||
+      expected.recoveryGenerationId !== actual.recoveryGenerationId
     ) {
       throw new TypeError('Nested tenant transaction context does not match the active context.');
     }
@@ -400,5 +455,8 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
     await transaction.execute(sql`select set_config('app.user_id', ${context.userId}, true)`);
     await transaction.execute(sql`select set_config('app.device_id', ${context.deviceId}, true)`);
     await transaction.execute(sql`select set_config('app.request_id', ${context.requestId}, true)`);
+    await transaction.execute(
+      sql`select set_config('app.recovery_generation_id', ${context.recoveryGenerationId ?? ''}, true)`,
+    );
   }
 }

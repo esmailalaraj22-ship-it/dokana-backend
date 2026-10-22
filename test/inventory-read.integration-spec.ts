@@ -28,7 +28,6 @@ import type {
 import {
   createInventoryTestDatabase,
   setInventoryContext,
-  stockCountMigrationFilename,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
@@ -53,6 +52,7 @@ const occurredAt = new Date('2026-01-15T10:00:00Z');
 const day = '2026-01-15';
 const large = 9007199254740993n;
 const periodId = deriveAccountingPeriodId(identities[0].storeId, 2026, 1);
+const migrationFilename = '0033_platform_recovery_generation_fencing.sql';
 
 describe('S11.3 authenticated inventory reads on isolated PostgreSQL', () => {
   jest.setTimeout(120000);
@@ -210,7 +210,7 @@ describe('S11.3 authenticated inventory reads on isolated PostgreSQL', () => {
       throw new Error('Approved non-production local test environment is required.');
     // Existing fixture creates a new generated database with no business data.
     // It never applies SQL or inserts fixtures in the source development database.
-    database = await createInventoryTestDatabase(stockCountMigrationFilename);
+    database = await createInventoryTestDatabase(migrationFilename);
     const migration = await db().migration.connect();
     try {
       await verifyMigrationSession(migration);

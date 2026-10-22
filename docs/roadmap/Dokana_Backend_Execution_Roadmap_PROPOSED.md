@@ -2062,8 +2062,8 @@ gates where applicable.
 | S22.1 - Backup, Restore, and Recovery Orientation                      | **CLOSED.** Defined authority, assets, granularity, failure model, consistency problem, decision gates, and stages. No backup, restore, notification producer, or infrastructure implementation. Depends on S19-S21 closure; Roadmap only.                                                                                                                                                                                                                                | Database/reference/SQLite/application/test deltas = 0. PostgreSQL remains 32 applied / 0 pending.                                                                                                                                                                                                                                                                    | Bounded repository/catalog inspection and migration verification only; no broad tests or drill. Closure is this reviewed orientation record.                                                                                                                                                                                                                                                                                                            |
 | S22.2 - PostgreSQL Recovery Points, Integrity, and Backup Health       | **CLOSED.** Added PostgreSQL custom-format recovery-point creation, immutable UUID identity, external versioned manifests/catalog, SHA-256 integrity, stored-artifact verification, bounded retention cleanup, isolated restore-smoke, safe Owner status, and S21 `backup_failure` reconciliation. Excludes production restore/cutover and attachment copying.                                                                                                                             | Database delta = 0; PostgreSQL remains 32 applied / 0 pending. The dedicated recovery destination holds encrypted private artifacts and manifests under a controlled namespace; no catalog table, PostgreSQL-reference change, SQLite change, S19 mutation, S18 entitlement mutation, or accounting mutation was introduced.                                                   | Daily retention is 35 days and monthly retention is 12 calendar months. PITR target is 7 days, but provider PITR, the 15-minute RPO, production KMS/IAM, scheduler, and real storage-provider behavior remain unverified deployment/S23 gates. Focused recovery, notification, privacy, full unit, broad integration, migration, role, residue, and isolated PostgreSQL restore checks passed. |
 | S22.3 - Attachment Protection, Manifest, and Recovery Consistency      | **CLOSED.** Bound the exact active attachment set to the database recovery point through one exported PostgreSQL snapshot, protected immutable binaries in dedicated recovery storage, and a versioned encrypted companion manifest. Added bounded resume, deep SHA-256 verification, isolated reconstruction smoke, coherent health, and reference-safe retention. Excludes broad restore/cutover and Store access to recovery artifacts.                                          | Database delta = 0; PostgreSQL remains 32 applied / 0 pending. The same `recoveryPointId` correlates the custom database artifact, immutable database manifest, snapshot inventory, protected attachment mappings, and companion manifest. PostgreSQL-reference, SQLite, S18, S19, attachment business lifecycle, and accounting deltas are 0.                    | ACTIVE-at-snapshot completeness, later upload/removal boundaries, REMOVED non-resurrection, missing/corrupt source or protected content, immutable reuse, same-ID mutation rejection, no cross-attachment hash deduplication, crash/restart safety, Owner-safe health, and S21 `backup_failure` integration passed. Real S3-compatible provider, KMS/IAM, versioning/replication, and measured RPO/RTO remain S23 gates. |
-| S22.4 - Isolated Restore, Recovery Fencing, and Offline Reconciliation | Restore immutable points to isolated/empty targets, verify and reconcile PostgreSQL plus binaries, enforce traffic/sync fencing, define client invalidation/rebootstrap, and cut over only after gates pass. Excludes live single-Store rollback and accounting reconstruction. Reuses S19 bootstrap/pull, S18 validation, S21 reconciliation, health, migrations, and RLS checks. Expected areas are recovery orchestration, validation, fencing, and operator controls. | PostgreSQL is restored canonical authority; object versions are reconciled to the selected manifest. **POTENTIAL DATABASE NEED - MUST BE PROVEN IN IMPLEMENTATION STAGE** for recovery epoch/generation, durable fence, or status. S19 cursors/idempotency and S18 licenses are validated, not recreated opportunistically.                                          | Designated operator only, wrong-target guard, repeatable empty-target restore, current server time, no second accounting engine. Focused isolated PostgreSQL/object-store restore, RLS, role, accounting invariant, cursor/replay, entitlement, notification, and attachment tests. Requires restore-operator/cutover and post-restore client policy. Closes with a restartable fenced restore and explicit pass/fail cutover gate.                     |
-| S22.5 - Integrated Disaster-Recovery Drill and S22 Closure             | Execute backup, verification, failure injection, isolated restore, backend startup, reconciliation, and measured recovery. No new product capability. Depends on S22.2-S22.4 closure and approved production-like test environment.                                                                                                                                                                                                                                       | Database delta expected = 0; no new recovery semantics. PostgreSQL, manifest, and protected binaries must identify the same verified point.                                                                                                                                                                                                                          | Prove migration checksums, roles/RLS/tenant isolation, representative accounting/inventory balances and corrections, operationId/replay and sync safety, subscriptions/licenses, S21 state, backup-failure notifications, zero test residue, and measured RPO/RTO. Real S3-compatible/provider validation remains an S23 handoff if unavailable. Closes S22 only with an evidence-backed repeatable drill.                                              |
+| S22.4 - Isolated Restore, Recovery Fencing, and Offline Reconciliation | **CLOSED.** Added restartable isolated restore orchestration, protected-attachment reconstruction, explicit verify/approve/activate gates, Recovery Generation fencing, recovery-aware authentication, stale session/cursor/PUSH rejection, and forced fresh bootstrap. Excludes live single-Store rollback and accounting reconstruction.                                                                                                                                            | Migration `0033` is the sole database evolution; PostgreSQL is 33 applied / 0 pending and migration `0034` does not exist. Forced RLS, narrow definer functions, S19 six-state semantics, PostgreSQL reference, SQLite, and accounting authority remain intact.                                                    | Wrong-target and source-fence guards, login/fence and activation races, rollback residue, isolated restore, attachment reconciliation, RLS, entitlement, cursor/replay, and cross-domain duplicate-effect tests passed. Production infrastructure traffic fencing and the production-like drill remain S22.5/S23 gates.                                                                                       |
+| S22.5 - Integrated Disaster-Recovery Drill and S22 Closure             | **NEXT / NOT STARTED.** Execute backup, verification, failure injection, isolated restore, backend startup, reconciliation, and measured recovery. No new product capability. Depends on S22.2-S22.4 closure and approved production-like test environment.                                                                                                                                                                                                                     | Database delta expected = 0; no new recovery semantics. PostgreSQL, manifest, and protected binaries must identify the same verified point.                                                                                                                                                                                                                          | Prove migration checksums, roles/RLS/tenant isolation, representative accounting/inventory balances and corrections, operationId/replay and sync safety, subscriptions/licenses, S21 state, backup-failure notifications, zero test residue, and measured RPO/RTO. Real S3-compatible/provider validation remains an S23 handoff if unavailable. Closes S22 only with an evidence-backed repeatable drill.                                              |
 
 #### S22.2 Closure Evidence and Handoffs
 
@@ -2124,6 +2124,31 @@ gates where applicable.
   Generation, cursor invalidation, offline replay safety, forced rebootstrap, device continuity,
   and controlled cutover. S23 retains real provider, versioning/replication, IAM/KMS/key-custody,
   PITR, and measured 15-minute RPO / 4-hour RTO verification.
+
+#### S22.4 Closure Evidence and Handoffs
+
+- Recovery-aware login issues the legacy session and validates current recovery authority on the
+  same checked-out authentication connection inside one explicit transaction. Validation failure
+  rolls back session and device effects. The applied `issue_session_recovery_v1` composite wrapper
+  remains a known unusable migration-0033 defect and is deliberately unused by application runtime;
+  S23 must retain this item in its final migration audit.
+- Recovery execution restores only to a guarded isolated target, reconstructs required protected
+  attachment binaries, verifies database and attachment integrity, and separates verification,
+  approval, and activation. Activation establishes a new Recovery Generation atomically while the
+  source remains fenced; production traffic fencing remains an infrastructure/S23 deployment gate.
+- Pre-recovery sessions and refresh, old signed cursors, stale-generation PUSH, pre-cutoff Offline
+  Licenses, and ambiguous local operations fail closed or require fresh bootstrap/revalidation.
+  S19's six durable outcomes are unchanged, and no stale handler or automatic accounting replay is
+  permitted.
+- Real PostgreSQL recovery, authentication concurrency, RLS, attachment, synchronization, and
+  duplicate-effect verification passed. Full unit passed 1,331 tests and broad integration passed
+  900 tests with no skips. PostgreSQL is 33 applied / 0 pending; migration `0033` is immutable,
+  migration `0034` does not exist, and PostgreSQL-reference, SQLite, and accounting deltas are zero.
+- S22.5 owns the production-like integrated disaster-recovery drill, backend startup against the
+  recovered target, measured RPO/RTO, and final S22 closure. S23 retains provider, IAM/KMS,
+  production fencing, PITR, authenticated recovery-operator audit integration, and
+  release-readiness evidence. Recovery-attempt phases are already immutable and hash-chained, but
+  central operator-identity audit evidence is not claimed by S22.4.
 
 #### S23 Recovery Handoffs
 
@@ -2287,9 +2312,9 @@ new explicit owner decision.
 | ----------------------------------- | -------------------------------------------------- |
 | Last fully closed Station           | S21 - Notifications, Attachments, and Audit Access |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e`         |
-| Safe completed capabilities         | S0-S21 plus S22.1-S22.3                            |
+| Safe completed capabilities         | S0-S21 plus S22.1-S22.4                            |
 | First incomplete release dependency | S22 - Backup, Restore, and Recovery                |
-| Current Station                     | S22.3 CLOSED; S22.4 NEXT / NOT STARTED             |
+| Current Station                     | S22.4 CLOSED; S22.5 NEXT / NOT STARTED             |
 | S18 current status                  | CLOSED                                             |
 | S18.1 current status                | CLOSED                                             |
 | S18.2 current status                | CLOSED                                             |
@@ -2325,10 +2350,9 @@ new explicit owner decision.
 | S22.1 current status                | CLOSED                                             |
 | S22.2 current status                | CLOSED                                             |
 | S22.3 current status                | CLOSED                                             |
-| S22.4 current status                | NEXT / NOT STARTED                                 |
-| S22.5 current status                | NOT STARTED                                        |
+| S22.4 current status                | CLOSED                                             |
+| S22.5 current status                | NEXT / NOT STARTED                                 |
 
-Do not start S22.4 from this document. It requires a separate execution prompt and confirmation
-of the recovery-generation, fencing, cursor invalidation, client rebootstrap, device continuity,
-restore-operator, and cutover decisions. Database, PostgreSQL-reference, and SQLite deltas remain
-0 by default.
+Do not start S22.5 from this document. It requires a separate execution prompt and an approved
+production-like recovery-drill environment. Database, PostgreSQL-reference, and SQLite deltas
+remain 0 by default.

@@ -635,7 +635,8 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
     });
     expect(manifest.snapshotId).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.manifestChecksum).toMatch(/^[0-9a-f]{64}$/);
-    expect(manifest.baseCursor).toMatch(/^sc1\./);
+    expect(manifest.recoveryGenerationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(manifest.baseCursor).toMatch(/^sc2\./);
 
     const ids = manifest.datasets.map((dataset) => dataset.id);
     expect(ids).toEqual([
@@ -762,7 +763,7 @@ describeWithPostgres('S19.4 consistent initial bootstrap', () => {
         },
       ],
     });
-    expect(body.nextCursor).toMatch(/^sc1\./);
+    expect(body.nextCursor).toMatch(/^sc2\./);
 
     const empty = await authorized(
       identityA,

@@ -30,6 +30,7 @@ const principal: SyncAuthenticatedPrincipal = {
   deviceId: claims.deviceId,
   sessionId: claims.sessionId,
   sessionExpiresAt: new Date(Date.now() + 86_400_000),
+  recoveryGenerationId: '44a15e52-f6d1-41c7-b282-3c5576678dc1',
 };
 
 function executionContext(request: Request): ExecutionContext {
@@ -66,6 +67,7 @@ describe('SyncAuthenticationGuard', () => {
       userId: principal.userId,
       deviceId: principal.deviceId,
       requestId,
+      recoveryGenerationId: principal.recoveryGenerationId,
     });
   });
 

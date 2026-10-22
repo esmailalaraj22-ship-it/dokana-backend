@@ -21,11 +21,13 @@ import {
 } from './sync-cursor.service';
 
 describe('ChangePullService', () => {
+  const recoveryGenerationId = randomUUID();
   const context: TenantTransactionContext = {
     storeId: randomUUID(),
     userId: randomUUID(),
     deviceId: randomUUID(),
     requestId: randomUUID(),
+    recoveryGenerationId,
   };
   const principal: AuthenticatedPrincipal = {
     userId: context.userId,
@@ -39,6 +41,7 @@ describe('ChangePullService', () => {
     deviceId: context.deviceId,
     sessionId: randomUUID(),
     sessionExpiresAt: new Date(Date.now() + 60_000),
+    recoveryGenerationId,
   };
   const transaction = {} as DatabaseTransaction;
   let database: {
@@ -46,6 +49,7 @@ describe('ChangePullService', () => {
       Promise<unknown>,
       [TenantTransactionContext, (transaction: DatabaseTransaction) => Promise<unknown>]
     >;
+    assertSyncRecoveryAuthority: jest.Mock;
   };
   let repository: jest.Mocked<Pick<ChangePullRepository, 'readBounds' | 'readPage'>>;
   let cursors: jest.Mocked<Pick<SyncCursorService, 'decode' | 'issue'>>;
@@ -73,6 +77,10 @@ describe('ChangePullService', () => {
   beforeEach(() => {
     database = {
       withTenantSnapshotTransaction: jest.fn(async (_context, work) => work(transaction)),
+      assertSyncRecoveryAuthority: jest.fn().mockResolvedValue({
+        recoveryGenerationId: context.recoveryGenerationId,
+        authorityNotBefore: null,
+      }),
     };
     repository = {
       readBounds: jest.fn().mockResolvedValue({
@@ -83,8 +91,12 @@ describe('ChangePullService', () => {
       readPage: jest.fn().mockResolvedValue([row(11n), row(12n)]),
     };
     cursors = {
-      decode: jest.fn().mockReturnValue({ storeId: context.storeId, sequence: 10n }),
-      issue: jest.fn((_storeId, sequence) => `cursor-${sequence.toString()}`),
+      decode: jest.fn().mockReturnValue({
+        storeId: context.storeId,
+        recoveryGenerationId,
+        sequence: 10n,
+      }),
+      issue: jest.fn((_storeId, _generationId, sequence) => `cursor-${sequence.toString()}`),
     };
     service = new ChangePullService(
       database as unknown as DatabaseService,
@@ -138,17 +150,29 @@ describe('ChangePullService', () => {
   });
 
   it('rejects cross-Store, legacy-boundary, and ahead cursors without reading a page', async () => {
-    cursors.decode.mockReturnValueOnce({ storeId: randomUUID(), sequence: 10n });
+    cursors.decode.mockReturnValueOnce({
+      storeId: randomUUID(),
+      recoveryGenerationId,
+      sequence: 10n,
+    });
     await expect(
       service.pull(principal, context, { cursor: 'cross-store' }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    cursors.decode.mockReturnValueOnce({ storeId: context.storeId, sequence: 9n });
+    cursors.decode.mockReturnValueOnce({
+      storeId: context.storeId,
+      recoveryGenerationId,
+      sequence: 9n,
+    });
     await expect(service.pull(principal, context, { cursor: 'legacy' })).rejects.toBeInstanceOf(
       GoneException,
     );
 
-    cursors.decode.mockReturnValueOnce({ storeId: context.storeId, sequence: 13n });
+    cursors.decode.mockReturnValueOnce({
+      storeId: context.storeId,
+      recoveryGenerationId,
+      sequence: 13n,
+    });
     await expect(service.pull(principal, context, { cursor: 'ahead' })).rejects.toBeInstanceOf(
       BadRequestException,
     );

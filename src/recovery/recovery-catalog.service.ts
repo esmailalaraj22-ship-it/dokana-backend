@@ -159,6 +159,20 @@ export class RecoveryCatalogService {
     await this.storage.deleteObject(recoveryJobLockKey());
   }
 
+  async assertJobLockOwnership(token: string): Promise<void> {
+    const body = await this.storage.readBuffer(recoveryJobLockKey(), 4_096);
+    if (!body) throw new Error('Recovery-point lock is not held.');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body.toString('utf8'));
+    } catch {
+      throw new Error('Recovery-point lock is invalid.');
+    }
+    if (!isMatchingLock(parsed, token)) {
+      throw new Error('Recovery-point lock ownership verification failed.');
+    }
+  }
+
   async planRetention(now: Date): Promise<RecoveryRetentionPlan> {
     const manifests = await this.listVerifiedRecoveryPoints();
     const latest = manifests.at(-1)?.recoveryPointId ?? null;

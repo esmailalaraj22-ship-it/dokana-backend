@@ -1,4 +1,10 @@
-import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  GoneException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 
 import type { SyncAuthenticatedPrincipal } from '../auth/auth.types';
@@ -50,6 +56,12 @@ export class OfflineOperationService {
       try {
         parsed.push({ index, envelope: parseOfflineOperationEnvelope(value) });
       } catch (error) {
+        if (
+          error instanceof OfflineOperationEnvelopeError &&
+          error.code === 'SYNC_REBOOTSTRAP_REQUIRED'
+        ) {
+          throw this.rebootstrapRequired();
+        }
         results[index] = this.malformedResult(value, error);
       }
     });
@@ -59,6 +71,16 @@ export class OfflineOperationService {
       if (sequenceOrder !== 0n) return sequenceOrder < 0n ? -1 : 1;
       return left.index - right.index;
     });
+
+    if (
+      parsed.some(
+        ({ envelope }) =>
+          envelope.recoveryGenerationId !== principal.recoveryGenerationId ||
+          envelope.recoveryGenerationId !== context.recoveryGenerationId,
+      )
+    ) {
+      throw this.rebootstrapRequired();
+    }
 
     for (const item of parsed) {
       results[item.index] = await this.process(item.envelope, principal, context);
@@ -112,6 +134,12 @@ export class OfflineOperationService {
     try {
       envelope = parseOfflineOperationEnvelope(input.operation);
     } catch (error) {
+      if (
+        error instanceof OfflineOperationEnvelopeError &&
+        error.code === 'SYNC_REBOOTSTRAP_REQUIRED'
+      ) {
+        throw this.rebootstrapRequired();
+      }
       return this.malformedResult(input.operation, error);
     }
     if (operationId !== envelope.operationId) {
@@ -120,6 +148,7 @@ export class OfflineOperationService {
     if (envelope.storeId !== context.storeId || envelope.deviceId !== context.deviceId) {
       return this.result(envelope.operationId, 'REJECTED', 'SYNC_CONTEXT_MISMATCH');
     }
+    this.assertRecoveryGeneration(envelope, principal, context);
     if (!this.registry.supports(envelope.operationType)) {
       return this.result(envelope.operationId, 'REJECTED', 'SYNC_OPERATION_NOT_ALLOWED');
     }
@@ -138,6 +167,7 @@ export class OfflineOperationService {
       context,
       { operationId: envelope.operationId, operationType: envelope.operationType },
       async (transaction) => {
+        await this.database.assertSyncRecoveryAuthority(transaction, envelope.recoveryGenerationId);
         const beginning = await this.repository.beginRecovery(
           transaction,
           envelope,
@@ -187,6 +217,7 @@ export class OfflineOperationService {
     if (envelope.storeId !== context.storeId || envelope.deviceId !== context.deviceId) {
       return this.result(envelope.operationId, 'REJECTED', 'SYNC_CONTEXT_MISMATCH');
     }
+    this.assertRecoveryGeneration(envelope, principal, context);
     if (!this.registry.supports(envelope.operationType)) {
       return this.result(envelope.operationId, 'REJECTED', 'SYNC_OPERATION_NOT_ALLOWED');
     }
@@ -205,6 +236,7 @@ export class OfflineOperationService {
       context,
       { operationId: envelope.operationId, operationType: envelope.operationType },
       async (transaction) => {
+        await this.database.assertSyncRecoveryAuthority(transaction, envelope.recoveryGenerationId);
         const beginning = await this.repository.begin(transaction, envelope);
         if (beginning.disposition !== 'authorized') {
           return this.beginResult(envelope.operationId, beginning);
@@ -258,6 +290,26 @@ export class OfflineOperationService {
       license.signingKeyId === envelope.signingKeyId &&
       envelope.trustedTimeEvidence.trustedServerTime === new Date(license.issuedAt).toISOString()
     );
+  }
+
+  private assertRecoveryGeneration(
+    envelope: OfflineOperationEnvelopeV1,
+    principal: SyncAuthenticatedPrincipal,
+    context: TenantTransactionContext,
+  ): void {
+    if (
+      envelope.recoveryGenerationId !== principal.recoveryGenerationId ||
+      envelope.recoveryGenerationId !== context.recoveryGenerationId
+    ) {
+      throw this.rebootstrapRequired();
+    }
+  }
+
+  private rebootstrapRequired(): GoneException {
+    return new GoneException({
+      code: 'SYNC_REBOOTSTRAP_REQUIRED',
+      message: 'A new synchronization bootstrap is required.',
+    });
   }
 
   private beginResult(

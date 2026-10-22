@@ -1014,6 +1014,7 @@ describeWithPostgres('S20.2 Dashboard authoritative Store reads', () => {
       operationType: 'sales.post.v1',
       storeId: owner.storeId,
       deviceId: owner.deviceId,
+      recoveryGenerationId: syncAuthentication.recoveryGenerationId,
       clientRecordedAt: occurredAt,
       payload: saleBody(null, occurredAt),
       offlineLicenseId: signed.payload.licenseId,

@@ -41,7 +41,14 @@
     "recovery:verify": "tsx scripts/recovery.ts verify",
     "recovery:health": "tsx scripts/recovery.ts health",
     "recovery:cleanup": "tsx scripts/recovery.ts cleanup",
-    "recovery:restore-smoke": "tsx scripts/recovery.ts restore-smoke"
+    "recovery:restore-smoke": "tsx scripts/recovery.ts restore-smoke",
+    "recovery:prepare": "tsx scripts/recovery.ts prepare",
+    "recovery:restore-database": "tsx scripts/recovery.ts restore-database",
+    "recovery:restore-attachments": "tsx scripts/recovery.ts restore-attachments",
+    "recovery:verify-attempt": "tsx scripts/recovery.ts verify-attempt",
+    "recovery:approve": "tsx scripts/recovery.ts approve",
+    "recovery:activate": "tsx scripts/recovery.ts activate",
+    "recovery:abort": "tsx scripts/recovery.ts abort"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",

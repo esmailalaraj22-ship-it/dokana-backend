@@ -13,11 +13,13 @@ import type { OfflineOperationRegistry } from './offline-operation.registry';
 import type { OfflineOperationRepository } from './offline-operation.repository';
 import { OfflineOperationService } from './offline-operation.service';
 
+const recoveryGenerationId = '44a15e52-f6d1-41c7-b282-3c5576678dc1';
 const context: TenantTransactionContext = {
   storeId: '59e90f52-05aa-4bf4-af84-242686f712a8',
   userId: 'a417fabd-b3c8-409c-9db3-2d62fdce21fd',
   deviceId: '873ef648-a779-4aaf-bf8b-936b092ecb93',
   requestId: '9f97bb10-b68a-4474-888e-7244fc581bcb',
+  recoveryGenerationId,
 };
 
 const principal: SyncAuthenticatedPrincipal = {
@@ -32,6 +34,7 @@ const principal: SyncAuthenticatedPrincipal = {
   deviceId: context.deviceId,
   sessionId: '18dcbf0a-acbe-48d6-88ed-cd1b078ddf41',
   sessionExpiresAt: new Date('2026-01-10T00:00:00.000Z'),
+  recoveryGenerationId,
 };
 
 const license: OfflineLicensePayloadV1 = {
@@ -68,6 +71,7 @@ function operation(
     operationType: 'customers.create.v1',
     storeId: context.storeId,
     deviceId: context.deviceId,
+    recoveryGenerationId: context.recoveryGenerationId,
     aggregateId: randomUUID(),
     clientRecordedAt: '2026-01-02T00:00:00.000Z',
     payload: { name: 'Offline Customer', phone: '0599000000' },
@@ -108,8 +112,15 @@ describe('OfflineOperationService', () => {
         work: (tx: DatabaseTransaction) => Promise<unknown>,
       ) => work(transaction),
     ),
+    assertSyncRecoveryAuthority: jest.fn().mockResolvedValue({
+      recoveryGenerationId: context.recoveryGenerationId,
+      authorityNotBefore: null,
+    }),
   } as jest.Mocked<
-    Pick<DatabaseService, 'withTenantTransaction' | 'withOfflineOperationTransaction'>
+    Pick<
+      DatabaseService,
+      'withTenantTransaction' | 'withOfflineOperationTransaction' | 'assertSyncRecoveryAuthority'
+    >
   >;
   const licenses = {
     verify: jest.fn().mockReturnValue(license),

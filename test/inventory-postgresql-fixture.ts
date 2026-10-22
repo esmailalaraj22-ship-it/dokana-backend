@@ -16,6 +16,7 @@ export const inventoryMigrationFilename = '0007_inventory_physical_foundation.sq
 export const stockCountMigrationFilename = '0008_stock_count_zero_establishment.sql';
 
 export interface InventoryTestDatabase {
+  databaseName: string;
   admin: Pool;
   runtime: Pool;
   migration: Pool;
@@ -119,7 +120,7 @@ export async function createInventoryTestDatabase(
         }
       }
     }
-    return { admin, runtime, migration, file, close };
+    return { databaseName, admin, runtime, migration, file, close };
   } catch (error) {
     await close();
     throw error;

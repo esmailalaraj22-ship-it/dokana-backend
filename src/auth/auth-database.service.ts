@@ -5,7 +5,7 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { Pool, QueryConfig } from 'pg';
+import type { Pool, PoolClient, QueryConfig } from 'pg';
 
 import type { DatabaseReadiness } from '../database/database.types';
 import { AUTH_DATABASE_POOL } from './auth.constants';
@@ -38,6 +38,14 @@ interface AuthenticationRoleInspection {
   hasRestrictedSchemaUsage: boolean;
   hasProtectedTableAccess: boolean;
   ownsApplicationObjects: boolean;
+}
+
+interface IssuedSessionRow {
+  userId: string;
+  storeId: string;
+  deviceId: string;
+  deviceStatus: string;
+  sessionId: string;
 }
 
 class UnsafeAuthenticationDatabaseRoleError extends Error {
@@ -145,20 +153,80 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
   }
 
   async issueSession(input: SessionIssueInput): Promise<AuthenticatedPrincipal | undefined> {
-    const result = await this.pool.query<AuthenticatedPrincipal>(
+    const client = await this.pool.connect();
+    let transactionStarted = false;
+
+    try {
+      await client.query('begin');
+      transactionStarted = true;
+
+      const issued = await this.issueLegacySession(client, input);
+      if (
+        issued?.userId !== input.userId ||
+        issued.storeId !== input.storeId ||
+        issued.deviceId !== input.deviceId ||
+        issued.deviceStatus !== 'active' ||
+        issued.sessionId !== input.sessionId
+      ) {
+        throw new Error('Authentication session issuance returned an invalid result.');
+      }
+
+      const validated = await client.query<AuthenticatedPrincipal>(
+        `
+          select
+            user_id as "userId",
+            email,
+            full_name as "fullName",
+            store_id as "storeId",
+            store_name as "storeName",
+            store_status as "storeStatus",
+            membership_role as "membershipRole",
+            membership_version as "membershipVersion",
+            device_id as "deviceId",
+            session_id as "sessionId",
+            session_expires_at as "sessionExpiresAt",
+            recovery_generation_id as "recoveryGenerationId"
+          from auth_api.validate_session_recovery_v1(
+            $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
+          )
+        `,
+        [issued.userId, issued.sessionId, issued.storeId, issued.deviceId, input.accessTokenJti],
+      );
+      const principal = validated.rows[0];
+      if (
+        principal?.userId !== issued.userId ||
+        principal.storeId !== issued.storeId ||
+        principal.deviceId !== issued.deviceId ||
+        principal.sessionId !== issued.sessionId
+      ) {
+        throw new Error('Recovery-aware session validation returned an invalid result.');
+      }
+
+      await client.query('commit');
+      transactionStarted = false;
+      return principal;
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query('rollback').catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async issueLegacySession(
+    client: PoolClient,
+    input: SessionIssueInput,
+  ): Promise<IssuedSessionRow | undefined> {
+    const result = await client.query<IssuedSessionRow>(
       `
         select
           user_id as "userId",
-          email,
-          full_name as "fullName",
           store_id as "storeId",
-          store_name as "storeName",
-          store_status as "storeStatus",
-          membership_role as "membershipRole",
-          membership_version as "membershipVersion",
           device_id as "deviceId",
-          session_id as "sessionId",
-          session_expires_at as "sessionExpiresAt"
+          device_status as "deviceStatus",
+          session_id as "sessionId"
         from auth_api.issue_session(
           $1::uuid,
           $2::uuid,
@@ -216,8 +284,11 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           membership_version as "membershipVersion",
           device_id as "deviceId",
           session_id as "sessionId",
-          session_expires_at as "sessionExpiresAt"
-        from auth_api.validate_session($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid)
+          session_expires_at as "sessionExpiresAt",
+          recovery_generation_id as "recoveryGenerationId"
+        from auth_api.validate_session_recovery_v1(
+          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
+        )
       `,
       [userId, sessionId, storeId, deviceId, accessTokenJti],
     );
@@ -243,8 +314,9 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           membership_version as "membershipVersion",
           device_id as "deviceId",
           session_id as "sessionId",
-          session_expires_at as "sessionExpiresAt"
-        from auth_api.validate_sync_session($1::uuid, $2::uuid, $3::uuid, $4::uuid)
+          session_expires_at as "sessionExpiresAt",
+          recovery_generation_id as "recoveryGenerationId"
+        from auth_api.validate_sync_session_recovery_v1($1::uuid, $2::uuid, $3::uuid, $4::uuid)
       `,
       [userId, sessionId, storeId, deviceId],
     );
@@ -267,8 +339,9 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           membership_version as "membershipVersion",
           device_id as "deviceId",
           session_id as "sessionId",
-          session_expires_at as "sessionExpiresAt"
-        from auth_api.validate_sync_refresh_token($1::text)
+          session_expires_at as "sessionExpiresAt",
+          recovery_generation_id as "recoveryGenerationId"
+        from auth_api.validate_sync_refresh_token_recovery_v1($1::text)
       `,
       [tokenHash],
     );
@@ -290,8 +363,11 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           membership_version as "membershipVersion",
           device_id as "deviceId",
           session_id as "sessionId",
-          session_expires_at as "sessionExpiresAt"
-        from auth_api.rotate_refresh_token($1::text, $2::uuid, $3::text, $4::uuid, $5::integer)
+          session_expires_at as "sessionExpiresAt",
+          recovery_generation_id as "recoveryGenerationId"
+        from auth_api.rotate_refresh_token_recovery_v1(
+          $1::text, $2::uuid, $3::text, $4::uuid, $5::integer
+        )
       `,
       [
         input.currentTokenHash,

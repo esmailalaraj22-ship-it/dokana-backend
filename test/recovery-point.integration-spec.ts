@@ -85,7 +85,7 @@ describeWithDatabase('PostgreSQL recovery points with isolated restore smoke', (
       manifestVersion: '1',
       state: 'VERIFIED',
       backupType: 'postgresql-custom',
-      migrations: { appliedCount: 32, checksumStatus: 'PASS' },
+      migrations: { appliedCount: 33, checksumStatus: 'PASS' },
       verification: { status: 'VERIFIED', structuralCheck: 'PASS' },
     });
     expect(manifest.artifact.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -137,7 +137,7 @@ describeWithDatabase('PostgreSQL recovery points with isolated restore smoke', (
     });
     expect(restored).toMatchObject({
       schemas: ['audit', 'ledger', 'platform', 'sync'],
-      migrationCount: 32,
+      migrationCount: 33,
       latestMigration: manifest.migrations.latestFilename,
     });
     expect(restored.forcedRlsTables).toBeGreaterThan(0);

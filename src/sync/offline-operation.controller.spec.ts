@@ -32,6 +32,7 @@ describe('OfflineOperationController', () => {
       store: { id: '59e90f52-05aa-4bf4-af84-242686f712a8', status: 'suspended' },
       deviceId: '873ef648-a779-4aaf-bf8b-936b092ecb93',
       sessionId: '18dcbf0a-acbe-48d6-88ed-cd1b078ddf41',
+      recoveryGenerationId: '44a15e52-f6d1-41c7-b282-3c5576678dc1',
     });
 
     await expect(

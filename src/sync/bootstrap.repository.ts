@@ -33,7 +33,7 @@ export class BootstrapRepository {
   async readBoundary(
     transaction: DatabaseTransaction,
     context: TenantTransactionContext,
-  ): Promise<BootstrapBoundary> {
+  ): Promise<Omit<BootstrapBoundary, 'recoveryGenerationId'>> {
     const result = await transaction.execute(sql`
       select
         contract_version as "contractVersion",

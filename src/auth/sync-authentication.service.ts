@@ -43,6 +43,7 @@ export class SyncAuthenticationService {
       },
       deviceId: principal.deviceId,
       sessionId: principal.sessionId,
+      recoveryGenerationId: principal.recoveryGenerationId,
     };
   }
 }

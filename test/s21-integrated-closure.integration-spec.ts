@@ -298,6 +298,7 @@ describeWithPostgres('S21 integrated Owner operations closure', () => {
       operationType: 'customers.create.v1',
       storeId: identities.ownerA.storeId,
       deviceId: identities.ownerA.deviceId,
+      recoveryGenerationId: syncAuthentication.recoveryGenerationId,
       aggregateId: fixture.offlineCustomerId,
       clientRecordedAt: occurredAt,
       payload: { name: 'Offline Audit Customer', phone: '0599000199' },

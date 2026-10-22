@@ -28,6 +28,7 @@ export interface OfflineOperationEnvelopeV1 {
   operationType: string;
   storeId: string;
   deviceId: string;
+  recoveryGenerationId: string;
   aggregateId?: string;
   expectedVersion?: string;
   clientRecordedAt: string;
@@ -73,6 +74,7 @@ export function parseOfflineOperationEnvelope(value: unknown): OfflineOperationE
       'operationType',
       'storeId',
       'deviceId',
+      'recoveryGenerationId',
       'clientRecordedAt',
       'payload',
       'offlineLicenseId',
@@ -91,6 +93,12 @@ export function parseOfflineOperationEnvelope(value: unknown): OfflineOperationE
   const operationId = canonicalUuid(input.operationId);
   const storeId = canonicalUuid(input.storeId);
   const deviceId = canonicalUuid(input.deviceId);
+  let recoveryGenerationId: string;
+  try {
+    recoveryGenerationId = canonicalUuid(input.recoveryGenerationId);
+  } catch {
+    throw new OfflineOperationEnvelopeError('SYNC_REBOOTSTRAP_REQUIRED');
+  }
   const offlineLicenseId = canonicalUuid(input.offlineLicenseId);
   const subscriptionId = canonicalUuid(input.subscriptionId);
   const operationType = requiredString(input.operationType);
@@ -124,6 +132,7 @@ export function parseOfflineOperationEnvelope(value: unknown): OfflineOperationE
     operationType,
     storeId,
     deviceId,
+    recoveryGenerationId,
     aggregateId: aggregateId ?? null,
     expectedVersion: expectedVersion ?? null,
     clientRecordedAt,
@@ -142,6 +151,7 @@ export function parseOfflineOperationEnvelope(value: unknown): OfflineOperationE
     operationType,
     storeId,
     deviceId,
+    recoveryGenerationId,
     ...(aggregateId === undefined ? {} : { aggregateId }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
     clientRecordedAt,

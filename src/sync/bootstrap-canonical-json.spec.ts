@@ -53,6 +53,7 @@ describe('bootstrap canonical integrity and artifacts', () => {
       sessionId,
       datasetId: sessionId,
       bootstrapGenerationId: sessionId,
+      recoveryGenerationId: '44a15e52-f6d1-41c7-b282-3c5576678dc1',
       storeId: '19040000-0000-4000-8000-000000000003',
       deviceId: '19040000-0000-4000-8000-000000000004',
       status: 'ready',

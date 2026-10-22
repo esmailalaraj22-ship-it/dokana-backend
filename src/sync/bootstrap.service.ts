@@ -95,7 +95,18 @@ export class BootstrapService {
       const manifestCore = await this.database.withTenantSnapshotTransaction(
         context,
         async (transaction) => {
-          const boundary = await this.repository.readBoundary(transaction, context);
+          const recoveryAuthority =
+            await this.database.capturePlatformRecoveryAuthority(transaction);
+          if (recoveryAuthority.recoveryGenerationId !== principal.recoveryGenerationId) {
+            throw new GoneException({
+              code: 'SYNC_REBOOTSTRAP_REQUIRED',
+              message: 'A new synchronization bootstrap is required.',
+            });
+          }
+          const boundary = {
+            ...(await this.repository.readBoundary(transaction, context)),
+            recoveryGenerationId: recoveryAuthority.recoveryGenerationId,
+          };
           const expiresAt = this.resolveExpiry(principal, boundary.serverTime);
           const license = await this.readVerifiedLicense(
             transaction,
@@ -141,7 +152,11 @@ export class BootstrapService {
     }
     try {
       const manifest = await this.artifacts.readManifest(sessionId.toLowerCase());
-      if (manifest.storeId !== context.storeId || manifest.deviceId !== context.deviceId) {
+      if (
+        manifest.storeId !== context.storeId ||
+        manifest.deviceId !== context.deviceId ||
+        manifest.recoveryGenerationId !== principal.recoveryGenerationId
+      ) {
         throw new BootstrapArtifactNotFoundError();
       }
       return await this.artifacts.readPage(manifest, datasetId, pageNumber);
@@ -215,13 +230,18 @@ export class BootstrapService {
       sessionId,
       datasetId: sessionId,
       bootstrapGenerationId: sessionId,
+      recoveryGenerationId: boundary.recoveryGenerationId,
       storeId: context.storeId,
       deviceId: context.deviceId,
       status: 'ready',
       serverTime: boundary.serverTime.toISOString(),
       expiresAt: expiresAt.toISOString(),
       snapshotId: boundary.snapshotId,
-      baseCursor: this.cursors.issue(context.storeId, boundary.baseWatermark),
+      baseCursor: this.cursors.issue(
+        context.storeId,
+        boundary.recoveryGenerationId,
+        boundary.baseWatermark,
+      ),
       pageSize: bootstrapPageSize,
       encoding: {
         bigInteger: 'decimal_string',
@@ -469,7 +489,8 @@ export class BootstrapService {
       principal.membershipRole !== 'owner' ||
       principal.storeId !== context.storeId ||
       principal.userId !== context.userId ||
-      principal.deviceId !== context.deviceId
+      principal.deviceId !== context.deviceId ||
+      principal.recoveryGenerationId !== context.recoveryGenerationId
     ) {
       throw new ForbiddenException({
         code: 'BOOTSTRAP_NOT_ALLOWED',

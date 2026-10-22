@@ -1,7 +1,8 @@
 import type { PinoLogger } from 'nestjs-pino';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import { AuthenticationDatabaseService } from './auth-database.service';
+import type { AuthenticatedPrincipal, SessionIssueInput } from './auth.types';
 
 interface InspectionRow {
   sessionUser: string;
@@ -130,5 +131,124 @@ describe('AuthenticationDatabaseService readiness', () => {
     ].flat();
     expect(JSON.stringify(loggedPayloads)).not.toContain('postgresql://');
     expect(JSON.stringify(loggedPayloads)).not.toContain('secret');
+  });
+});
+
+describe('AuthenticationDatabaseService recovery-aware session issuance', () => {
+  const query = jest.fn<
+    Promise<{ rows: unknown[] }>,
+    [text: string, values?: readonly unknown[]]
+  >();
+  const release = jest.fn();
+  const client = { query, release } as unknown as PoolClient;
+  const connect = jest.fn().mockResolvedValue(client);
+  const pool = { connect, on: jest.fn(), end: jest.fn() } as unknown as Pool;
+  const logger = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  } as unknown as PinoLogger;
+  const service = new AuthenticationDatabaseService(pool, logger);
+  const input: SessionIssueInput = {
+    userId: '9f97bb10-b68a-4474-888e-7244fc581bcb',
+    storeId: '18dcbf0a-acde-48d6-88ed-cd1b078ddf41',
+    deviceId: '59e90f52-05aa-4bf4-af84-242686f712a8',
+    deviceName: 'Test device',
+    devicePlatform: 'android',
+    sessionId: '4b1c2573-f894-4da3-a795-349ae622aa2c',
+    accessTokenJti: 'fc8b9fb8-7c18-4551-a6f8-624cb26e5e33',
+    refreshTokenId: 'b1cf8f6c-d1e2-4a58-b6dd-7294fb98a220',
+    refreshTokenHash: 'a'.repeat(64),
+    refreshFamilyId: '59919848-6601-4e82-9e93-2a1d7580a53f',
+    sessionExpiresAt: new Date('2026-10-22T00:00:00.000Z'),
+    refreshExpiresAt: new Date('2026-10-23T00:00:00.000Z'),
+  };
+  const principal: AuthenticatedPrincipal = {
+    userId: input.userId,
+    email: 'owner@example.test',
+    fullName: 'Owner',
+    storeId: input.storeId,
+    storeName: 'Store',
+    storeStatus: 'active',
+    membershipRole: 'owner',
+    membershipVersion: '1',
+    deviceId: input.deviceId,
+    sessionId: input.sessionId,
+    sessionExpiresAt: input.sessionExpiresAt,
+    recoveryGenerationId: '7292c1b5-0f9a-44e1-9ef6-3b3b84e9c7a4',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    connect.mockResolvedValue(client);
+  });
+
+  it('issues and recovery-validates on one connection before committing', async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            userId: input.userId,
+            storeId: input.storeId,
+            deviceId: input.deviceId,
+            deviceStatus: 'active',
+            sessionId: input.sessionId,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [principal] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(service.issueSession(input)).resolves.toEqual(principal);
+
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenNthCalledWith(1, 'begin');
+    expect(query.mock.calls[1]?.[0]).toContain('from auth_api.issue_session(');
+    expect(query.mock.calls[1]?.[0]).not.toContain('issue_session_recovery_v1');
+    expect(query.mock.calls[2]?.[0]).toContain('auth_api.validate_session_recovery_v1');
+    expect(query).toHaveBeenNthCalledWith(4, 'commit');
+    expect(query.mock.calls.some(([statement]) => statement === 'rollback')).toBe(false);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back and releases the connection when recovery validation fails', async () => {
+    const recoveryError = Object.assign(new Error('platform fenced'), { code: '55000' });
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            userId: input.userId,
+            storeId: input.storeId,
+            deviceId: input.deviceId,
+            deviceStatus: 'active',
+            sessionId: input.sessionId,
+          },
+        ],
+      })
+      .mockRejectedValueOnce(recoveryError)
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(service.issueSession(input)).rejects.toBe(recoveryError);
+
+    expect(query).toHaveBeenLastCalledWith('rollback');
+    expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back malformed issuance results before recovery validation', async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(service.issueSession(input)).rejects.toThrow(
+      'Authentication session issuance returned an invalid result.',
+    );
+
+    expect(query).toHaveBeenLastCalledWith('rollback');
+    expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

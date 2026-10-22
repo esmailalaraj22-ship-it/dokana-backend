@@ -17,6 +17,7 @@ const principal: SyncAuthenticatedPrincipal = {
   deviceId: '873ef648-a779-4aaf-bf8b-936b092ecb93',
   sessionId: '18dcbf0a-acbe-48d6-88ed-cd1b078ddf41',
   sessionExpiresAt: new Date('2026-01-10T00:00:00.000Z'),
+  recoveryGenerationId: '44a15e52-f6d1-41c7-b282-3c5576678dc1',
 };
 
 describe('SyncAuthenticationService', () => {
@@ -49,6 +50,7 @@ describe('SyncAuthenticationService', () => {
       store: { id: principal.storeId, status: 'suspended' },
       deviceId: principal.deviceId,
       sessionId: principal.sessionId,
+      recoveryGenerationId: principal.recoveryGenerationId,
     });
     expect(database.validateSyncRefreshToken).toHaveBeenCalledWith(
       createHash('sha256').update(refreshToken, 'utf8').digest('hex'),

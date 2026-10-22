@@ -11,6 +11,12 @@ export interface TenantTransactionContext {
   userId: string;
   deviceId: string;
   requestId: string;
+  recoveryGenerationId?: string;
+}
+
+export interface PlatformRecoveryAuthority {
+  recoveryGenerationId: string;
+  authorityNotBefore: Date | null;
 }
 
 export interface OfflineOperationTransactionIdentity {

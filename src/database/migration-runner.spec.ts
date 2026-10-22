@@ -56,6 +56,7 @@ describe('controlled migration runner', () => {
       '0030_notification_touch_trigger_fix.sql',
       '0031_sanitized_owner_business_audit.sql',
       '0032_attachment_lifecycle_audit.sql',
+      '0033_platform_recovery_generation_fencing.sql',
     ]);
   });
 
@@ -79,6 +80,15 @@ describe('controlled migration runner', () => {
     expect(() =>
       validateRoleSwitches({
         filename: '0024_offline_operation_push_authority.sql',
+        absolutePath: 'ignored',
+        contents: 'set local role shop_app_auth_owner;',
+        checksumSha256: sha256('set local role shop_app_auth_owner;'),
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      validateRoleSwitches({
+        filename: '0033_platform_recovery_generation_fencing.sql',
         absolutePath: 'ignored',
         contents: 'set local role shop_app_auth_owner;',
         checksumSha256: sha256('set local role shop_app_auth_owner;'),

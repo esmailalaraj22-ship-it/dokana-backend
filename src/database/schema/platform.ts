@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   foreignKey,
   index,
@@ -240,6 +241,33 @@ export const licenseIssuances = platformSchema.table(
     unique('license_issuances_license_serial_key').on(table.licenseSerial),
     check('license_issuances_check', sql`${table.expiresAt} > ${table.issuedAt}`),
     index('idx_license_store_device').on(table.storeId, table.deviceId, table.expiresAt.desc()),
+  ],
+);
+
+export const recoveryControl = platformSchema.table(
+  'recovery_control',
+  {
+    singletonKey: boolean('singleton_key').primaryKey().default(true),
+    recoveryGenerationId: uuid('recovery_generation_id').notNull(),
+    serviceState: text('service_state').$type<'ACTIVE' | 'FENCED'>().notNull(),
+    authorityNotBefore: timestamp('authority_not_before', { withTimezone: true, mode: 'date' }),
+    fencedAt: timestamp('fenced_at', { withTimezone: true, mode: 'date' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('recovery_control_singleton_check', sql`${table.singletonKey}`),
+    check(
+      'recovery_control_service_state_check',
+      sql`${table.serviceState} in ('ACTIVE', 'FENCED')`,
+    ),
+    check(
+      'recovery_control_fenced_state_check',
+      sql`${table.serviceState} = 'ACTIVE' or (${table.serviceState} = 'FENCED' and ${table.fencedAt} is not null)`,
+    ),
+    check(
+      'recovery_control_cutoff_check',
+      sql`${table.authorityNotBefore} is null or ${table.fencedAt} is not null`,
+    ),
   ],
 );
 

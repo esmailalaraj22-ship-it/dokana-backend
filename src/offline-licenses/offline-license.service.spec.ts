@@ -26,11 +26,13 @@ function cryptoFixture(keyId = 'service-v1') {
 }
 
 describe('OfflineLicenseService', () => {
+  const recoveryGenerationId = randomUUID();
   const context: TenantTransactionContext = {
     storeId: randomUUID(),
     userId: randomUUID(),
     deviceId: randomUUID(),
     requestId: randomUUID(),
+    recoveryGenerationId,
   };
   const principal = {
     ...context,
@@ -42,6 +44,7 @@ describe('OfflineLicenseService', () => {
     membershipVersion: '1',
     sessionId: randomUUID(),
     sessionExpiresAt: new Date('2026-11-01T00:00:00Z'),
+    recoveryGenerationId,
   };
   let database: DatabaseService;
   let repository: jest.Mocked<Pick<OfflineLicenseRepository, 'prepare' | 'complete'>>;
@@ -57,6 +60,7 @@ describe('OfflineLicenseService', () => {
           work: (value: DatabaseTransaction) => Promise<unknown>,
         ) => work(transaction),
       ),
+      assertPlatformWriteAuthority: jest.fn().mockResolvedValue(undefined),
     } as unknown as DatabaseService;
     repository = {
       prepare: jest.fn(),
@@ -119,6 +123,7 @@ describe('OfflineLicenseService', () => {
       expiryBoundary: 'exclusive',
       clockRollbackPolicy: 'read_only_and_online_revalidation_required',
     });
+    expect(database.assertPlatformWriteAuthority).toHaveBeenCalledWith(transaction);
     expect(repository.complete).toHaveBeenCalledTimes(1);
   });
 

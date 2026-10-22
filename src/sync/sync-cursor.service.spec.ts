@@ -32,25 +32,32 @@ describe('SyncCursorService', () => {
   it('round-trips a Store-bound lossless PostgreSQL sequence deterministically', () => {
     const cursors = service(tokenConfig('test.v1', 1));
     const storeId = randomUUID();
-    const cursor = cursors.issue(storeId.toUpperCase(), 9_223_372_036_854_775_807n);
+    const recoveryGenerationId = randomUUID();
+    const cursor = cursors.issue(
+      storeId.toUpperCase(),
+      recoveryGenerationId.toUpperCase(),
+      9_223_372_036_854_775_807n,
+    );
 
-    expect(cursors.issue(storeId, '9223372036854775807')).toBe(cursor);
+    expect(cursors.issue(storeId, recoveryGenerationId, '9223372036854775807')).toBe(cursor);
     expect(cursors.decode(cursor)).toEqual({
       storeId,
+      recoveryGenerationId,
       sequence: 9_223_372_036_854_775_807n,
     });
   });
 
   it('rejects legacy, malformed, tampered, and overflowing cursors', () => {
     const cursors = service(tokenConfig('test-v1', 2));
-    const valid = cursors.issue(randomUUID(), 41n);
+    const recoveryGenerationId = randomUUID();
+    const valid = cursors.issue(randomUUID(), recoveryGenerationId, 41n);
     const replacement = valid.endsWith('A') ? 'B' : 'A';
     const tampered = `${valid.slice(0, -1)}${replacement}`;
 
     expect(() => cursors.decode('41')).toThrow(LegacySyncCursorError);
     expect(() => cursors.decode('not-a-cursor')).toThrow(InvalidSyncCursorError);
     expect(() => cursors.decode(tampered)).toThrow(InvalidSyncCursorError);
-    expect(() => cursors.issue(randomUUID(), '9223372036854775808')).toThrow(
+    expect(() => cursors.issue(randomUUID(), recoveryGenerationId, '9223372036854775808')).toThrow(
       InvalidSyncCursorError,
     );
   });
@@ -59,10 +66,11 @@ describe('SyncCursorService', () => {
     const oldSecret = Buffer.alloc(32, 3).toString('base64url');
     const old = service({ ...tokenConfig('old-v1', 3), activeSecret: oldSecret });
     const storeId = randomUUID();
-    const cursor = old.issue(storeId, 7n);
+    const recoveryGenerationId = randomUUID();
+    const cursor = old.issue(storeId, recoveryGenerationId, 7n);
 
     const rotated = service(tokenConfig('new-v2', 4, { 'old-v1': oldSecret }));
-    expect(rotated.decode(cursor)).toEqual({ storeId, sequence: 7n });
+    expect(rotated.decode(cursor)).toEqual({ storeId, recoveryGenerationId, sequence: 7n });
     expect(() => service(tokenConfig('new-v2', 4)).decode(cursor)).toThrow(LegacySyncCursorError);
   });
 });

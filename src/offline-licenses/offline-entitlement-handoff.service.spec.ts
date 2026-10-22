@@ -32,6 +32,7 @@ function fixture() {
     userId: randomUUID(),
     deviceId: randomUUID(),
     requestId: randomUUID(),
+    recoveryGenerationId: randomUUID(),
   };
   const payload: OfflineLicensePayloadV1 = {
     licenseVersion: 1,
@@ -91,6 +92,10 @@ describe('OfflineEntitlementHandoffService', () => {
           work: (value: DatabaseTransaction) => Promise<unknown>,
         ) => work(transaction),
       ),
+      capturePlatformRecoveryAuthority: jest.fn().mockResolvedValue({
+        recoveryGenerationId: context.recoveryGenerationId,
+        authorityNotBefore: null,
+      }),
     } as unknown as DatabaseService;
     const service = new OfflineEntitlementHandoffService(
       database,
@@ -101,6 +106,46 @@ describe('OfflineEntitlementHandoffService', () => {
     await expect(service.classify(context, envelope)).resolves.toEqual({
       disposition: 'eligible',
       reason: 'licensed_within_window',
+    });
+  });
+
+  it('rejects a License issued before the current recovery authority cutoff', async () => {
+    const { context, crypto, payload, license, envelope } = fixture();
+    const repository = {
+      readForValidation: jest.fn().mockResolvedValue({
+        licenseId: payload.licenseId,
+        deviceId: payload.deviceId,
+        subscriptionId: payload.subscriptionId,
+        signedPayload: payload,
+        signature: license.signature,
+        keyId: payload.signingKeyId,
+        issuedAt: new Date(payload.issuedAt),
+        expiresAt: new Date(payload.offlineValidUntil),
+        revokedAt: null,
+        revokeReason: null,
+      }),
+    };
+    const database = {
+      withTenantTransaction: jest.fn(
+        async (
+          _context: TenantTransactionContext,
+          work: (value: DatabaseTransaction) => Promise<unknown>,
+        ) => work(transaction),
+      ),
+      capturePlatformRecoveryAuthority: jest.fn().mockResolvedValue({
+        recoveryGenerationId: context.recoveryGenerationId,
+        authorityNotBefore: new Date('2026-10-05T00:00:00.000Z'),
+      }),
+    } as unknown as DatabaseService;
+    const service = new OfflineEntitlementHandoffService(
+      database,
+      repository as unknown as OfflineLicenseRepository,
+      crypto,
+    );
+
+    await expect(service.classify(context, envelope)).resolves.toEqual({
+      disposition: 'reject',
+      reason: 'invalid_license',
     });
   });
 
@@ -159,6 +204,10 @@ describe('OfflineEntitlementHandoffService', () => {
           work: (value: DatabaseTransaction) => Promise<unknown>,
         ) => work(transaction),
       ),
+      capturePlatformRecoveryAuthority: jest.fn().mockResolvedValue({
+        recoveryGenerationId: context.recoveryGenerationId,
+        authorityNotBefore: null,
+      }),
     } as unknown as DatabaseService;
     const service = new OfflineEntitlementHandoffService(
       database,

@@ -53,6 +53,7 @@ const principal: AuthenticatedPrincipal = {
   deviceId: loginInput.deviceId,
   sessionId: randomUUID(),
   sessionExpiresAt: new Date(Date.now() + 86_400_000),
+  recoveryGenerationId: randomUUID(),
 };
 
 function createHarness(): {
@@ -110,6 +111,7 @@ function rotatedResult(overrides: Partial<RefreshRotationResult> = {}): RefreshR
     deviceId: principal.deviceId,
     sessionId: principal.sessionId,
     sessionExpiresAt: principal.sessionExpiresAt,
+    recoveryGenerationId: principal.recoveryGenerationId,
     ...overrides,
   };
 }
@@ -213,6 +215,7 @@ describe('AuthenticationService', () => {
           deviceId: null,
           sessionId: null,
           sessionExpiresAt: null,
+          recoveryGenerationId: null,
         }),
       );
 

@@ -33,7 +33,7 @@ export class AuthenticationGuard implements CanActivate {
         claims.deviceId,
         claims.tokenId,
       );
-      if (!principal) {
+      if (!principal || !isUuid(principal.recoveryGenerationId)) {
         throw new Error('Session validation failed.');
       }
 
@@ -49,6 +49,7 @@ export class AuthenticationGuard implements CanActivate {
         userId: principal.userId,
         deviceId: principal.deviceId,
         requestId,
+        recoveryGenerationId: principal.recoveryGenerationId,
       };
       return true;
     } catch {

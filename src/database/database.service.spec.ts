@@ -10,14 +10,18 @@ import type {
 } from './database.types';
 
 describe('DatabaseService tenant transactions', () => {
+  const recoveryGenerationId = '44a15e52-f6d1-41c7-b282-3c5576678dc1';
   const context: TenantTransactionContext = {
     storeId: '18dcbf0a-acbe-48d6-88ed-cd1b078ddf41',
     userId: 'a417fabd-b3c8-409c-9db3-2d62fdce21fd',
     deviceId: '59e90f52-05aa-4bf4-af84-242686f712a8',
     requestId: '9f97bb10-b68a-4474-888e-7244fc581bcb',
+    recoveryGenerationId,
   };
 
-  const execute = jest.fn().mockResolvedValue({ rows: [{ writeEligible: true }] });
+  const execute = jest
+    .fn()
+    .mockResolvedValue({ rows: [{ writeEligible: true, recoveryGenerationId }] });
   const transaction = {
     execute,
   } as unknown as DatabaseTransaction;
@@ -37,14 +41,24 @@ describe('DatabaseService tenant transactions', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    execute.mockResolvedValue({ rows: [{ writeEligible: true }] });
+    execute.mockResolvedValue({ rows: [{ writeEligible: true, recoveryGenerationId }] });
   });
+
+  function queueTenantContext(): void {
+    for (let index = 0; index < 5; index += 1) {
+      execute.mockResolvedValueOnce({ rows: [] });
+    }
+  }
+
+  function queueRecoveryAuthority(): void {
+    execute.mockResolvedValueOnce({ rows: [{ recoveryGenerationId }] });
+  }
 
   it('sets every required transaction-local tenant value before work runs', async () => {
     const work = jest.fn().mockResolvedValue('completed');
 
     await expect(service.withTenantTransaction(context, work)).resolves.toBe('completed');
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(5);
     expect(work).toHaveBeenCalledWith(transaction);
     expect(database.transaction).toHaveBeenCalledTimes(1);
   });
@@ -54,7 +68,7 @@ describe('DatabaseService tenant transactions', () => {
 
     await expect(service.withTenantSnapshotTransaction(context, work)).resolves.toBe('snapshot');
 
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(5);
     expect(work).toHaveBeenCalledWith(transaction);
     expect(database.transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: 'repeatable read',
@@ -80,10 +94,10 @@ describe('DatabaseService tenant transactions', () => {
 
     await expect(service.withBusinessWriteTransaction(context, work)).resolves.toBe('written');
 
-    expect(execute).toHaveBeenCalledTimes(5);
+    expect(execute).toHaveBeenCalledTimes(7);
     expect(work).toHaveBeenCalledTimes(1);
     expect(work).toHaveBeenCalledWith(transaction);
-    const entitlementCallOrder = execute.mock.invocationCallOrder[4];
+    const entitlementCallOrder = execute.mock.invocationCallOrder[6];
     const workCallOrder = work.mock.invocationCallOrder[0];
     if (entitlementCallOrder === undefined || workCallOrder === undefined) {
       throw new Error('Expected the entitlement check and protected work to be invoked.');
@@ -95,10 +109,8 @@ describe('DatabaseService tenant transactions', () => {
   it.each(['read_only', 'suspended', 'archived', 'expired', 'cancelled', 'missing', 'future'])(
     'denies a %s entitlement before invoking protected work',
     async () => {
-      execute.mockResolvedValueOnce({ rows: [] });
-      execute.mockResolvedValueOnce({ rows: [] });
-      execute.mockResolvedValueOnce({ rows: [] });
-      execute.mockResolvedValueOnce({ rows: [] });
+      queueTenantContext();
+      queueRecoveryAuthority();
       execute.mockResolvedValueOnce({ rows: [{ writeEligible: false }] });
       const work = jest.fn();
 
@@ -114,10 +126,8 @@ describe('DatabaseService tenant transactions', () => {
   );
 
   it('fails closed when the authoritative store is missing', async () => {
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
+    queueTenantContext();
+    queueRecoveryAuthority();
     execute.mockResolvedValueOnce({ rows: [] });
     const work = jest.fn();
 
@@ -129,10 +139,8 @@ describe('DatabaseService tenant transactions', () => {
   });
 
   it('translates a PostgreSQL tenant-authorization rejection without exposing database details', async () => {
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
+    queueTenantContext();
+    queueRecoveryAuthority();
     execute.mockRejectedValueOnce(
       Object.assign(new Error('Failed query'), {
         cause: Object.assign(new Error('Effective entitlement requires an authorized Store'), {
@@ -170,10 +178,8 @@ describe('DatabaseService tenant transactions', () => {
     );
     expect(setupWork).not.toHaveBeenCalled();
 
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
-    execute.mockResolvedValueOnce({ rows: [] });
+    queueTenantContext();
+    queueRecoveryAuthority();
     const entitlementWork = jest.fn();
     execute.mockRejectedValueOnce(new Error('entitlement lock failed'));
     await expect(service.withBusinessWriteTransaction(context, entitlementWork)).rejects.toThrow(
@@ -196,7 +202,7 @@ describe('DatabaseService tenant transactions', () => {
     ).resolves.toBe('applied');
 
     expect(database.transaction).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledTimes(5);
+    expect(execute).toHaveBeenCalledTimes(7);
     expect(work).toHaveBeenCalledWith(transaction);
   });
 
@@ -205,7 +211,9 @@ describe('DatabaseService tenant transactions', () => {
       operationId: 'd6339f6f-a043-4138-8f39-3de1c584073a',
       operationType: 'supplier_invoices.post.v1',
     };
-    const savepointExecute = jest.fn().mockResolvedValue({ rows: [{ writeEligible: true }] });
+    const savepointExecute = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ writeEligible: true, recoveryGenerationId }] });
     const savepoint = { execute: savepointExecute } as unknown as DatabaseTransaction;
 
     await expect(
@@ -214,7 +222,7 @@ describe('DatabaseService tenant transactions', () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(savepointExecute).toHaveBeenCalledTimes(1);
+    expect(savepointExecute).toHaveBeenCalledTimes(2);
     expect(database.transaction).toHaveBeenCalledTimes(1);
   });
 

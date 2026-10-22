@@ -212,3 +212,17 @@ export const attachmentLifecycleAuditRoutines = [
   'ledger.read_owner_business_audit_pre_attachments_v1(p_limit integer, p_cursor_occurred_at timestamp with time zone, p_cursor_event_id uuid, p_occurred_from timestamp with time zone, p_occurred_to timestamp with time zone, p_actor_user_id uuid, p_action text, p_entity_type text, p_entity_id uuid)',
   'ledger.remove_attachment_v1(p_attachment_id uuid)',
 ] as const;
+
+export const platformRecoveryFoundationTables = ['platform.recovery_control'] as const;
+
+export const platformRecoveryFoundationRoutines = [
+  'ledger.assert_platform_write_authority_v1(p_expected_generation uuid)',
+  'platform.activate_new_recovery_generation_v1(p_expected_generation uuid)',
+  'platform.assert_platform_session_authority_v1(p_session_issued_at timestamp with time zone)',
+  'platform.capture_platform_auth_authority_v1()',
+  'platform.fence_platform_recovery_v1(p_expected_generation uuid)',
+  'platform.lock_platform_recovery_authority_v1(p_expected_generation uuid, p_allow_generationless_after_cutoff boolean, p_session_issued_at timestamp with time zone, p_require_session_cutoff boolean)',
+  'platform.read_platform_recovery_control_v1()',
+  'sync.assert_platform_recovery_authority_v1(p_expected_generation uuid)',
+  'sync.capture_platform_recovery_authority_v1()',
+] as const;

@@ -5,12 +5,13 @@ import { Injectable } from '@nestjs/common';
 import { isUuid } from '../common/logging/request-id';
 import { AppConfigService } from '../config/app-config.service';
 
-const cursorPrefix = 'sc1';
+const cursorPrefix = 'sc2';
 const maximumCursorLength = 512;
 const maximumSequence = 9_223_372_036_854_775_807n;
 
 export interface SyncCursorPosition {
   storeId: string;
+  recoveryGenerationId: string;
   sequence: bigint;
 }
 
@@ -51,12 +52,15 @@ export class SyncCursorService {
     ]);
   }
 
-  issue(storeId: string, sequenceValue: string | bigint): string {
+  issue(storeId: string, recoveryGenerationId: string, sequenceValue: string | bigint): string {
     const normalizedStoreId = storeId.toLowerCase();
-    if (!isUuid(normalizedStoreId)) throw new InvalidSyncCursorError();
+    const normalizedGenerationId = recoveryGenerationId.toLowerCase();
+    if (!isUuid(normalizedStoreId) || !isUuid(normalizedGenerationId)) {
+      throw new InvalidSyncCursorError();
+    }
     const sequence = parseSequence(sequenceValue.toString());
     const encodedKeyId = Buffer.from(this.activeKeyId, 'utf8').toString('base64url');
-    const unsigned = `${cursorPrefix}.${encodedKeyId}.${normalizedStoreId}.${sequence.toString()}`;
+    const unsigned = `${cursorPrefix}.${encodedKeyId}.${normalizedStoreId}.${normalizedGenerationId}.${sequence.toString()}`;
     const key = this.keys.get(this.activeKeyId);
     if (!key) throw new Error('The active synchronization cursor key is unavailable.');
     return `${unsigned}.${this.signature(unsigned, key)}`;
@@ -68,9 +72,18 @@ export class SyncCursorService {
       throw new InvalidSyncCursorError();
     }
     const parts = value.split('.');
-    if (parts.length !== 5 || parts[0] !== cursorPrefix) throw new InvalidSyncCursorError();
-    const [, encodedKeyId, storeId, sequenceValue, signature] = parts;
-    if (!encodedKeyId || !storeId || !sequenceValue || !signature || !isUuid(storeId)) {
+    if (parts[0] === 'sc1') throw new LegacySyncCursorError();
+    if (parts.length !== 6 || parts[0] !== cursorPrefix) throw new InvalidSyncCursorError();
+    const [, encodedKeyId, storeId, recoveryGenerationId, sequenceValue, signature] = parts;
+    if (
+      !encodedKeyId ||
+      !storeId ||
+      !recoveryGenerationId ||
+      !sequenceValue ||
+      !signature ||
+      !isUuid(storeId) ||
+      !isUuid(recoveryGenerationId)
+    ) {
       throw new InvalidSyncCursorError();
     }
 
@@ -84,7 +97,7 @@ export class SyncCursorService {
     const key = this.keys.get(keyId);
     if (!key) throw new LegacySyncCursorError();
 
-    const unsigned = `${cursorPrefix}.${encodedKeyId}.${storeId}.${sequenceValue}`;
+    const unsigned = `${cursorPrefix}.${encodedKeyId}.${storeId}.${recoveryGenerationId}.${sequenceValue}`;
     if (!/^[A-Za-z0-9_-]{43}$/.test(signature)) throw new InvalidSyncCursorError();
     const expected = Buffer.from(this.signature(unsigned, key), 'ascii');
     const actual = Buffer.from(signature, 'ascii');
@@ -92,7 +105,11 @@ export class SyncCursorService {
       throw new InvalidSyncCursorError();
     }
 
-    return { storeId: storeId.toLowerCase(), sequence: parseSequence(sequenceValue) };
+    return {
+      storeId: storeId.toLowerCase(),
+      recoveryGenerationId: recoveryGenerationId.toLowerCase(),
+      sequence: parseSequence(sequenceValue),
+    };
   }
 
   private signature(unsigned: string, key: Buffer): string {

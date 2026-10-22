@@ -22,6 +22,7 @@ const authOwnerMigrationAllowList = new Set([
   '0004_authentication_database_api.sql',
   '0005_refresh_rotation_session_boundary.sql',
   '0024_offline_operation_push_authority.sql',
+  '0033_platform_recovery_generation_fencing.sql',
 ]);
 
 export function parseCommand(value: string | undefined): MigrationCommand {

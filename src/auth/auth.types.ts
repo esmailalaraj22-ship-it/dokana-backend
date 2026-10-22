@@ -30,6 +30,7 @@ export interface AuthenticatedPrincipal {
   deviceId: string;
   sessionId: string;
   sessionExpiresAt: Date;
+  recoveryGenerationId: string;
 }
 
 export interface SyncAuthenticatedPrincipal extends Omit<AuthenticatedPrincipal, 'storeStatus'> {
@@ -74,6 +75,7 @@ export interface RefreshRotationResult {
   deviceId: string | null;
   sessionId: string | null;
   sessionExpiresAt: Date | null;
+  recoveryGenerationId: string | null;
 }
 
 export interface VerifiedAccessToken {
@@ -98,6 +100,7 @@ export interface SyncAuthenticationResponse {
   };
   deviceId: string;
   sessionId: string;
+  recoveryGenerationId: string;
 }
 
 export interface AuthenticationResponse {
@@ -122,4 +125,5 @@ export interface AuthenticationResponse {
   };
   deviceId: string;
   sessionId: string;
+  recoveryGenerationId: string;
 }

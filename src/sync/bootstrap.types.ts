@@ -8,6 +8,7 @@ export interface BootstrapBoundary {
   baseWatermark: string;
   snapshotId: string;
   serverTime: Date;
+  recoveryGenerationId: string;
 }
 
 export interface BootstrapDatasetManifest {
@@ -33,6 +34,7 @@ export interface BootstrapManifestCore {
   sessionId: string;
   datasetId: string;
   bootstrapGenerationId: string;
+  recoveryGenerationId: string;
   storeId: string;
   deviceId: string;
   status: 'ready';

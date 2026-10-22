@@ -68,10 +68,14 @@ export class ChangePullService {
       throw error;
     }
     if (cursor.storeId !== context.storeId) throw this.invalidCursor();
+    if (cursor.recoveryGenerationId !== principal.recoveryGenerationId) {
+      throw this.rebootstrapRequired();
+    }
     const limit = query.limit ?? defaultPageSize;
 
     try {
       return await this.database.withTenantSnapshotTransaction(context, async (transaction) => {
+        await this.database.assertSyncRecoveryAuthority(transaction, cursor.recoveryGenerationId);
         const bounds = await this.repository.readBounds(transaction, context.storeId);
         if (bounds.streamGeneration !== supportedStreamGeneration) {
           throw this.unavailable();
@@ -92,7 +96,11 @@ export class ChangePullService {
         return {
           changeFeedVersion: 1,
           changes: rows.map((row) => this.mapChange(row)),
-          nextCursor: this.cursors.issue(context.storeId, lastSequence),
+          nextCursor: this.cursors.issue(
+            context.storeId,
+            cursor.recoveryGenerationId,
+            lastSequence,
+          ),
           hasMore: lastSequence < bounds.headSequence,
         };
       });
@@ -167,7 +175,8 @@ export class ChangePullService {
     if (
       principal.storeId !== context.storeId ||
       principal.userId !== context.userId ||
-      principal.deviceId !== context.deviceId
+      principal.deviceId !== context.deviceId ||
+      principal.recoveryGenerationId !== context.recoveryGenerationId
     ) {
       throw new ForbiddenException({
         code: 'SYNC_PULL_NOT_ALLOWED',
