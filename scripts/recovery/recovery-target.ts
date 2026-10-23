@@ -19,6 +19,7 @@ export interface RecoveryTargetVerification {
   checkConstraints: number;
   correctnessIndexes: number;
   forcedRlsTables: number;
+  unsafeStoreOwnedRlsTables: number;
   policies: number;
   securityDefinerFunctions: number;
   triggers: number;
@@ -149,6 +150,7 @@ export async function verifyRecoveryTargetDatabase(input: {
         ),
         admin.query<{
           forcedRlsTables: number;
+          unsafeStoreOwnedRlsTables: number;
           policies: number;
           securityDefinerFunctions: number;
           triggers: number;
@@ -159,6 +161,18 @@ export async function verifyRecoveryTargetDatabase(input: {
             (select count(*)::integer from pg_class c join pg_namespace n on n.oid=c.relnamespace
              where n.nspname=any($1::text[]) and c.relkind='r' and c.relforcerowsecurity)
               as "forcedRlsTables",
+            (select count(distinct c.oid)::integer
+             from pg_class c
+             join pg_namespace n on n.oid=c.relnamespace
+             join pg_attribute a on a.attrelid=c.oid
+               and a.attname='store_id' and not a.attisdropped
+             where n.nspname=any($1::text[])
+               and c.relkind='r'
+               and (not c.relrowsecurity or not c.relforcerowsecurity)
+               and not (
+                 n.nspname='platform'
+                 and c.relname in ('admin_actions', 'auth_sessions')
+               )) as "unsafeStoreOwnedRlsTables",
             (select count(*)::integer from pg_policies where schemaname=any($1::text[])) as policies,
             (select count(*)::integer from pg_proc p join pg_namespace n on n.oid=p.pronamespace
              where n.nspname=any($1::text[]) and p.prosecdef) as "securityDefinerFunctions",
@@ -215,6 +229,7 @@ export async function verifyRecoveryTargetDatabase(input: {
     if (
       !securityState ||
       securityState.forcedRlsTables <= 0 ||
+      securityState.unsafeStoreOwnedRlsTables !== 0 ||
       securityState.policies <= 0 ||
       securityState.securityDefinerFunctions <= 0 ||
       securityState.triggers <= 0 ||
