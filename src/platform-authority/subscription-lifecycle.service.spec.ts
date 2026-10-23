@@ -32,6 +32,7 @@ describe('SubscriptionLifecycleService', () => {
   };
   let database: DatabaseService;
   let withTenantTransaction: jest.Mock;
+  let assertPlatformWriteAuthority: jest.Mock;
   let repository: jest.Mocked<
     Pick<SubscriptionLifecycleRepository, 'mutate' | 'readLifecycle' | 'readHistory'>
   >;
@@ -44,7 +45,11 @@ describe('SubscriptionLifecycleService', () => {
         work: (value: DatabaseTransaction) => Promise<unknown>,
       ) => work(transaction),
     );
-    database = { withTenantTransaction } as unknown as DatabaseService;
+    assertPlatformWriteAuthority = jest.fn().mockResolvedValue(undefined);
+    database = {
+      withTenantTransaction,
+      assertPlatformWriteAuthority,
+    } as unknown as DatabaseService;
     repository = {
       mutate: jest.fn(async (_transaction, _storeId, input) => result(input.action)),
       readLifecycle: jest.fn().mockResolvedValue([]),
@@ -66,6 +71,7 @@ describe('SubscriptionLifecycleService', () => {
       });
 
       expect(response.action).toBe(action);
+      expect(assertPlatformWriteAuthority).toHaveBeenCalledWith(transaction);
       expect(repository.mutate).toHaveBeenCalledWith(
         transaction,
         context.storeId,
@@ -74,6 +80,9 @@ describe('SubscriptionLifecycleService', () => {
           operationId: operationId.toLowerCase(),
           reason: 'Approved lifecycle reason',
         }),
+      );
+      expect(assertPlatformWriteAuthority.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.mutate.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
       );
       expect(repository.mutate.mock.calls[0]?.[2].requestHash).toMatch(/^[0-9a-f]{64}$/);
     },
@@ -96,5 +105,15 @@ describe('SubscriptionLifecycleService', () => {
     const first = repository.mutate.mock.calls[0]?.[2];
     const second = repository.mutate.mock.calls[1]?.[2];
     expect(first?.requestHash).not.toBe(second?.requestHash);
+  });
+
+  it('does not mutate subscription state when recovery write authority rejects', async () => {
+    assertPlatformWriteAuthority.mockRejectedValue(new Error('platform fenced'));
+
+    await expect(
+      service.activate(context, { operationId: randomUUID(), reason: 'Approved activation' }),
+    ).rejects.toThrow('platform fenced');
+
+    expect(repository.mutate).not.toHaveBeenCalled();
   });
 });

@@ -70,9 +70,10 @@ export class SubscriptionLifecycleService {
     command: SubscriptionLifecycleCommand,
   ): Promise<SubscriptionLifecycleResult> {
     const prepared = this.prepare(context.storeId, action, command);
-    return this.database.withTenantTransaction(context, (transaction) =>
-      this.repository.mutate(transaction, context.storeId, prepared),
-    );
+    return this.database.withTenantTransaction(context, async (transaction) => {
+      await this.database.assertPlatformWriteAuthority(transaction);
+      return this.repository.mutate(transaction, context.storeId, prepared);
+    });
   }
 
   private prepare(

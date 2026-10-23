@@ -105,9 +105,10 @@ export class OfflineLicenseAdminService {
     };
 
     try {
-      const result = await this.database.withTenantTransaction(context, (transaction) =>
-        this.repository.revoke(transaction, context.storeId, input),
-      );
+      const result = await this.database.withTenantTransaction(context, async (transaction) => {
+        await this.database.assertPlatformWriteAuthority(transaction);
+        return this.repository.revoke(transaction, context.storeId, input);
+      });
       return {
         licenseId: result.licenseId,
         revokedAt: result.revokedAt.toISOString(),

@@ -93,6 +93,7 @@ async function main(): Promise<void> {
   ) {
     const execution = new RecoveryExecutionService({
       storage,
+      targetAttachmentStorage: createRecoveryTargetAttachmentStorage(environment),
       toolchain,
       adminConnectionString: requiredAdminUrl(environment),
       migrationConnectionString: requiredMigrationUrl(environment),
@@ -194,6 +195,21 @@ function createAttachmentStorage(environment: Environment) {
     accessKeyId: environment.ATTACHMENT_S3_ACCESS_KEY_ID,
     secretAccessKey: environment.ATTACHMENT_S3_SECRET_ACCESS_KEY,
     forcePathStyle: environment.ATTACHMENT_S3_FORCE_PATH_STYLE,
+    timeoutMs: environment.ATTACHMENT_STORAGE_TIMEOUT_MS,
+  });
+}
+
+function createRecoveryTargetAttachmentStorage(environment: Environment) {
+  if (!environment.RECOVERY_TARGET_ATTACHMENT_S3_BUCKET) {
+    return new UnavailableAttachmentStorage();
+  }
+  return new S3AttachmentStorage({
+    endpoint: environment.RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT,
+    region: environment.RECOVERY_TARGET_ATTACHMENT_S3_REGION,
+    bucket: environment.RECOVERY_TARGET_ATTACHMENT_S3_BUCKET,
+    accessKeyId: environment.RECOVERY_TARGET_ATTACHMENT_S3_ACCESS_KEY_ID,
+    secretAccessKey: environment.RECOVERY_TARGET_ATTACHMENT_S3_SECRET_ACCESS_KEY,
+    forcePathStyle: environment.RECOVERY_TARGET_ATTACHMENT_S3_FORCE_PATH_STYLE,
     timeoutMs: environment.ATTACHMENT_STORAGE_TIMEOUT_MS,
   });
 }

@@ -136,6 +136,36 @@ describe('validateEnvironment', () => {
         RECOVERY_S3_ENDPOINT: 'http://objects.example.test',
       }),
     ).toThrow('must use HTTPS in production');
+
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'production',
+        ATTACHMENT_S3_BUCKET: 'live-attachments',
+        RECOVERY_S3_BUCKET: 'private-recovery',
+        RECOVERY_TARGET_ATTACHMENT_S3_BUCKET: 'live-attachments',
+      }),
+    ).toThrow('must use a bucket distinct from live attachments and recovery artifacts');
+
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        APP_ENV: 'production',
+        ATTACHMENT_S3_BUCKET: 'live-attachments',
+        RECOVERY_S3_BUCKET: 'private-recovery',
+        RECOVERY_TARGET_ATTACHMENT_S3_BUCKET: 'isolated-restored-attachments',
+        RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT: 'http://objects.example.test',
+      }),
+    ).toThrow('must use HTTPS in production');
+  });
+
+  it('requires recovery target attachment credentials to be configured as a pair', () => {
+    expect(() =>
+      validateEnvironment({
+        ...minimumEnvironment,
+        RECOVERY_TARGET_ATTACHMENT_S3_ACCESS_KEY_ID: 'recovery-target-access',
+      }),
+    ).toThrow('access-key ID and secret access key must be configured together');
   });
 
   it('permits filesystem recovery storage only outside production', () => {

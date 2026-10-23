@@ -75,6 +75,7 @@ describeWithDatabase('isolated platform recovery execution', () => {
       const execution = () =>
         new RecoveryExecutionService({
           storage,
+          targetAttachmentStorage: new UnavailableAttachmentStorage(),
           toolchain,
           adminConnectionString: sourceAdminUrl,
           migrationConnectionString: sourceMigrationUrl,

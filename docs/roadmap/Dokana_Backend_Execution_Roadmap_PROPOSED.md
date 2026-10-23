@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S22                             |
-| Current Station           | S22 CLOSED; S23 next / not started          |
+| Closed execution history  | Stations S0-S21; S22 awaiting re-review     |
+| Current Station           | S22 remediation implemented; re-review required |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -68,8 +68,8 @@ The roadmap was reconstructed against this verified state:
 | Migrations                      | 33 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
-| Last fully closed Station       | S22                                        |
-| Current task                    | S22 closed; S23 next / not started         |
+| Last fully closed Station       | S21                                        |
+| Current task                    | S22 remediation awaiting independent re-review |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -2196,6 +2196,26 @@ gates where applicable.
   checksums, no migration `0034`, no test database, binary, lock, or idle-transaction residue, and
   zero PostgreSQL-reference or SQLite delta.
 
+#### S22 Independent Audit Remediation Status
+
+- An independent S22 audit identified two high-severity blockers: recovery did not populate the
+  isolated target's operational attachment storage, and several platform mutation families did
+  not hold shared recovery authority through their authoritative transaction commit.
+- H1 remediation now restores every required ACTIVE protected attachment into separately
+  configured isolated operational storage at the metadata-authoritative key and verifies target
+  size, SHA-256, and readback before activation. REMOVED attachments remain unavailable, and the
+  corrected drill no longer manually seeds the target.
+- H2 remediation now acquires the existing PostgreSQL recovery-write authority inside the actual
+  mutation transaction for subscription lifecycle, Store provisioning/lifecycle, Platform Admin,
+  Offline License revocation, and notification writes. Existing business-write fencing and the
+  accounting authority remain unchanged.
+- Focused remediation tests, the corrected real-PostgreSQL drill, 1,340 unit tests, and 901 broad
+  integration tests passed with no skips. The corrected focused drill observed a 2.145-second
+  point-age/loss window and a 26.493-second local drill duration; these are local test measurements,
+  not production RPO/RTO evidence.
+- Remediation implementation is complete, but independent S22 closure re-review remains required.
+  S23 is not started and may not begin from this remediation record.
+
 #### S23 Recovery Handoffs
 
 S23 must preserve and close the remaining deployment and release gates: real managed PostgreSQL
@@ -2359,11 +2379,11 @@ new explicit owner decision.
 
 | Field                               | Current position                                   |
 | ----------------------------------- | -------------------------------------------------- |
-| Last fully closed Station           | S22 - Backup, Restore, and Recovery                |
+| Last fully closed Station           | S21 - Notifications, Attachments, and Audit Access |
 | S19.4 starting checkpoint           | `139b408c6e2fc367d02604b6af30e3201fe8c65e`         |
-| Safe completed capabilities         | S0-S22                                             |
-| First incomplete release dependency | S23 - Final Validation and Release Readiness       |
-| Current Station                     | S22 CLOSED; S23 NEXT / NOT STARTED                 |
+| Safe completed capabilities         | S0-S21; S22 remediation implemented                |
+| First incomplete release dependency | S22 independent remediation re-review              |
+| Current Station                     | S22 RE-REVIEW REQUIRED; S23 NOT STARTED            |
 | S18 current status                  | CLOSED                                             |
 | S18.1 current status                | CLOSED                                             |
 | S18.2 current status                | CLOSED                                             |
@@ -2395,13 +2415,13 @@ new explicit owner decision.
 | S21.3 current status                | CLOSED                                             |
 | S21.4 current status                | CLOSED                                             |
 | S21.5 current status                | CLOSED                                             |
-| S22 current status                  | CLOSED                                             |
+| S22 current status                  | REMEDIATION IMPLEMENTED / RE-REVIEW REQUIRED       |
 | S22.1 current status                | CLOSED                                             |
 | S22.2 current status                | CLOSED                                             |
 | S22.3 current status                | CLOSED                                             |
 | S22.4 current status                | CLOSED                                             |
 | S22.5 current status                | CLOSED                                             |
-| S23 current status                  | NEXT / NOT STARTED                                 |
+| S23 current status                  | NOT STARTED                                        |
 
 Do not start S23 from this document. It requires a separate orientation and execution prompt.
 Database, PostgreSQL-reference, and SQLite deltas remain 0 by default.

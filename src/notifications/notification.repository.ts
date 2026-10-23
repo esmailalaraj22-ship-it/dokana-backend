@@ -103,6 +103,7 @@ export class NotificationRepository {
     externalCauses: readonly NotificationCause[] = [],
   ): Promise<void> {
     return this.database.withTenantTransaction(context, async (transaction) => {
+      await this.database.assertPlatformWriteAuthority(transaction);
       await transaction.execute(sql`
         select pg_advisory_xact_lock(
           hashtextextended(${'dokana:s21:notifications:' + context.storeId}, 0)
@@ -270,6 +271,7 @@ export class NotificationRepository {
     read: boolean,
   ): Promise<Date | null | undefined> {
     return this.database.withTenantTransaction(context, async (transaction) => {
+      await this.database.assertPlatformWriteAuthority(transaction);
       const exists = await transaction.execute(sql`
         select id
         from ledger.notifications

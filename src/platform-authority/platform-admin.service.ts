@@ -272,9 +272,10 @@ export class PlatformAdminService {
     const context = this.targetContext(caller, storeId);
     try {
       const prepared = this.prepareStoreLifecycle(context.storeId, action, body);
-      const result = await this.database.withTenantTransaction(context, (transaction) =>
-        this.repository.mutateStoreLifecycle(transaction, context.storeId, prepared),
-      );
+      const result = await this.database.withTenantTransaction(context, async (transaction) => {
+        await this.database.assertPlatformWriteAuthority(transaction);
+        return this.repository.mutateStoreLifecycle(transaction, context.storeId, prepared);
+      });
       return {
         storeId: result.storeId,
         status: result.status,

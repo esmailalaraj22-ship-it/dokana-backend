@@ -2,7 +2,7 @@ import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 
 import type { DatabaseService } from '../database/database.service';
-import type { DatabaseTransaction } from '../database/database.types';
+import type { DatabaseTransaction, TenantTransactionContext } from '../database/database.types';
 import { NotificationRepository } from './notification.repository';
 import type { NotificationCause } from './notification.types';
 
@@ -190,5 +190,55 @@ describe('NotificationRepository canonical cause mapping', () => {
         storeId,
       ),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('NotificationRepository recovery write authority', () => {
+  const context: TenantTransactionContext = {
+    storeId: '24000000-0000-4000-8000-000000000001',
+    userId: '24000000-0000-4000-8000-000000000002',
+    deviceId: '24000000-0000-4000-8000-000000000003',
+    requestId: '24000000-0000-4000-8000-000000000004',
+  };
+  let transaction: DatabaseTransaction;
+  let execute: jest.Mock;
+  let assertPlatformWriteAuthority: jest.Mock;
+  let repository: NotificationRepository;
+
+  beforeEach(() => {
+    execute = jest.fn().mockResolvedValue({ rows: [] });
+    transaction = { execute } as unknown as DatabaseTransaction;
+    assertPlatformWriteAuthority = jest.fn().mockResolvedValue(undefined);
+    const database = {
+      withTenantTransaction: jest.fn(
+        async (
+          _context: TenantTransactionContext,
+          work: (value: DatabaseTransaction) => Promise<unknown>,
+        ) => work(transaction),
+      ),
+      assertPlatformWriteAuthority,
+    } as unknown as DatabaseService;
+    repository = new NotificationRepository(database);
+  });
+
+  it('acquires authority on the reconciliation transaction before its first lock or write', async () => {
+    execute.mockRejectedValue(new Error('stop after authority'));
+
+    await expect(repository.reconcile(context)).rejects.toThrow('stop after authority');
+
+    expect(assertPlatformWriteAuthority).toHaveBeenCalledWith(transaction);
+    expect(assertPlatformWriteAuthority.mock.invocationCallOrder[0]).toBeLessThan(
+      execute.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+  });
+
+  it('blocks notification state writes without leaving a mutation when authority rejects', async () => {
+    assertPlatformWriteAuthority.mockRejectedValue(new Error('platform fenced'));
+
+    await expect(
+      repository.setReadState(context, '24000000-0000-4000-8000-000000000005', true),
+    ).rejects.toThrow('platform fenced');
+
+    expect(execute).not.toHaveBeenCalled();
   });
 });

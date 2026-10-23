@@ -254,6 +254,12 @@ export const environmentSchema = z
     RECOVERY_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
     RECOVERY_S3_FORCE_PATH_STYLE: booleanStringSchema.default(false),
     RECOVERY_S3_KMS_KEY_ID: optionalNonEmptyStringSchema,
+    RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT: optionalHttpUrlSchema,
+    RECOVERY_TARGET_ATTACHMENT_S3_REGION: z.string().min(1).default('us-east-1'),
+    RECOVERY_TARGET_ATTACHMENT_S3_BUCKET: optionalNonEmptyStringSchema,
+    RECOVERY_TARGET_ATTACHMENT_S3_ACCESS_KEY_ID: optionalNonEmptyStringSchema,
+    RECOVERY_TARGET_ATTACHMENT_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
+    RECOVERY_TARGET_ATTACHMENT_S3_FORCE_PATH_STYLE: booleanStringSchema.default(false),
     RECOVERY_STORAGE_TIMEOUT_MS: z.coerce.number().int().min(100).max(600_000).default(30_000),
     RECOVERY_LOGICAL_MAX_AGE_HOURS: z.coerce.number().int().min(24).max(72).default(36),
     RECOVERY_ATTACHMENT_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
@@ -321,6 +327,17 @@ export const environmentSchema = z
     }
 
     if (
+      (environment.RECOVERY_TARGET_ATTACHMENT_S3_ACCESS_KEY_ID === undefined) !==
+      (environment.RECOVERY_TARGET_ATTACHMENT_S3_SECRET_ACCESS_KEY === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_TARGET_ATTACHMENT_S3_ACCESS_KEY_ID'],
+        message: 'access-key ID and secret access key must be configured together',
+      });
+    }
+
+    if (
       environment.RECOVERY_STORAGE_DRIVER === 'filesystem' &&
       environment.RECOVERY_FILESYSTEM_ROOT === undefined
     ) {
@@ -365,6 +382,18 @@ export const environmentSchema = z
     }
 
     if (
+      environment.RECOVERY_TARGET_ATTACHMENT_S3_BUCKET !== undefined &&
+      (environment.RECOVERY_TARGET_ATTACHMENT_S3_BUCKET === environment.ATTACHMENT_S3_BUCKET ||
+        environment.RECOVERY_TARGET_ATTACHMENT_S3_BUCKET === environment.RECOVERY_S3_BUCKET)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_TARGET_ATTACHMENT_S3_BUCKET'],
+        message: 'must use a bucket distinct from live attachments and recovery artifacts',
+      });
+    }
+
+    if (
       environment.APP_ENV === 'production' &&
       environment.RECOVERY_STORAGE_DRIVER === 's3' &&
       environment.RECOVERY_S3_ENDPOINT?.startsWith('http:')
@@ -372,6 +401,17 @@ export const environmentSchema = z
       context.addIssue({
         code: 'custom',
         path: ['RECOVERY_S3_ENDPOINT'],
+        message: 'must use HTTPS in production',
+      });
+    }
+
+    if (
+      environment.APP_ENV === 'production' &&
+      environment.RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT?.startsWith('http:')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT'],
         message: 'must use HTTPS in production',
       });
     }

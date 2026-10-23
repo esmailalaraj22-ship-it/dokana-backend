@@ -47,7 +47,6 @@ import { DATABASE_POOL } from '../src/database/database.constants';
 import { NotificationSchedulerService } from '../src/notifications/notification-scheduler.service';
 import type { OfflineLicenseResponse } from '../src/offline-licenses/offline-license.types';
 import { deriveTransactionGroupId } from '../src/money-movements/money-movement-identity';
-import { recoveryAttemptAttachmentKey } from '../src/recovery/recovery-attempt';
 import { FilesystemRecoveryArtifactStorage } from '../src/recovery/filesystem-recovery-artifact-storage';
 import type { RecoveryRuntimeConfig } from '../src/recovery/recovery-config';
 import type { SalePostingResponse } from '../src/sales/sale-posting.types';
@@ -114,6 +113,14 @@ class DrillAttachmentStorage implements AttachmentStoragePort {
 
   set(key: string, body: Buffer): void {
     this.objects.set(key, { body: Buffer.from(body), lastModified: new Date() });
+  }
+
+  corruptExistingObject(key: string): void {
+    const existing = this.objects.get(key);
+    if (!existing) throw new Error('Attachment fault injection requires an existing object.');
+    const body = Buffer.from(existing.body);
+    body[0] = (body[0] ?? 0) ^ 0xff;
+    this.objects.set(key, { body, lastModified: new Date() });
   }
 
   putObject(input: PutAttachmentObjectInput): Promise<void> {
@@ -1032,6 +1039,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
       let inFlightReleased = false;
       const execution = new RecoveryExecutionService({
         storage: recoveryStorage,
+        targetAttachmentStorage,
         toolchain,
         adminConnectionString: sourceAdminUrl,
         migrationConnectionString: sourceMigrationUrl,
@@ -1110,9 +1118,6 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
         await expect(execution.verify(prepared.recoveryAttemptId)).rejects.toThrow(
           'not ready for verification',
         );
-        await execution.restoreAttachments(prepared.recoveryAttemptId);
-        attachmentsRestoredAt = new Date().toISOString();
-
         const entriesDirectory = await mkdtemp(join(tmpdir(), 'dokana-s225-entries-'));
         const entriesPath = join(entriesDirectory, 'entries.ndjson');
         try {
@@ -1131,27 +1136,72 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
           expect(entries).toHaveLength(1);
           const activeEntry = entries[0];
           if (!activeEntry) throw new Error('Active attachment recovery entry is unavailable.');
-          const stagedKey = recoveryAttemptAttachmentKey({
-            attemptId: prepared.recoveryAttemptId,
-            attachmentId: activeEntry.attachmentId,
-            sha256: activeEntry.sha256,
+          const protectedBody = await recoveryStorage.readBuffer(
+            activeEntry.protectedObjectKey,
+            ATTACHMENT_MAX_BYTES,
+          );
+          if (!protectedBody) throw new Error('Protected attachment body is unavailable.');
+
+          await recoveryStorage.deleteObject(activeEntry.protectedObjectKey);
+          await expect(execution.restoreAttachments(prepared.recoveryAttemptId)).rejects.toThrow(
+            'integrity verification',
+          );
+          await expect(
+            execution.activate(prepared.recoveryAttemptId, recoveryPoint.recoveryPointId),
+          ).rejects.toThrow('not bound');
+          await recoveryStorage.putBuffer({
+            key: activeEntry.protectedObjectKey,
+            body: protectedBody,
+            contentType: activeEntry.mediaType,
+            contentLength: protectedBody.byteLength,
+            checksumSha256: activeEntry.sha256,
           });
-          const stagedBody = await recoveryStorage.readBuffer(stagedKey, ATTACHMENT_MAX_BYTES);
-          if (!stagedBody) throw new Error('Staged attachment body is unavailable.');
-          await recoveryStorage.deleteObject(stagedKey);
+
+          const corruptProtectedBody = Buffer.from(protectedBody);
+          corruptProtectedBody[0] = (corruptProtectedBody[0] ?? 0) ^ 0xff;
+          await recoveryStorage.deleteObject(activeEntry.protectedObjectKey);
+          await recoveryStorage.putBuffer({
+            key: activeEntry.protectedObjectKey,
+            body: corruptProtectedBody,
+            contentType: activeEntry.mediaType,
+            contentLength: corruptProtectedBody.byteLength,
+            checksumSha256: activeEntry.sha256,
+          });
+          await expect(execution.restoreAttachments(prepared.recoveryAttemptId)).rejects.toThrow(
+            'integrity verification',
+          );
+          await recoveryStorage.deleteObject(activeEntry.protectedObjectKey);
+          await recoveryStorage.putBuffer({
+            key: activeEntry.protectedObjectKey,
+            body: protectedBody,
+            contentType: activeEntry.mediaType,
+            contentLength: protectedBody.byteLength,
+            checksumSha256: activeEntry.sha256,
+          });
+
+          await execution.restoreAttachments(prepared.recoveryAttemptId);
+          attachmentsRestoredAt = new Date().toISOString();
+          const operationalKey = `stores/${ownerA.storeId}/attachments/${activeAttachmentId}`;
+          const operationalObject = await targetAttachmentStorage.getObject(operationalKey);
+          expect(operationalObject).toEqual({
+            body: activeAttachmentBody,
+            contentLength: activeAttachmentBody.byteLength,
+          });
+          await targetAttachmentStorage.deleteObject(operationalKey);
           await expect(execution.verify(prepared.recoveryAttemptId)).rejects.toThrow(
             'integrity verification',
           );
           await expect(
             execution.approve(prepared.recoveryAttemptId, recoveryPoint.recoveryPointId),
           ).rejects.toThrow('not bound');
-          await recoveryStorage.putBuffer({
-            key: stagedKey,
-            body: stagedBody,
-            contentType: 'application/octet-stream',
-            contentLength: stagedBody.byteLength,
-            checksumSha256: activeEntry.sha256,
-          });
+          await execution.restoreAttachments(prepared.recoveryAttemptId);
+
+          targetAttachmentStorage.corruptExistingObject(operationalKey);
+          await expect(execution.verify(prepared.recoveryAttemptId)).rejects.toThrow(
+            'integrity verification',
+          );
+          await targetAttachmentStorage.deleteObject(operationalKey);
+          await execution.restoreAttachments(prepared.recoveryAttemptId);
 
           const targetAdminUrl = withDatabase(environment.adminUrl, prepared.targetDatabaseName);
           const targetMigrationUrl = withDatabase(
@@ -1219,8 +1269,16 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
             if (!activeRow || !removedRow) {
               throw new Error('Restored attachment metadata is incomplete.');
             }
-            targetAttachmentStorage.set(activeRow.remoteKey, stagedBody);
-            targetAttachmentStorage.set(removedRow.remoteKey, removedAttachmentBody);
+            expect(activeRow.remoteKey).toBe(
+              `stores/${ownerA.storeId}/attachments/${activeAttachmentId}`,
+            );
+            await expect(targetAttachmentStorage.getObject(activeRow.remoteKey)).resolves.toEqual({
+              body: activeAttachmentBody,
+              contentLength: activeAttachmentBody.byteLength,
+            });
+            await expect(
+              targetAttachmentStorage.getObject(removedRow.remoteKey),
+            ).resolves.toBeNull();
 
             const targetRuntime = createTestPool(targetRuntimeUrl, 'dokana-s225-target-rls', 1);
             try {

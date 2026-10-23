@@ -50,6 +50,7 @@ function command(operationId = randomUUID()): StoreProvisioningCommand {
 describe('StoreProvisioningService', () => {
   let database: DatabaseService;
   let withTenantTransaction: jest.Mock;
+  let assertPlatformWriteAuthority: jest.Mock;
   let repository: jest.Mocked<
     Pick<SubscriptionLifecycleRepository, 'provisionIdentity' | 'readProvisioningState'>
   >;
@@ -67,7 +68,11 @@ describe('StoreProvisioningService', () => {
         work: (value: DatabaseTransaction) => Promise<unknown>,
       ) => work(transaction),
     );
-    database = { withTenantTransaction } as unknown as DatabaseService;
+    assertPlatformWriteAuthority = jest.fn().mockResolvedValue(undefined);
+    database = {
+      withTenantTransaction,
+      assertPlatformWriteAuthority,
+    } as unknown as DatabaseService;
     identity = {
       storeId: '',
       ownerUserId: '',
@@ -145,6 +150,10 @@ describe('StoreProvisioningService', () => {
       { ...actor, storeId: prepared?.storeId },
       expect.any(Function),
     );
+    expect(assertPlatformWriteAuthority).toHaveBeenCalledWith(transaction);
+    expect(assertPlatformWriteAuthority.mock.invocationCallOrder[0]).toBeLessThan(
+      execute.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
     expect(execute).toHaveBeenCalledTimes(1);
     expect(settings.ensureForStoreInTransaction).toHaveBeenCalledWith(
       transaction,
@@ -198,5 +207,16 @@ describe('StoreProvisioningService', () => {
     );
     expect(() => service.provision(actor, { ...command(), reason: ' ' })).toThrow(TypeError);
     expect(withTenantTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not provision any Store foundation when recovery write authority rejects', async () => {
+    assertPlatformWriteAuthority.mockRejectedValue(new Error('platform fenced'));
+
+    await expect(service.provision(actor, command())).rejects.toThrow('platform fenced');
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(repository.provisionIdentity).not.toHaveBeenCalled();
+    expect(settings.ensureForStoreInTransaction).not.toHaveBeenCalled();
+    expect(cash.ensureForStoreInTransaction).not.toHaveBeenCalled();
   });
 });

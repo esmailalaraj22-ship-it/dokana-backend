@@ -36,6 +36,7 @@ export class StoreProvisioningService {
     const context = { ...actor, storeId: input.storeId };
 
     return this.database.withTenantTransaction(context, async (transaction) => {
+      await this.database.assertPlatformWriteAuthority(transaction);
       // Central provisioning has no Store-owned Device yet. Keep the trusted actor,
       // Store, and request context while allowing audit rows to record a null Device.
       await transaction.execute(sql`select set_config('app.device_id', '', true)`);

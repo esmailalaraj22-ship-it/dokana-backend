@@ -5,6 +5,10 @@ import { join } from 'node:path';
 
 import type { Pool } from 'pg';
 
+import {
+  AttachmentStorageConflictError,
+  type AttachmentStoragePort,
+} from '../../src/attachments/attachment-storage.port';
 import { ATTACHMENT_MAX_BYTES } from '../../src/attachments/attachment.types';
 import {
   ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES,
@@ -12,10 +16,9 @@ import {
 } from '../../src/recovery/attachment-recovery-manifest';
 import { AttachmentRecoveryCatalogService } from '../../src/recovery/attachment-recovery-catalog.service';
 import { RecoveryAttemptCatalogService } from '../../src/recovery/recovery-attempt-catalog.service';
-import {
-  recoveryAttemptAttachmentKey,
-  type DatabaseRestoredRecoveryAttemptRecord,
-  type RecoveryAttemptRecord,
+import type {
+  DatabaseRestoredRecoveryAttemptRecord,
+  RecoveryAttemptRecord,
 } from '../../src/recovery/recovery-attempt';
 import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-artifact-storage.port';
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
@@ -41,6 +44,7 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 export interface RecoveryExecutionDependencies {
   storage: RecoveryArtifactStoragePort;
+  targetAttachmentStorage: AttachmentStoragePort;
   toolchain: PostgresToolchain;
   adminConnectionString: string;
   migrationConnectionString: string;
@@ -239,10 +243,11 @@ export class RecoveryExecutionService {
   async restoreAttachments(attemptId: string): Promise<RecoveryExecutionResult> {
     this.assertLocalExecutionBoundary();
     let state = await this.requiredAttempt(attemptId);
-    if (hasReached(state.records, 'ATTACHMENTS_RESTORED')) {
+    const previouslyRestored = hasReached(state.records, 'ATTACHMENTS_RESTORED');
+    if (state.current.phase === 'ACTIVATED') {
       return result(state.current, state.prepared.targetDatabaseName);
     }
-    if (state.current.phase !== 'DATABASE_RESTORED') {
+    if (!previouslyRestored && state.current.phase !== 'DATABASE_RESTORED') {
       throw new Error('Recovery attempt is not ready for attachment restore.');
     }
     await this.assertAttemptLock(state.prepared.lockToken);
@@ -259,7 +264,6 @@ export class RecoveryExecutionService {
       throw new Error('Recovery attachment manifest changed after preparation.');
     }
     const restored = await this.restoreAttachmentSet({
-      attemptId,
       recoveryPointId: state.prepared.recoveryPointId,
       targetDatabaseName: state.prepared.targetDatabaseName,
       entriesKey: attachmentManifest.entries.key,
@@ -267,6 +271,9 @@ export class RecoveryExecutionService {
       expectedEntryCount: attachmentManifest.attachmentEntryCount,
       expectedTotalBytes: attachmentManifest.totalProtectedBytes,
     });
+    if (previouslyRestored) {
+      return result(state.current, state.prepared.targetDatabaseName);
+    }
     state = await this.attemptCatalog.append({
       attemptVersion: '1',
       attemptId,
@@ -473,8 +480,7 @@ export class RecoveryExecutionService {
     ) {
       throw new Error('Recovery verification detected a runtime audit device integrity defect.');
     }
-    await this.verifyStagedAttachments({
-      attemptId: prepared.attemptId,
+    await this.verifyOperationalAttachments({
       recoveryPointId: prepared.recoveryPointId,
       targetDatabaseName: prepared.targetDatabaseName,
       expectedEntryCount: attachmentRecord.attachmentEntryCount,
@@ -484,7 +490,6 @@ export class RecoveryExecutionService {
   }
 
   private async restoreAttachmentSet(input: {
-    attemptId: string;
     recoveryPointId: string;
     targetDatabaseName: string;
     entriesKey: string;
@@ -513,7 +518,7 @@ export class RecoveryExecutionService {
       let entryCount = 0;
       let totalBytes = 0n;
       for await (const entry of readAttachmentRecoveryEntries(entriesPath, input.recoveryPointId)) {
-        await this.assertActiveAttachmentMetadata(pool, entry);
+        const restoredMetadata = await this.requireActiveAttachmentMetadata(pool, entry);
         const body = await this.dependencies.storage.readBuffer(
           entry.protectedObjectKey,
           ATTACHMENT_MAX_BYTES,
@@ -521,13 +526,10 @@ export class RecoveryExecutionService {
         if (body?.byteLength !== Number(entry.sizeBytes) || sha256(body) !== entry.sha256) {
           throw new Error('Protected attachment failed recovery integrity verification.');
         }
-        await this.putOrVerifyStagedAttachment({
-          key: recoveryAttemptAttachmentKey({
-            attemptId: input.attemptId,
-            attachmentId: entry.attachmentId,
-            sha256: entry.sha256,
-          }),
+        await this.putOrVerifyOperationalAttachment({
+          key: restoredMetadata.remoteKey,
           body,
+          mediaType: entry.mediaType,
           sha256: entry.sha256,
         });
         entryCount += 1;
@@ -549,8 +551,7 @@ export class RecoveryExecutionService {
     }
   }
 
-  private async verifyStagedAttachments(input: {
-    attemptId: string;
+  private async verifyOperationalAttachments(input: {
     recoveryPointId: string;
     targetDatabaseName: string;
     expectedEntryCount: number;
@@ -575,19 +576,16 @@ export class RecoveryExecutionService {
       let entryCount = 0;
       let totalBytes = 0n;
       for await (const entry of readAttachmentRecoveryEntries(entriesPath, input.recoveryPointId)) {
-        await this.assertActiveAttachmentMetadata(pool, entry);
-        const key = recoveryAttemptAttachmentKey({
-          attemptId: input.attemptId,
-          attachmentId: entry.attachmentId,
-          sha256: entry.sha256,
-        });
-        const object = await this.dependencies.storage.headObject(key);
+        const restoredMetadata = await this.requireActiveAttachmentMetadata(pool, entry);
+        const object = await this.dependencies.targetAttachmentStorage.getObject(
+          restoredMetadata.remoteKey,
+        );
         if (
           object?.contentLength !== Number(entry.sizeBytes) ||
-          object.checksumSha256 !== entry.sha256 ||
-          !object.encryption
+          object.body.byteLength !== Number(entry.sizeBytes) ||
+          sha256(object.body) !== entry.sha256
         ) {
-          throw new Error('Staged recovery attachment failed integrity verification.');
+          throw new Error('Operational recovery attachment failed integrity verification.');
         }
         entryCount += 1;
         totalBytes += BigInt(entry.sizeBytes);
@@ -600,14 +598,14 @@ export class RecoveryExecutionService {
         entryCount !== input.expectedEntryCount ||
         totalBytes.toString() !== input.expectedTotalBytes
       ) {
-        throw new Error('Staged recovery attachment set is incomplete.');
+        throw new Error('Operational recovery attachment set is incomplete.');
       }
     } finally {
       await Promise.all([pool.end(), rm(directory, { recursive: true, force: true })]);
     }
   }
 
-  private async assertActiveAttachmentMetadata(
+  private async requireActiveAttachmentMetadata(
     pool: Pool,
     entry: {
       attachmentId: string;
@@ -615,56 +613,79 @@ export class RecoveryExecutionService {
       sizeBytes: string;
       sha256: string;
     },
-  ): Promise<void> {
+  ): Promise<{ remoteKey: string }> {
     const result = await pool.query<{
+      storeId: string;
       mediaType: string | null;
       sizeBytes: string | null;
       sha256: string | null;
+      remoteKey: string | null;
       removed: boolean;
     }>(
       `
-      select mime_type as "mediaType", file_size_bytes::text as "sizeBytes",
-             checksum_sha256 as sha256, removed_at is not null as removed
+      select store_id as "storeId", mime_type as "mediaType",
+             file_size_bytes::text as "sizeBytes", checksum_sha256 as sha256,
+             remote_key as "remoteKey", removed_at is not null as removed
       from ledger.attachments where id=$1
     `,
       [entry.attachmentId],
     );
     const row = result.rows[0];
+    const expectedRemoteKey = row
+      ? `stores/${row.storeId}/attachments/${entry.attachmentId}`
+      : null;
     if (
       result.rowCount !== 1 ||
       !row ||
       row.removed ||
       row.mediaType !== entry.mediaType ||
       row.sizeBytes !== entry.sizeBytes ||
-      row.sha256 !== entry.sha256
+      row.sha256 !== entry.sha256 ||
+      row.remoteKey === null ||
+      row.remoteKey !== expectedRemoteKey
     ) {
       throw new Error('Recovery attachment does not match active restored metadata.');
     }
+    return { remoteKey: row.remoteKey };
   }
 
-  private async putOrVerifyStagedAttachment(input: {
+  private async putOrVerifyOperationalAttachment(input: {
     key: string;
     body: Buffer;
+    mediaType: string;
     sha256: string;
   }): Promise<void> {
-    const existing = await this.dependencies.storage.headObject(input.key);
+    const existing = await this.dependencies.targetAttachmentStorage.getObject(input.key);
     if (existing) {
-      if (
-        existing.contentLength !== input.body.byteLength ||
-        existing.checksumSha256 !== input.sha256 ||
-        !existing.encryption
-      ) {
-        throw new Error('Staged recovery attachment conflicts with existing evidence.');
-      }
+      this.assertOperationalAttachment(existing, input.body.byteLength, input.sha256);
       return;
     }
-    await this.dependencies.storage.putBuffer({
-      key: input.key,
-      body: input.body,
-      contentType: 'application/octet-stream',
-      contentLength: input.body.byteLength,
-      checksumSha256: input.sha256,
-    });
+    try {
+      await this.dependencies.targetAttachmentStorage.putObject({
+        key: input.key,
+        body: input.body,
+        mediaType: input.mediaType,
+        checksumSha256: input.sha256,
+      });
+    } catch (error) {
+      if (!(error instanceof AttachmentStorageConflictError)) throw error;
+    }
+    const restored = await this.dependencies.targetAttachmentStorage.getObject(input.key);
+    this.assertOperationalAttachment(restored, input.body.byteLength, input.sha256);
+  }
+
+  private assertOperationalAttachment(
+    object: { body: Buffer; contentLength: number } | null,
+    expectedSize: number,
+    expectedSha256: string,
+  ): void {
+    if (
+      object?.contentLength !== expectedSize ||
+      object.body.byteLength !== expectedSize ||
+      sha256(object.body) !== expectedSha256
+    ) {
+      throw new Error('Operational recovery attachment failed integrity verification.');
+    }
   }
 
   private async ensureSourceFenced(expectedGenerationId: string): Promise<RecoveryControlState> {
