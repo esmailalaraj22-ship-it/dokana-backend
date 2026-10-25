@@ -214,6 +214,7 @@ export class PlatformAdminService {
           userId: context.userId,
           deviceId: context.deviceId,
           requestId: context.requestId,
+          recoveryGenerationId: context.recoveryGenerationId,
         },
         {
           operationId: body.operationId,

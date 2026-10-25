@@ -2216,6 +2216,23 @@ gates where applicable.
 - Remediation implementation is complete, but independent S22 closure re-review remains required.
   S23 is not started and may not begin from this remediation record.
 
+- Independent re-review found R1: Platform Admin Store provisioning dropped the authenticated
+  recovery generation. A bounded sweep of provisioning, Store lifecycle, subscriptions,
+  Offline Licenses, and notifications confirmed this as the only equivalent propagation gap.
+  Platform Admin now forwards the generation unchanged into the existing provisioning transaction.
+- R1 real-PostgreSQL tests prove post-activation authenticated generation success and exactly-once
+  replay, stale/missing generation rejection with zero state delta, an admitted provisioning
+  transaction delaying the fence, and post-fence rejection with zero state delta.
+- R1 verification: 10 targeted unit tests, four PostgreSQL proofs, 55 focused regression tests,
+  the corrected S22.5 drill, and all 1,343 full-unit tests passed. Typecheck, lint, and build passed.
+  The resumed broad run passed 903/904 tests across 80 suites; its sole failure was S3 expecting
+  original bootstrap registration metadata on an inventory-fixture database. All 15 S3 tests then
+  passed on a disposable database initialized through the original bootstrap commands, without
+  changing assertions or application/database code. No tests were skipped; the drill was run
+  separately. Existing Markdown formatting warnings remain out of scope.
+- R1 implementation is complete; independent final re-review is still required. Database schema,
+  accounting authority, and S19 protocol are unchanged. S23 remains NOT STARTED.
+
 #### S23 Recovery Handoffs
 
 S23 must preserve and close the remaining deployment and release gates: real managed PostgreSQL

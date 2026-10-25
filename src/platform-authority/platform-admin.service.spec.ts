@@ -18,6 +18,7 @@ describe('PlatformAdminService recovery write authority', () => {
   };
   let assertPlatformWriteAuthority: jest.Mock;
   let repository: jest.Mocked<Pick<PlatformAdminRepository, 'mutateStoreLifecycle'>>;
+  let provisioning: jest.Mocked<Pick<StoreProvisioningService, 'provision'>>;
   let service: PlatformAdminService;
 
   beforeEach(() => {
@@ -41,13 +42,56 @@ describe('PlatformAdminService recovery write authority', () => {
         replayed: false,
       }),
     };
+    provisioning = { provision: jest.fn() };
     service = new PlatformAdminService(
       database,
       repository as unknown as PlatformAdminRepository,
       {} as SubscriptionLifecycleService,
-      {} as StoreProvisioningService,
+      provisioning as unknown as StoreProvisioningService,
     );
   });
+
+  it.each([randomUUID(), randomUUID(), undefined])(
+    'forwards provisioning authority unchanged, including stale or missing generation %s',
+    async (recoveryGenerationId) => {
+      const rejection = new Error('Provisioning authority rejected');
+      provisioning.provision.mockRejectedValue(rejection);
+      const operationId = randomUUID();
+      await expect(
+        service.provisionStore(
+          { ...context, recoveryGenerationId },
+          {
+            operationId,
+            ownerUserId: randomUUID(),
+            name: 'Recovery provisioning',
+            reason: 'Approved provisioning',
+            activateSubscription: false,
+            settings: {
+              dailyReportTimeMinutes: 1200,
+              defaultCreditPolicy: 'warn',
+              defaultCreditLimitMinor: null,
+              allowNegativeStock: false,
+              lowStockAlertEnabled: true,
+              debtAgeAlertDays: 30,
+              backupEnabled: true,
+              backupIntervalHours: 24,
+            },
+          },
+        ),
+      ).rejects.toBe(rejection);
+
+      expect(provisioning.provision).toHaveBeenCalledTimes(1);
+      expect(provisioning.provision).toHaveBeenCalledWith(
+        {
+          userId: context.userId,
+          deviceId: context.deviceId,
+          requestId: context.requestId,
+          recoveryGenerationId,
+        },
+        expect.objectContaining({ operationId }),
+      );
+    },
+  );
 
   it('holds recovery write authority on the Store lifecycle mutation transaction', async () => {
     await expect(
