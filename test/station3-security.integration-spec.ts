@@ -371,7 +371,7 @@ describeWithPostgres('Station 3 PostgreSQL security and migrations', () => {
       order by signature
     `);
 
-    expect(functions.rows).toHaveLength(14);
+    expect(functions.rows).toHaveLength(13);
     for (const functionState of functions.rows) {
       expect(functionState.owner).toBe('shop_app_auth_owner');
       expect(functionState.securityDefiner).toBe(true);
@@ -393,12 +393,11 @@ describeWithPostgres('Station 3 PostgreSQL security and migrations', () => {
     const executableSignatures = functions.rows
       .filter((functionState) => functionState.authExecute)
       .map((functionState) => functionState.signature);
-    expect(executableSignatures).toHaveLength(13);
+    expect(executableSignatures).toHaveLength(12);
     expect(executableSignatures).toEqual(
       expect.arrayContaining([
         'validate_sync_refresh_token(p_token_hash text)',
         'validate_sync_session(p_user_id uuid, p_session_id uuid, p_store_id uuid, p_device_id uuid)',
-        'issue_session_recovery_v1(p_user_id uuid, p_store_id uuid, p_device_id uuid, p_device_name text, p_device_platform text, p_session_id uuid, p_access_token_jti uuid, p_refresh_token_id uuid, p_refresh_token_hash text, p_refresh_family_id uuid, p_session_expires_at timestamp with time zone, p_refresh_expires_at timestamp with time zone, p_ip_hash text, p_user_agent_hash text)',
         'validate_session_recovery_v1(p_user_id uuid, p_session_id uuid, p_store_id uuid, p_device_id uuid, p_access_token_jti uuid)',
         'rotate_refresh_token_recovery_v1(p_current_token_hash text, p_new_token_id uuid, p_new_token_hash text, p_new_access_token_jti uuid, p_refresh_ttl_seconds integer)',
         'validate_sync_session_recovery_v1(p_user_id uuid, p_session_id uuid, p_store_id uuid, p_device_id uuid)',
@@ -407,6 +406,9 @@ describeWithPostgres('Station 3 PostgreSQL security and migrations', () => {
     );
     expect(executableSignatures).not.toContain(
       'rotate_refresh_token(p_current_token_hash text, p_new_token_id uuid, p_new_token_hash text, p_new_access_token_jti uuid, p_new_refresh_expires_at timestamp with time zone)',
+    );
+    expect(functions.rows.map((functionState) => functionState.signature)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^issue_session_recovery_v1\(/)]),
     );
   });
 

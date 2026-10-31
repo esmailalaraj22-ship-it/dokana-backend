@@ -24,7 +24,7 @@ import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-ar
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
 import { serializeRecoveryManifest, sha256 } from '../../src/recovery/recovery-manifest';
 import { readAttachmentRecoveryEntries } from './attachment-recovery-files';
-import { readVerifiedMigrationState } from './migration-state';
+import { isRecoveryMigrationCompatible, readVerifiedMigrationState } from './migration-state';
 import { restoreCustomFormatDump, type PostgresToolchain } from './postgres-tools';
 import {
   activateRecoveryControl,
@@ -39,7 +39,6 @@ import {
 import { readRepresentativeRecoveryCounts } from './restore-smoke';
 import { withLatestVerifiedArtifact } from './stored-recovery-verification';
 
-const REQUIRED_RECOVERY_MIGRATION = '0033_platform_recovery_generation_fencing.sql';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 export interface RecoveryExecutionDependencies {
@@ -89,13 +88,7 @@ export class RecoveryExecutionService {
     const sourceMigrations = await readVerifiedMigrationState(
       this.dependencies.adminConnectionString,
     );
-    if (
-      sourceMigrations.appliedCount !== databaseEntry.manifest.migrations.appliedCount ||
-      sourceMigrations.latestFilename !== databaseEntry.manifest.migrations.latestFilename ||
-      sourceMigrations.checksumAggregateSha256 !==
-        databaseEntry.manifest.migrations.checksumAggregateSha256 ||
-      sourceMigrations.latestFilename !== REQUIRED_RECOVERY_MIGRATION
-    ) {
+    if (!isRecoveryMigrationCompatible(sourceMigrations, databaseEntry.manifest.migrations)) {
       throw new Error('Recovery point is not compatible with the current recovery authority.');
     }
     const sourceAuthority = await readRecoveryControl(this.dependencies.migrationConnectionString);

@@ -4,11 +4,25 @@ import { Pool } from 'pg';
 
 import { readMigrationFiles } from '../migrations/migration-files';
 
+export const REQUIRED_RECOVERY_MIGRATION = '0033_platform_recovery_generation_fencing.sql';
+
+export interface MigrationIdentity {
+  filename: string;
+  checksumSha256: string;
+}
+
 export interface VerifiedMigrationState {
   appliedCount: number;
   latestFilename: string;
   checksumAggregateSha256: string;
   serverVersion: string;
+  appliedFilenames: readonly string[];
+}
+
+export interface RecoveryManifestMigrationState {
+  appliedCount: number;
+  latestFilename: string;
+  checksumAggregateSha256: string;
 }
 
 export async function readVerifiedMigrationState(
@@ -35,16 +49,7 @@ export async function readVerifiedMigrationState(
       pool.query<{ version: string }>(`select current_setting('server_version') as version`),
     ]);
     const applied = appliedResult.rows;
-    if (applied.length !== files.length || applied.length === 0) {
-      throw new Error('Recovery requires zero pending migrations.');
-    }
-    const filesByName = new Map(files.map((file) => [file.filename, file]));
-    for (const migration of applied) {
-      const file = filesByName.get(migration.filename);
-      if (file?.checksumSha256 !== migration.checksumSha256) {
-        throw new Error('Migration checksum verification failed for recovery.');
-      }
-    }
+    const appliedFilenames = verifyAppliedMigrationLedger(files, applied);
     const latestFilename = applied.at(-1)?.filename;
     const serverVersion = serverResult.rows[0]?.version;
     if (!latestFilename || !serverVersion) {
@@ -56,10 +61,45 @@ export async function readVerifiedMigrationState(
       latestFilename,
       checksumAggregateSha256: createHash('sha256').update(aggregate).digest('hex'),
       serverVersion,
+      appliedFilenames,
     };
   } finally {
     await pool.end();
   }
+}
+
+export function verifyAppliedMigrationLedger(
+  files: readonly MigrationIdentity[],
+  applied: readonly MigrationIdentity[],
+): readonly string[] {
+  if (!applied.some((migration) => migration.filename === REQUIRED_RECOVERY_MIGRATION)) {
+    throw new Error('Required recovery migration is missing.');
+  }
+  if (applied.length !== files.length || applied.length === 0) {
+    throw new Error('Recovery requires zero pending migrations.');
+  }
+  const filesByName = new Map(files.map((file) => [file.filename, file]));
+  for (const migration of applied) {
+    const file = filesByName.get(migration.filename);
+    if (file?.checksumSha256 !== migration.checksumSha256) {
+      throw new Error('Migration checksum verification failed for recovery.');
+    }
+  }
+  return applied.map((migration) => migration.filename);
+}
+
+export function isRecoveryMigrationCompatible(
+  source: VerifiedMigrationState,
+  manifest: RecoveryManifestMigrationState,
+): boolean {
+  return (
+    source.appliedFilenames.length === source.appliedCount &&
+    source.appliedFilenames.at(-1) === source.latestFilename &&
+    source.appliedFilenames.includes(REQUIRED_RECOVERY_MIGRATION) &&
+    source.appliedCount === manifest.appliedCount &&
+    source.latestFilename === manifest.latestFilename &&
+    source.checksumAggregateSha256 === manifest.checksumAggregateSha256
+  );
 }
 
 export function equalMigrationState(

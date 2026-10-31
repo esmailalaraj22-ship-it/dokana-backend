@@ -14,7 +14,7 @@ import { createVerifiedRecoveryPoint } from '../scripts/recovery/recovery-point-
 import { createInventoryTestDatabase } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0033_platform_recovery_generation_fencing.sql';
+const migrationFilename = '0034_retire_broken_recovery_session_wrapper.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithDatabase = environment ? describe : describe.skip;
 
@@ -67,7 +67,7 @@ describeWithDatabase('isolated platform recovery execution', () => {
         sourceStorage: new UnavailableAttachmentStorage(),
       });
       expect(point.migrations).toMatchObject({
-        appliedCount: 33,
+        appliedCount: 34,
         latestFilename: migrationFilename,
         checksumStatus: 'PASS',
       });

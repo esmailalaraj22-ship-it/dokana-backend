@@ -60,7 +60,8 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
-const migrationFilename = '0033_platform_recovery_generation_fencing.sql';
+const recoveryAuthorityMigrationFilename = '0033_platform_recovery_generation_fencing.sql';
+const currentMigrationFilename = '0034_retire_broken_recovery_session_wrapper.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
 
@@ -420,7 +421,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
     const password = `S225-${randomUUID()}!Aa1`;
 
     try {
-      database = await createInventoryTestDatabase(migrationFilename);
+      database = await createInventoryTestDatabase(recoveryAuthorityMigrationFilename);
       const migration = await database.migration.connect();
       try {
         await verifyMigrationSession(migration);
@@ -860,7 +861,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
       });
       expect(recoveryPoint).toMatchObject({
         state: 'VERIFIED',
-        migrations: { appliedCount: 33, checksumStatus: 'PASS' },
+        migrations: { appliedCount: 34, checksumStatus: 'PASS' },
         verification: { status: 'VERIFIED', structuralCheck: 'PASS' },
       });
       expect(attachmentManifest).toMatchObject({
@@ -1343,8 +1344,8 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
             });
             const targetMigrations = await readVerifiedMigrationState(targetAdminUrl);
             expect(targetMigrations).toMatchObject({
-              appliedCount: 33,
-              latestFilename: migrationFilename,
+              appliedCount: 34,
+              latestFilename: currentMigrationFilename,
             });
           } finally {
             await targetAdmin.end();
@@ -1640,7 +1641,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
       process.stdout.write(
         `S22.5_DRILL_EVIDENCE ${JSON.stringify({
           stores: 2,
-          migrationCount: 33,
+          migrationCount: 34,
           recoveryPointCreatedAt,
           disasterAt,
           recoveryStartedAt,

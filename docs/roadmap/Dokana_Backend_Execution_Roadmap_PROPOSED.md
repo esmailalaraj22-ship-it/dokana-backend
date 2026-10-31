@@ -9,7 +9,7 @@
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
 | Closed execution history  | Stations S0-S22                            |
-| Current Station           | S23; S23.1 release gates frozen            |
+| Current Station           | S23; S23.1-S23.2 closed; S23.3 next        |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -65,11 +65,11 @@ The roadmap was reconstructed against this verified state:
 | Starting `origin/main`          | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree at S23.1 start     | Clean                                      |
-| Migrations                      | 33 applied, 0 pending                      |
+| Migrations                      | 34 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S22                                        |
-| Current task                    | S23.1 release inventory and gate freeze    |
+| Current task                    | S23.2 closed; S23.3 next                   |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -2252,7 +2252,7 @@ accounting, synchronization, attachment, or recovery gate as release success.
 
 ### S23 - Final Validation and Release Readiness
 
-- **Status:** CURRENT - S23.1 CLOSED; S23.2 NOT STARTED.
+- **Status:** CURRENT - S23.1-S23.2 CLOSED; S23.3 NEXT.
 - **Purpose:** Execute the complete backend release gate.
 - **Distinct boundary:** Cross-domain assurance cannot be proven by isolated Station
   tests alone.
@@ -2343,10 +2343,10 @@ required verification fails or its applicability is confirmed.
 | 11  | Operator dual control                          | C     | S23.5   | Recovery workflow/operations       | None                               | Operational         | Yes            | Yes           |
 | 12  | Authenticated recovery-operator audit identity | C     | S23.5   | Audit integration                  | Unproven; default `0`              | Operational         | Yes            | Yes           |
 | 13  | Owner lost-device revocation/replacement       | E     | Owner   | Future product capability          | Unknown; no authority granted      | No                  | Yes            | Conditional   |
-| 14  | Broken `issue_session_recovery_v1` wrapper     | A     | S23.2   | Disposition analysis               | Possible forward migration only    | No                  | Yes            | Yes           |
-| 15  | Code/migrations/live PostgreSQL reconciliation | F     | S23.2   | Verification/tests                 | Conditional on proven defect       | No                  | Conditional    | Conditional   |
-| 16  | Final RLS/functions/triggers/grants audit      | F     | S23.2   | Verification/tests                 | Conditional on proven defect       | No                  | Conditional    | Conditional   |
-| 17  | Drizzle/PostgreSQL reconciliation              | F     | S23.2   | Mapping correction possible        | Default `0`                        | No                  | Conditional    | Conditional   |
+| 14  | Broken `issue_session_recovery_v1` wrapper     | F     | S23.2   | Retired through migration `0034`   | `0034` applied                     | No                  | Yes            | No            |
+| 15  | Code/migrations/live PostgreSQL reconciliation | F     | S23.2   | Reconciled and verified            | `0034` explained                   | No                  | Yes            | No            |
+| 16  | Final RLS/functions/triggers/grants audit      | F     | S23.2   | Reconciled and verified            | No additional delta                | No                  | No             | No            |
+| 17  | Drizzle/PostgreSQL reconciliation              | F     | S23.2   | Reconciled; no material drift      | `0`                                | No                  | No             | No            |
 | 18  | SQLite semantic parity                         | F     | S23.3   | Parity artifact possible           | PostgreSQL `0`; SQLite conditional | No                  | Conditional    | Conditional   |
 | 19  | Final S19 protocol verification                | F     | S23.3   | Verification/tests                 | Default `0`                        | No                  | No             | Conditional   |
 | 20  | Release-candidate schema baseline              | B     | S23.4   | Artifact tooling                   | Live database `0`                  | No                  | Yes            | Yes           |
@@ -2362,9 +2362,8 @@ required verification fails or its applicability is confirmed.
 
 The Owner lost-device gap remains **OWNER DECISION REQUIRED**. PRD v1.1 names device activation
 and revocation at a high level but does not define a complete Owner lifecycle, authorization,
-replacement, or database contract. S23 must not invent it. The broken auth wrapper is a release
-blocker requiring S23.2 caller/grant/dependency/security analysis and separate backend-owner
-authorization before any corrected projection, revoke, drop, or migration `0034`.
+replacement, or database contract. S23 must not invent it. The broken auth wrapper release block
+was resolved in S23.2 through the separately authorized migration `0034`.
 
 ##### Database and Reference Authorization Freeze
 
@@ -2385,8 +2384,8 @@ will be an artifact, not an upgrade authority or permission to rewrite history.
 | Stage | Status      | Purpose                                             | Database delta | Main release gates                                      | Closure condition                                  |
 | ----- | ----------- | --------------------------------------------------- | -------------- | ------------------------------------------------------- | -------------------------------------------------- |
 | S23.1 | CLOSED      | Freeze release inventory, invariants, and authority | `0`            | 29/29 ownership; severity and evidence policy           | Scope and gates recorded without non-Roadmap delta |
-| S23.2 | NOT STARTED | Reconcile PostgreSQL, security, migrations, Drizzle | `0` default    | Catalog, RLS, grants, roles, functions, auth wrapper    | No unexplained drift; approved remediation only    |
-| S23.3 | NOT STARTED | Verify offline contract and application hardening   | `0` default    | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
+| S23.2 | CLOSED      | Reconcile PostgreSQL, security, migrations, Drizzle | `0034`         | Catalog, RLS, grants, roles, functions, auth wrapper    | Wrapper retired; recovery compatibility preserved  |
+| S23.3 | NEXT        | Verify offline contract and application hardening   | `0` default    | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
 | S23.4 | NOT STARTED | Prove clean install and release schema baseline     | `0` live       | Canonical metadata, S3 fixture, restorable baseline     | Deterministic equivalent disposable environments   |
 | S23.5 | NOT STARTED | Prove production infrastructure and recovery        | `0` default    | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators   | Real provider and operational evidence accepted    |
 | S23.6 | NOT STARTED | Execute the integrated final release gate           | `0` default    | Zero-skip static/test/security/accounting/recovery gate | Evidence-backed release decision                   |
@@ -2405,6 +2404,23 @@ not semantic redesign. Product gaps require owner decisions. Non-blocking debt r
 acceptance. The stale README capability/status text is assigned to S23.6 release-document
 reconciliation; it is not modified in S23.1. The remaining `money-posting-v1.md` formatting warning
 is recorded as L2 and the frozen accounting contract remains untouched.
+
+#### S23.2 - PostgreSQL, Security, Migration, and Drizzle Reconciliation
+
+- **Status:** CLOSED.
+- **Database remediation:** Backend-owner-authorized migration `0034` revoked and dropped only
+  the unused broken `auth_api.issue_session_recovery_v1(...)` wrapper. The valid authentication
+  path remains `issue_session(...)` followed by `validate_session_recovery_v1(...)`.
+- **Recovery compatibility:** S23.2-H2 confirmed that Recovery Execution incorrectly treated
+  migration `0033` as the permanent latest migration. The bounded correction retains `0033` as
+  a required checksum-valid Recovery Generation capability while preserving exact source-to-
+  manifest migration count, latest filename, and aggregate-checksum consistency for `0034` and
+  later exact states.
+- **Verification:** PostgreSQL remains 34 applied / 0 pending; the post-0034 real disaster-
+  recovery drill, RLS/security checks, Drizzle reconciliation, full unit suite, and broad
+  integration suite passed. Accounting, S18, S19, S21, SQLite, and historical PostgreSQL
+  reference semantic deltas are `0`.
+- **Next:** S23.3 is next and requires its own execution authorization.
 
 ## 12. Dependency Model and Sequence Proof
 
@@ -2537,9 +2553,9 @@ new explicit owner decision.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S22 - Backup, Restore, and Recovery        |
 | S23.1 starting checkpoint           | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
-| Safe completed capabilities         | S0-S22; S23.1 release inventory            |
-| First incomplete release dependency | S23.2 database/security reconciliation     |
-| Current Station                     | S23 CURRENT; S23.1 CLOSED                  |
+| Safe completed capabilities         | S0-S22; S23.1-S23.2                        |
+| First incomplete release dependency | S23.3 offline/application hardening        |
+| Current Station                     | S23 CURRENT; S23.1-S23.2 CLOSED            |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2579,11 +2595,11 @@ new explicit owner decision.
 | S22.5 current status                | CLOSED                                     |
 | S23 current status                  | CURRENT                                    |
 | S23.1 current status                | CLOSED                                     |
-| S23.2 current status                | NOT STARTED                                |
-| S23.3 current status                | NOT STARTED                                |
+| S23.2 current status                | CLOSED                                     |
+| S23.3 current status                | NEXT                                       |
 | S23.4 current status                | NOT STARTED                                |
 | S23.5 current status                | NOT STARTED                                |
 | S23.6 current status                | NOT STARTED                                |
 
-Do not start S23.2 from this document. It requires a separate execution prompt. Database,
+Do not start S23.3 from this document. It requires a separate execution prompt. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.
