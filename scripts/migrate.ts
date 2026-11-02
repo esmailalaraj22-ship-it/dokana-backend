@@ -2,15 +2,17 @@ import { performance } from 'node:perf_hooks';
 
 import type { PoolClient } from 'pg';
 
+import {
+  readEffectiveMigrationState,
+  verifyMigrationChecksums,
+  type MigrationIdentity,
+} from './migrations/effective-migration-state';
 import { createMigrationPool, requiredPostgresUrl } from './migrations/migration-database';
 import { readMigrationFiles, type MigrationFile } from './migrations/migration-files';
 
 export type MigrationCommand = 'apply' | 'status' | 'verify';
 
-export interface AppliedMigration {
-  filename: string;
-  checksumSha256: string;
-}
+export type AppliedMigration = MigrationIdentity;
 
 export const bootstrapOnlyMigrations = new Set([
   '0001_rls_context_function_privileges.sql',
@@ -218,45 +220,8 @@ export function validateRoleSwitches(migration: MigrationFile): void {
   }
 }
 
-async function readAppliedMigrations(client: PoolClient): Promise<AppliedMigration[]> {
-  const ledger = await client.query<{ ledger: string | null; owner: string | null }>(`
-    select
-      to_regclass('platform.schema_migrations')::text as ledger,
-      case
-        when to_regclass('platform.schema_migrations') is null then null
-        else pg_get_userbyid(
-          (select relowner from pg_class where oid = 'platform.schema_migrations'::regclass)
-        )
-      end as owner
-  `);
-  const ledgerState = ledger.rows[0];
-  if (
-    ledgerState?.ledger !== 'platform.schema_migrations' ||
-    ledgerState.owner !== 'shop_app_migrator'
-  ) {
-    throw new Error('The verified migration foundation is not installed.');
-  }
-
-  const result = await client.query<AppliedMigration>(`
-    select filename, checksum_sha256 as "checksumSha256"
-    from platform.schema_migrations
-    order by filename
-  `);
-  return result.rows;
-}
-
 export function verifyChecksums(files: MigrationFile[], applied: AppliedMigration[]): void {
-  const filesByName = new Map(files.map((file) => [file.filename, file]));
-
-  for (const migration of applied) {
-    const file = filesByName.get(migration.filename);
-    if (!file) {
-      throw new Error(`Applied migration file is missing: ${migration.filename}.`);
-    }
-    if (file.checksumSha256 !== migration.checksumSha256) {
-      throw new Error(`Applied migration checksum mismatch: ${migration.filename}.`);
-    }
-  }
+  verifyMigrationChecksums(files, applied);
 }
 
 export async function applyMigration(client: PoolClient, migration: MigrationFile): Promise<void> {
@@ -308,13 +273,12 @@ export async function applyMigration(client: PoolClient, migration: MigrationFil
   }
 }
 
-async function main(): Promise<void> {
-  const command = parseCommand(process.argv[2]);
+export async function runMigrationCommand(
+  command: MigrationCommand,
+  connectionString = requiredPostgresUrl('DATABASE_MIGRATION_URL'),
+): Promise<void> {
   const files = await readMigrationFiles();
-  const pool = createMigrationPool(
-    requiredPostgresUrl('DATABASE_MIGRATION_URL'),
-    `dokana-migration-${command}`,
-  );
+  const pool = createMigrationPool(connectionString, `dokana-migration-${command}`);
   const client = await pool.connect();
   let lockAcquired = false;
 
@@ -328,10 +292,8 @@ async function main(): Promise<void> {
       throw new Error('Another migration runner holds the advisory lock.');
     }
 
-    const applied = await readAppliedMigrations(client);
-    verifyChecksums(files, applied);
-    const appliedNames = new Set(applied.map((migration) => migration.filename));
-    const pending = files.filter((file) => !appliedNames.has(file.filename));
+    const state = await readEffectiveMigrationState(client, files);
+    const pending = state.pending;
 
     if (pending.some((file) => bootstrapOnlyMigrations.has(file.filename))) {
       throw new Error('The one-time migration foundation is not fully registered.');
@@ -348,8 +310,10 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write(
-      `Migrations: OK (applied=${String(applied.length + (command === 'apply' ? pending.length : 0))}, pending=${String(
+      `Migrations: OK (applied=${String(state.effective.length + (command === 'apply' ? pending.length : 0))}, pending=${String(
         command === 'apply' ? 0 : pending.length,
+      )}, executed=${String(state.executed.length + (command === 'apply' ? pending.length : 0))}, baseline=${String(
+        state.baseline?.migrationChecksumManifest.length ?? 0,
       )}).\n`,
     );
   } finally {
@@ -362,6 +326,10 @@ async function main(): Promise<void> {
       await pool.end();
     }
   }
+}
+
+async function main(): Promise<void> {
+  await runMigrationCommand(parseCommand(process.argv[2]));
 }
 
 if (require.main === module) {

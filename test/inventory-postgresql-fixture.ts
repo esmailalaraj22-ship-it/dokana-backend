@@ -128,11 +128,43 @@ export async function createInventoryTestDatabase(
 }
 
 async function registerBootstrap(admin: Pool, file: MigrationFile): Promise<void> {
+  const number = file.filename.slice(0, 4);
+  const registration =
+    number === '0001'
+      ? {
+          appliedBy: 'postgres (verified pre-existing migration)',
+          metadata: {
+            registration: 'verified_preexisting',
+            originalAppliedAtKnown: false,
+            replayed: false,
+          },
+        }
+      : number === '0002'
+        ? {
+            appliedBy: 'postgres (one-time ownership bootstrap)',
+            metadata: {
+              bootstrap: true,
+              ownershipTransition: 'postgres_to_shop_app_migrator',
+            },
+          }
+        : {
+            appliedBy: 'postgres (one-time auth schema bootstrap)',
+            metadata: {
+              bootstrap: true,
+              scope: 'auth_api_schema_only',
+              persistentDatabaseCreateGrant: false,
+            },
+          };
   await admin.query(
     `insert into platform.schema_migrations
     (filename, checksum_sha256, applied_at, applied_by, execution_ms, metadata)
-    values ($1, $2, clock_timestamp(), current_user, 0, '{"fixture":"isolated-s112"}'::jsonb)`,
-    [file.filename, file.checksumSha256],
+    values ($1, $2, clock_timestamp(), $3, 0, $4::jsonb)`,
+    [
+      file.filename,
+      file.checksumSha256,
+      registration.appliedBy,
+      JSON.stringify(registration.metadata),
+    ],
   );
 }
 

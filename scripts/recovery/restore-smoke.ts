@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 
 import type { VerifiedRecoveryManifest } from '../../src/recovery/recovery-manifest';
+import { readEffectiveMigrationState } from '../migrations/effective-migration-state';
+import { readMigrationFiles } from '../migrations/migration-files';
 import { restoreCustomFormatDump, type PostgresToolchain } from './postgres-tools';
 
 export interface RestoreSmokeResult {
@@ -35,6 +37,7 @@ export async function runIsolatedRestoreSmoke(input: {
     await restoreCustomFormatDump(input.toolchain, targetUrl, input.artifactPath);
     const targetPool = pool(targetUrl, 'dokana_recovery_smoke_verify');
     try {
+      const migrationFiles = await readMigrationFiles();
       const [schemas, migrations, security, essential, restoredCounts] = await Promise.all([
         targetPool.query<{ schemaName: string }>(
           `
@@ -45,10 +48,7 @@ export async function runIsolatedRestoreSmoke(input: {
         `,
           [['audit', 'ledger', 'platform', 'sync']],
         ),
-        targetPool.query<{ count: number; latest: string | null }>(`
-          select count(*)::integer as count, max(filename) as latest
-          from platform.schema_migrations
-        `),
+        readEffectiveMigrationState(targetPool, migrationFiles),
         targetPool.query<{
           forcedRlsTables: number;
           policies: number;
@@ -95,13 +95,16 @@ export async function runIsolatedRestoreSmoke(input: {
         readRepresentativeRecoveryCounts(targetPool),
       ]);
       const schemaNames = schemas.rows.map((row) => row.schemaName);
-      const migration = migrations.rows[0];
+      const migration = {
+        count: migrations.effective.length,
+        latest: migrations.effective.at(-1)?.filename ?? null,
+      };
       const securityState = security.rows[0];
       if (schemaNames.join(',') !== 'audit,ledger,platform,sync') {
         throw new Error('Isolated restore is missing a required Dokana schema.');
       }
       if (
-        migration?.count !== input.manifest.migrations.appliedCount ||
+        migration.count !== input.manifest.migrations.appliedCount ||
         migration.latest !== input.manifest.migrations.latestFilename
       ) {
         throw new Error('Isolated restore migration identity does not match the manifest.');

@@ -9,7 +9,7 @@
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
 | Closed execution history  | Stations S0-S22                            |
-| Current Station           | S23; S23.1-S23.3 closed; S23.4 next        |
+| Current Station           | S23; S23.1-S23.4 closed; S23.5 next        |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -65,11 +65,11 @@ The roadmap was reconstructed against this verified state:
 | Starting `origin/main`          | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
 | Ahead/behind                    | `0/0`                                      |
 | Working tree at S23.1 start     | Clean                                      |
-| Migrations                      | 34 applied, 0 pending                      |
+| Migrations                      | 35 applied, 0 pending                      |
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S22                                        |
-| Current task                    | S23.3 closed; S23.4 next                   |
+| Current task                    | S23.4 closed; S23.5 next                   |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -2252,7 +2252,7 @@ accounting, synchronization, attachment, or recovery gate as release success.
 
 ### S23 - Final Validation and Release Readiness
 
-- **Status:** CURRENT - S23.1-S23.3 CLOSED; S23.4 NEXT.
+- **Status:** CURRENT - S23.1-S23.4 CLOSED; S23.5 NEXT.
 - **Purpose:** Execute the complete backend release gate.
 - **Distinct boundary:** Cross-domain assurance cannot be proven by isolated Station
   tests alone.
@@ -2349,16 +2349,16 @@ required verification fails or its applicability is confirmed.
 | 17  | Drizzle/PostgreSQL reconciliation              | F     | S23.2   | Reconciled; no material drift      | `0`                                | No                  | No             | No            |
 | 18  | SQLite semantic parity                         | F     | S23.3   | Parity artifact possible           | PostgreSQL `0`; SQLite conditional | No                  | Conditional    | Conditional   |
 | 19  | Final S19 protocol verification                | F     | S23.3   | Verification/tests                 | Default `0`                        | No                  | No             | Conditional   |
-| 20  | Release-candidate schema baseline              | B     | S23.4   | Artifact tooling                   | Live database `0`                  | No                  | Yes            | Yes           |
+| 20  | Release-candidate schema baseline              | B     | S23.6+  | Provenance done; artifact deferred | `0035`; final artifact deferred    | No                  | Yes            | Yes           |
 | 21  | Production secrets/config verification         | C     | S23.5   | Configuration/evidence             | None                               | Yes                 | Yes            | Yes           |
-| 22  | Clean install/migration-from-zero              | A     | S23.4   | Test harness                       | Guarded disposable databases only  | No                  | No             | Yes           |
+| 22  | Clean install/migration-from-zero              | F     | S23.4   | Verified test harness              | Guarded disposable databases only  | No                  | No             | No            |
 | 23  | Final deployment/recovery readiness            | C     | S23.5   | Operations/evidence                | Default `0`                        | Yes                 | Yes            | Yes           |
 | 24  | M1 protected-binary health revalidation        | B     | S23.3/5 | Health/scheduler hardening         | None                               | Yes                 | No             | Conditional   |
 | 25  | M2 subprocess timeout/stale recovery-job lock  | B     | S23.3   | Recovery-tool hardening            | None                               | No                  | No             | Conditional   |
 | 26  | M3 OpenAPI Recovery Generation coverage        | B     | S23.3   | OpenAPI correction                 | None                               | No                  | No             | Conditional   |
 | 27  | L1 auth failed-session rollback hardening      | D     | S23.3   | Optional auth-pool hardening       | None                               | No                  | No             | No            |
 | 28  | L2 Markdown formatting warnings                | D     | S23.1/6 | Roadmap formatted; contract frozen | None                               | No                  | No             | No            |
-| 29  | S3 fixture/bootstrap reproducibility           | B     | S23.4   | Integration-fixture hardening      | None                               | No                  | No             | Yes           |
+| 29  | S3 fixture/bootstrap reproducibility           | F     | S23.4   | Integration fixture reconciled     | None                               | No                  | No             | No            |
 
 The Owner lost-device gap remains **OWNER DECISION REQUIRED**. PRD v1.1 names device activation
 and revocation at a high level but does not define a complete Owner lifecycle, authorization,
@@ -2374,10 +2374,11 @@ proven defect and repository/live evidence; why application-only remediation is 
 security, tenant, accounting, S19, and SQLite impact; the smallest forward-only migration;
 rollback/remediation strategy; real PostgreSQL tests; and the exact requested authorization.
 
-The historical `shop_ledger_postgresql_v1_all_in_one.sql` remains immutable. A schema-only,
-independently restorable, catalog-verifiable release-candidate baseline is deferred to S23.4 after
-the migration set and S23.2/S23.3 reconciliation are frozen and clean installation is proven. It
-will be an artifact, not an upgrade authority or permission to rewrite history.
+The historical `shop_ledger_postgresql_v1_all_in_one.sql` remains immutable. A final schema-only
+release baseline and the final OpenAPI/Swagger package are deferred until after S23.6 by explicit
+backend-owner decision. S23.4 proves the provenance and reproducibility mechanism without
+generating those final artifacts. A future baseline remains an artifact, not upgrade authority or
+permission to rewrite history.
 
 ##### Frozen S23 Execution Structure
 
@@ -2386,7 +2387,7 @@ will be an artifact, not an upgrade authority or permission to rewrite history.
 | S23.1 | CLOSED      | Freeze release inventory, invariants, and authority | `0`            | 29/29 ownership; severity and evidence policy           | Scope and gates recorded without non-Roadmap delta |
 | S23.2 | CLOSED      | Reconcile PostgreSQL, security, migrations, Drizzle | `0034`         | Catalog, RLS, grants, roles, functions, auth wrapper    | Wrapper retired; recovery compatibility preserved  |
 | S23.3 | CLOSED      | Verify offline contract and application hardening   | `0`            | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
-| S23.4 | NEXT        | Prove clean install and release schema baseline     | `0` live       | Canonical metadata, S3 fixture, restorable baseline     | Deterministic equivalent disposable environments   |
+| S23.4 | CLOSED      | Prove migration provenance and clean installation   | `0035`         | Truthful effective state, S3 fixture, clean install     | Deterministic equivalent disposable environments   |
 | S23.5 | NOT STARTED | Prove production infrastructure and recovery        | `0` default    | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators   | Real provider and operational evidence accepted    |
 | S23.6 | NOT STARTED | Execute the integrated final release gate           | `0` default    | Zero-skip static/test/security/accounting/recovery gate | Evidence-backed release decision                   |
 
@@ -2439,7 +2440,28 @@ is recorded as L2 and the frozen accounting contract remains untouched.
   907/907 tests with 0 skipped.
 - **Post-condition:** PostgreSQL remains 34 applied / 0 pending; migration `0035` is absent; database,
   Drizzle, SQLite, historical-reference, and accounting-authority deltas are `0`.
-- **Next:** S23.4 is next and requires its own execution authorization.
+- **Next:** S23.4 followed under separate execution authorization.
+
+#### S23.4 - Migration Provenance and Clean-Install Reproducibility
+
+- **Status:** CLOSED. S23.5 is next and remains separately authorized work.
+- **Root cause and solution:** `platform.schema_migrations` remains executed history only. Migration
+  `0035_release_baseline_provenance.sql` adds separate immutable release-baseline provenance, and
+  migration/recovery tooling now derives effective state from validated baseline provenance plus
+  later executed migrations without fabricating execution history. The applied checksum is
+  `76e78c0bdf3c8c3b007d676a5a793fbf36f86eb252ea6ee8733b9f7793f627f9`; PostgreSQL is 35 applied /
+  0 pending.
+- **Verification:** Exact provenance replay, tamper rejection, future migration execution, Recovery
+  `0033` capability, canonical S3 bootstrap metadata, clean installation from an empty disposable
+  database, catalog fingerprint equality, application startup/health, RLS/FORCE RLS, cross-tenant
+  isolation, accounting structure, S19 bootstrap/PUSH/PULL, and disaster recovery passed. The broad
+  integration gate covered all 83 suites and 908 tests through one broad run plus targeted reruns of
+  the three corrected migration-count/test-environment suites; unit tests passed 163 suites / 1358
+  tests; skipped tests were 0. Temporary databases, roles, locks, and idle transactions were removed.
+- **Deltas and artifacts:** Accounting authority, SQLite, and the historical PostgreSQL reference
+  changed by 0. No final release database, schema dump, release manifest/checksum package, deployment
+  archive, or final OpenAPI/Swagger package was generated. Final release database/schema baseline and
+  final OpenAPI/Swagger packaging remain deferred until after S23.6.
 
 ## 12. Dependency Model and Sequence Proof
 
@@ -2572,9 +2594,9 @@ new explicit owner decision.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S22 - Backup, Restore, and Recovery        |
 | S23.1 starting checkpoint           | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
-| Safe completed capabilities         | S0-S22; S23.1-S23.3                        |
-| First incomplete release dependency | S23.4 clean installation/release baseline  |
-| Current Station                     | S23 CURRENT; S23.1-S23.3 CLOSED            |
+| Safe completed capabilities         | S0-S22; S23.1-S23.4                        |
+| First incomplete release dependency | S23.5 production infrastructure/readiness  |
+| Current Station                     | S23 CURRENT; S23.1-S23.4 CLOSED            |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2616,9 +2638,9 @@ new explicit owner decision.
 | S23.1 current status                | CLOSED                                     |
 | S23.2 current status                | CLOSED                                     |
 | S23.3 current status                | CLOSED                                     |
-| S23.4 current status                | NEXT                                       |
-| S23.5 current status                | NOT STARTED                                |
+| S23.4 current status                | CLOSED                                     |
+| S23.5 current status                | NEXT                                       |
 | S23.6 current status                | NOT STARTED                                |
 
-Do not start S23.4 from this document. It requires a separate execution prompt. Database,
+Do not start S23.5 from this document. It requires a separate execution prompt. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.

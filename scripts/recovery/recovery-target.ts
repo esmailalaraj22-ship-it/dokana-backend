@@ -1,5 +1,7 @@
 import { Pool, type QueryResult, type QueryResultRow } from 'pg';
 
+import { readEffectiveMigrationState } from '../migrations/effective-migration-state';
+import { readMigrationFiles } from '../migrations/migration-files';
 import { readRepresentativeRecoveryCounts } from './restore-smoke';
 
 export interface RecoveryControlState {
@@ -115,6 +117,7 @@ export async function verifyRecoveryTargetDatabase(input: {
   const admin = recoveryPool(input.adminConnectionString, 'dokana_recovery_target_verify');
   const runtime = recoveryPool(input.runtimeConnectionString, 'dokana_recovery_target_runtime');
   try {
+    const migrationFiles = await readMigrationFiles();
     const [schemas, migrations, constraints, security, authority, serverTime, auditGap] =
       await Promise.all([
         admin.query<{ schemaName: string }>(
@@ -126,10 +129,7 @@ export async function verifyRecoveryTargetDatabase(input: {
         `,
           [['audit', 'ledger', 'platform', 'sync']],
         ),
-        admin.query<{ count: number; latest: string | null }>(`
-          select count(*)::integer as count, max(filename) as latest
-          from platform.schema_migrations
-        `),
+        readEffectiveMigrationState(admin, migrationFiles),
         admin.query<{
           foreignKeys: number;
           uniqueConstraints: number;
@@ -203,7 +203,10 @@ export async function verifyRecoveryTargetDatabase(input: {
       ]);
 
     const schemaNames = schemas.rows.map((row) => row.schemaName);
-    const migration = migrations.rows[0];
+    const migration = {
+      count: migrations.effective.length,
+      latest: migrations.effective.at(-1)?.filename ?? null,
+    };
     const constraintState = constraints.rows[0];
     const securityState = security.rows[0];
     const authorityState = authority.rows[0];
@@ -212,7 +215,7 @@ export async function verifyRecoveryTargetDatabase(input: {
       throw new Error('Recovery target is missing a required schema.');
     }
     if (
-      migration?.count !== input.expectedMigrationCount ||
+      migration.count !== input.expectedMigrationCount ||
       migration.latest !== input.expectedLatestMigration
     ) {
       throw new Error('Recovery target migration identity is invalid.');

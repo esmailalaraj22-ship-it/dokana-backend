@@ -25,6 +25,8 @@ import {
   platformAuthorityFoundationTables,
   platformRecoveryFoundationRoutines,
   platformRecoveryFoundationTables,
+  releaseBaselineProvenanceRoutines,
+  releaseBaselineProvenanceTables,
   sanitizedOwnerAuditRoutines,
   station2ContextFunctions,
   subscriptionLifecycleProvisioningRoutines,
@@ -86,6 +88,7 @@ export async function verifyApplicationInventory(
   let sanitizedOwnerAuditApplied = false;
   let attachmentLifecycleAuditApplied = false;
   let platformRecoveryFoundationApplied = false;
+  let releaseBaselineProvenanceApplied = false;
   if (includeFoundation) {
     const applied = await client.query<{ checksum: string }>(
       `select checksum_sha256 as checksum from platform.schema_migrations
@@ -292,6 +295,18 @@ export async function verifyApplicationInventory(
       }
       platformRecoveryFoundationApplied = true;
     }
+
+    const releaseBaselineProvenance = await client.query<{ checksum: string }>(
+      `select checksum_sha256 as checksum from platform.schema_migrations
+       where filename = '0035_release_baseline_provenance.sql'`,
+    );
+    if (releaseBaselineProvenance.rows[0]) {
+      const file = await readMigrationFile('0035_release_baseline_provenance.sql');
+      if (releaseBaselineProvenance.rows[0].checksum !== file.checksumSha256) {
+        throw new Error('Release baseline provenance migration checksum mismatch.');
+      }
+      releaseBaselineProvenanceApplied = true;
+    }
   }
   const schemaResult = await client.query<{ schemaName: string; owner: string }>(
     `
@@ -342,6 +357,7 @@ export async function verifyApplicationInventory(
     ...(offlineOperationRecoveryApplied ? offlineOperationRecoveryTables : []),
     ...(notificationUserStateApplied ? notificationUserStateTables : []),
     ...(platformRecoveryFoundationApplied ? platformRecoveryFoundationTables : []),
+    ...(releaseBaselineProvenanceApplied ? releaseBaselineProvenanceTables : []),
   ];
   assertExactSet(
     'Application relation',
@@ -411,6 +427,7 @@ export async function verifyApplicationInventory(
       ...(sanitizedOwnerAuditApplied ? sanitizedOwnerAuditRoutines : []),
       ...(attachmentLifecycleAuditApplied ? attachmentLifecycleAuditRoutines : []),
       ...(platformRecoveryFoundationApplied ? platformRecoveryFoundationRoutines : []),
+      ...(releaseBaselineProvenanceApplied ? releaseBaselineProvenanceRoutines : []),
     ],
   );
   if (routineResult.rows.some((row) => row.owner !== expectedOwner)) {

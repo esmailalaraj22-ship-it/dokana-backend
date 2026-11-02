@@ -46,6 +46,19 @@ export async function createCustomFormatDump(
   );
 }
 
+export async function createSchemaOnlyCustomFormatDump(
+  toolchain: PostgresToolchain,
+  connectionString: string,
+  targetPath: string,
+): Promise<void> {
+  await runPostgresTool(
+    toolchain.pgDump,
+    ['--format=custom', '--schema-only', '--file', targetPath, '--no-password'],
+    postgresEnvironment(connectionString),
+    { timeoutMs: toolchain.timeoutMs },
+  );
+}
+
 export async function listCustomFormatDump(
   toolchain: PostgresToolchain,
   artifactPath: string,

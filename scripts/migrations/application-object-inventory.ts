@@ -226,3 +226,10 @@ export const platformRecoveryFoundationRoutines = [
   'sync.assert_platform_recovery_authority_v1(p_expected_generation uuid)',
   'sync.capture_platform_recovery_authority_v1()',
 ] as const;
+
+export const releaseBaselineProvenanceTables = ['platform.release_baseline_provenance'] as const;
+
+export const releaseBaselineProvenanceRoutines = [
+  'platform.register_release_baseline_provenance_v1(p_format_version integer, p_baseline_identifier text, p_source_git_head text, p_artifact_sha256 text, p_catalog_fingerprint_sha256 text, p_migration_ceiling text, p_migration_checksum_manifest jsonb)',
+  'platform.reject_release_baseline_provenance_mutation_v1()',
+] as const;

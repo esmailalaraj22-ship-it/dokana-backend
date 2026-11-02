@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto';
 
 import { Pool } from 'pg';
 
+import {
+  readEffectiveMigrationState,
+  verifyMigrationChecksums,
+  type MigrationIdentity,
+} from '../migrations/effective-migration-state';
 import { readMigrationFiles } from '../migrations/migration-files';
 
 export const REQUIRED_RECOVERY_MIGRATION = '0033_platform_recovery_generation_fencing.sql';
-
-export interface MigrationIdentity {
-  filename: string;
-  checksumSha256: string;
-}
 
 export interface VerifiedMigrationState {
   appliedCount: number;
@@ -39,25 +39,23 @@ export async function readVerifiedMigrationState(
     allowExitOnIdle: true,
   });
   try {
-    const [files, appliedResult, serverResult] = await Promise.all([
-      readMigrationFiles(),
-      pool.query<{ filename: string; checksumSha256: string }>(`
-        select filename, checksum_sha256 as "checksumSha256"
-        from platform.schema_migrations
-        order by filename
-      `),
+    const files = await readMigrationFiles();
+    const [state, serverResult] = await Promise.all([
+      readEffectiveMigrationState(pool, files),
       pool.query<{ version: string }>(`select current_setting('server_version') as version`),
     ]);
-    const applied = appliedResult.rows;
-    const appliedFilenames = verifyAppliedMigrationLedger(files, applied);
-    const latestFilename = applied.at(-1)?.filename;
+    if (state.pending.length !== 0) throw new Error('Recovery requires zero pending migrations.');
+    const appliedFilenames = verifyEffectiveRecoveryMigrations(files, state.effective);
+    const latestFilename = state.effective.at(-1)?.filename;
     const serverVersion = serverResult.rows[0]?.version;
     if (!latestFilename || !serverVersion) {
       throw new Error('Recovery migration identity is incomplete.');
     }
-    const aggregate = applied.map((item) => `${item.filename}:${item.checksumSha256}\n`).join('');
+    const aggregate = state.effective
+      .map((item) => `${item.filename}:${item.checksumSha256}\n`)
+      .join('');
     return {
-      appliedCount: applied.length,
+      appliedCount: state.effective.length,
       latestFilename,
       checksumAggregateSha256: createHash('sha256').update(aggregate).digest('hex'),
       serverVersion,
@@ -72,20 +70,25 @@ export function verifyAppliedMigrationLedger(
   files: readonly MigrationIdentity[],
   applied: readonly MigrationIdentity[],
 ): readonly string[] {
-  if (!applied.some((migration) => migration.filename === REQUIRED_RECOVERY_MIGRATION)) {
+  return verifyEffectiveRecoveryMigrations(files, applied);
+}
+
+export function verifyEffectiveRecoveryMigrations(
+  files: readonly MigrationIdentity[],
+  effective: readonly MigrationIdentity[],
+): readonly string[] {
+  if (!effective.some((migration) => migration.filename === REQUIRED_RECOVERY_MIGRATION)) {
     throw new Error('Required recovery migration is missing.');
   }
-  if (applied.length !== files.length || applied.length === 0) {
+  if (effective.length !== files.length || effective.length === 0) {
     throw new Error('Recovery requires zero pending migrations.');
   }
-  const filesByName = new Map(files.map((file) => [file.filename, file]));
-  for (const migration of applied) {
-    const file = filesByName.get(migration.filename);
-    if (file?.checksumSha256 !== migration.checksumSha256) {
-      throw new Error('Migration checksum verification failed for recovery.');
-    }
+  try {
+    verifyMigrationChecksums(files, effective);
+  } catch {
+    throw new Error('Migration checksum verification failed for recovery.');
   }
-  return applied.map((migration) => migration.filename);
+  return effective.map((migration) => migration.filename);
 }
 
 export function isRecoveryMigrationCompatible(

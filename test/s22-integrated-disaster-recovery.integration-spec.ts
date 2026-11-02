@@ -61,7 +61,7 @@ import {
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 
 const recoveryAuthorityMigrationFilename = '0033_platform_recovery_generation_fencing.sql';
-const currentMigrationFilename = '0034_retire_broken_recovery_session_wrapper.sql';
+const currentMigrationFilename = '0035_release_baseline_provenance.sql';
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
 
@@ -861,7 +861,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
       });
       expect(recoveryPoint).toMatchObject({
         state: 'VERIFIED',
-        migrations: { appliedCount: 34, checksumStatus: 'PASS' },
+        migrations: { appliedCount: 35, checksumStatus: 'PASS' },
         verification: { status: 'VERIFIED', structuralCheck: 'PASS' },
       });
       expect(attachmentManifest).toMatchObject({
@@ -1344,7 +1344,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
             });
             const targetMigrations = await readVerifiedMigrationState(targetAdminUrl);
             expect(targetMigrations).toMatchObject({
-              appliedCount: 34,
+              appliedCount: 35,
               latestFilename: currentMigrationFilename,
             });
           } finally {
@@ -1641,7 +1641,7 @@ describeWithPostgres('S22.5 integrated disaster-recovery drill', () => {
       process.stdout.write(
         `S22.5_DRILL_EVIDENCE ${JSON.stringify({
           stores: 2,
-          migrationCount: 34,
+          migrationCount: 35,
           recoveryPointCreatedAt,
           disasterAt,
           recoveryStartedAt,
