@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -113,6 +114,27 @@ describe('S3RecoveryArtifactStorage', () => {
     await expect(storageWith(send, 20).readBuffer('recovery/v1/key', 10)).rejects.toBeInstanceOf(
       RecoveryStorageUnavailableError,
     );
+  });
+
+  it('uses provider-side version matching for stale-lock deletion', async () => {
+    const preconditionFailed = Object.assign(new Error('changed object'), {
+      $metadata: { httpStatusCode: 412 },
+    });
+    const send = jest
+      .fn<Promise<unknown>, SendArguments>()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(preconditionFailed);
+    const storage = storageWith(send);
+
+    await expect(storage.deleteObjectIfVersion('recovery/v1/locks/job', 'etag-1')).resolves.toBe(
+      true,
+    );
+    await expect(storage.deleteObjectIfVersion('recovery/v1/locks/job', 'etag-2')).resolves.toBe(
+      false,
+    );
+    const command = send.mock.calls[0]?.[0] as DeleteObjectCommand;
+    expect(command).toBeInstanceOf(DeleteObjectCommand);
+    expect(command.input).toMatchObject({ IfMatch: 'etag-1' });
   });
 
   it('rejects keys outside the dedicated recovery namespace before provider access', async () => {

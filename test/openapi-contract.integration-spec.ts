@@ -435,6 +435,43 @@ describe('machine-readable Dokana API contract', () => {
       expect(schema.properties).not.toHaveProperty(internal);
     }
   });
+
+  it('documents Recovery Generation fencing and exactly six offline PUSH outcomes', () => {
+    const push = operationAt(document, '/v1/sync/push', 'post');
+    const bootstrap = operationAt(document, '/v1/sync/bootstrap', 'post');
+    const pull = operationAt(document, '/v1/sync/pull', 'get');
+
+    expect(responseRef(push)).toBe('#/components/schemas/OfflineOperationPushResponseDto');
+    expect(responseRef(bootstrap)).toBe('#/components/schemas/BootstrapManifestResponseDto');
+    expect(responseRef(pull)).toBe('#/components/schemas/ChangePullResponseDto');
+    for (const operation of [push, bootstrap, pull]) {
+      expect(operation.security).toContainEqual({ bearer: [] });
+      expect(operation.responses).toHaveProperty('410');
+      expect(responseRefForStatus(operation, '410')).toBe(
+        '#/components/schemas/SyncRebootstrapRequiredErrorResponseDto',
+      );
+    }
+
+    expect(
+      schemaProperty(schemaAt(document, 'OfflineOperationResultResponseDto'), 'status').enum,
+    ).toEqual([
+      'APPLIED',
+      'EXACT_REPLAY',
+      'REJECTED',
+      'DEPENDENCY_PENDING',
+      'CONFLICT',
+      'QUARANTINED',
+    ]);
+    expect(
+      schemaProperty(schemaAt(document, 'BootstrapManifestResponseDto'), 'bootstrapGenerationId'),
+    ).toMatchObject({ format: 'uuid' });
+    expect(
+      schemaProperty(schemaAt(document, 'BootstrapManifestResponseDto'), 'recoveryGenerationId'),
+    ).toMatchObject({ format: 'uuid' });
+    expect(
+      schemaProperty(schemaAt(document, 'SyncRebootstrapRequiredErrorResponseDto'), 'code').enum,
+    ).toEqual(['SYNC_REBOOTSTRAP_REQUIRED']);
+  });
 });
 
 function allOperations(
@@ -463,7 +500,11 @@ function responseAt(operation: OperationObject, status: string): ResponseObject 
 }
 
 function responseRef(operation: OperationObject): string {
-  const schema = responseAt(operation, '200').content?.['application/json']?.schema;
+  return responseRefForStatus(operation, '200');
+}
+
+function responseRefForStatus(operation: OperationObject, status: string): string {
+  const schema = responseAt(operation, status).content?.['application/json']?.schema;
   if (!schema || !isReference(schema))
     throw new Error('Expected a referenced JSON response schema.');
   return schema.$ref;

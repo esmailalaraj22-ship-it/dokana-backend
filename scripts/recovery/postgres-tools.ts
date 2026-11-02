@@ -3,21 +3,29 @@ import { access } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 
 const TOOL_OUTPUT_MAXIMUM_BYTES = 8 * 1024 * 1024;
+const DEFAULT_TOOL_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export interface PostgresToolchain {
   pgDump: string;
   pgRestore: string;
+  timeoutMs: number;
 }
 
-export async function resolvePostgresToolchain(binDirectory?: string): Promise<PostgresToolchain> {
+export async function resolvePostgresToolchain(
+  binDirectory?: string,
+  timeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+): Promise<PostgresToolchain> {
   return {
     pgDump: await resolveTool('pg_dump', binDirectory),
     pgRestore: await resolveTool('pg_restore', binDirectory),
+    timeoutMs,
   };
 }
 
 export async function readPgDumpVersion(toolchain: PostgresToolchain): Promise<string> {
-  const result = await runTool(toolchain.pgDump, ['--version'], process.env);
+  const result = await runPostgresTool(toolchain.pgDump, ['--version'], process.env, {
+    timeoutMs: toolchain.timeoutMs,
+  });
   const version = result.stdout.trim();
   if (!version || version.length > 256) throw new Error('PostgreSQL backup tool is invalid.');
   return version;
@@ -30,10 +38,11 @@ export async function createCustomFormatDump(
   snapshotId?: string,
 ): Promise<void> {
   const snapshotArguments = snapshotId ? ['--snapshot', snapshotId] : [];
-  await runTool(
+  await runPostgresTool(
     toolchain.pgDump,
     ['--format=custom', '--file', targetPath, '--no-password', ...snapshotArguments],
     postgresEnvironment(connectionString),
+    { timeoutMs: toolchain.timeoutMs },
   );
 }
 
@@ -41,7 +50,9 @@ export async function listCustomFormatDump(
   toolchain: PostgresToolchain,
   artifactPath: string,
 ): Promise<string> {
-  const result = await runTool(toolchain.pgRestore, ['--list', artifactPath], process.env);
+  const result = await runPostgresTool(toolchain.pgRestore, ['--list', artifactPath], process.env, {
+    timeoutMs: toolchain.timeoutMs,
+  });
   return result.stdout;
 }
 
@@ -53,7 +64,7 @@ export async function restoreCustomFormatDump(
   const environment = postgresEnvironment(connectionString);
   const database = databaseName(connectionString);
   for (const section of ['pre-data', 'post-data'] as const) {
-    await runTool(
+    await runPostgresTool(
       toolchain.pgRestore,
       [
         '--exit-on-error',
@@ -65,9 +76,10 @@ export async function restoreCustomFormatDump(
         artifactPath,
       ],
       environment,
+      { timeoutMs: toolchain.timeoutMs },
     );
   }
-  await runTool(
+  await runPostgresTool(
     toolchain.pgRestore,
     [
       '--exit-on-error',
@@ -80,6 +92,7 @@ export async function restoreCustomFormatDump(
       artifactPath,
     ],
     environment,
+    { timeoutMs: toolchain.timeoutMs },
   );
 }
 
@@ -150,12 +163,14 @@ async function resolveTool(name: 'pg_dump' | 'pg_restore', binDirectory?: string
   throw new Error('Required PostgreSQL backup toolchain is unavailable.');
 }
 
-function runTool(
+export function runPostgresTool(
   executable: string,
   arguments_: readonly string[],
   environment: NodeJS.ProcessEnv,
+  options: { timeoutMs: number; maximumOutputBytes?: number },
 ): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
+    const maximumOutputBytes = options.maximumOutputBytes ?? TOOL_OUTPUT_MAXIMUM_BYTES;
     const child = spawn(executable, arguments_, {
       env: environment,
       shell: false,
@@ -165,24 +180,47 @@ function runTool(
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;
+    let outputExceeded = false;
+    let timedOut = false;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, options.timeoutMs);
+    const finish = (work: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      work();
+    };
     const collect = (chunk: Buffer): void => {
       outputBytes += chunk.byteLength;
-      if (outputBytes > TOOL_OUTPUT_MAXIMUM_BYTES) child.kill();
-      else stdout.push(chunk);
+      if (outputBytes > maximumOutputBytes) {
+        outputExceeded = true;
+        child.kill('SIGKILL');
+      } else stdout.push(chunk);
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', (chunk: Buffer) => {
       outputBytes += chunk.byteLength;
-      if (outputBytes > TOOL_OUTPUT_MAXIMUM_BYTES) child.kill();
-      else stderr.push(chunk);
+      if (outputBytes > maximumOutputBytes) {
+        outputExceeded = true;
+        child.kill('SIGKILL');
+      } else stderr.push(chunk);
     });
-    child.once('error', () => reject(new Error('PostgreSQL backup tool could not start.')));
+    child.once('error', () =>
+      finish(() => reject(new Error('PostgreSQL backup tool could not start.'))),
+    );
     child.once('close', (code) => {
-      if (code !== 0 || outputBytes > TOOL_OUTPUT_MAXIMUM_BYTES) {
-        reject(new Error(classifyToolFailure(Buffer.concat(stderr).toString('utf8'))));
-        return;
-      }
-      resolve({ stdout: Buffer.concat(stdout).toString('utf8') });
+      finish(() => {
+        if (timedOut) {
+          reject(new Error('PostgreSQL backup tool timed out.'));
+        } else if (code !== 0 || outputExceeded) {
+          reject(new Error(classifyToolFailure(Buffer.concat(stderr).toString('utf8'))));
+        } else {
+          resolve({ stdout: Buffer.concat(stdout).toString('utf8') });
+        }
+      });
     });
   });
 }

@@ -10,6 +10,15 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiGoneResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 
 import {
   SyncAuthenticationGuard,
@@ -21,6 +30,11 @@ import { RefreshDto } from '../auth/dto/refresh.dto';
 import { PushOfflineOperationsDto } from './dto/push-offline-operations.dto';
 import { OfflineOperationStatusQueryDto } from './dto/offline-operation-status-query.dto';
 import { RecoverOfflineOperationDto } from './dto/recover-offline-operation.dto';
+import {
+  OfflineOperationPushResponseDto,
+  SyncApiErrorResponseDto,
+  SyncRebootstrapRequiredErrorResponseDto,
+} from './dto/sync-contract-response.dto';
 import type {
   OfflineOperationPushResult,
   OfflineOperationStatusResult,
@@ -28,6 +42,7 @@ import type {
 import { OfflineOperationService } from './offline-operation.service';
 
 @Controller('sync')
+@ApiTags('Synchronization')
 export class OfflineOperationController {
   constructor(
     private readonly authentication: SyncAuthenticationService,
@@ -43,6 +58,20 @@ export class OfflineOperationController {
   @Post('push')
   @UseGuards(SyncAuthenticationGuard)
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    operationId: 'sync.push',
+    summary: 'Apply a bounded batch of offline operations',
+    description:
+      'Returns one of exactly six canonical outcomes per operation. Recovery Generation is validated before authoritative domain dispatch.',
+  })
+  @ApiOkResponse({ type: OfflineOperationPushResponseDto })
+  @ApiBadRequestResponse({ type: SyncApiErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: SyncApiErrorResponseDto })
+  @ApiGoneResponse({
+    description: 'The client Recovery Generation is stale and a new bootstrap is required.',
+    type: SyncRebootstrapRequiredErrorResponseDto,
+  })
   push(
     @Body() input: PushOfflineOperationsDto,
     @Req() request: SyncAuthenticatedRequest,

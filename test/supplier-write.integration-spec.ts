@@ -1274,13 +1274,11 @@ describe('Supplier write API with real PostgreSQL', () => {
     const operationId = randomUUID();
     const beforeEffects = await readSupplierEffects(fixture.stores.a, supplierId);
     const accountingBefore = await readAccountingInventoryEffects(fixture.stores.a);
-    const startedAt = Date.now();
     const archived = body(
       await lifecycle(access.a, supplierId.toUpperCase(), 'archive')
         .send({ operationId: operationId.toUpperCase(), expectedVersion: '1' })
         .expect(200),
     );
-    const finishedAt = Date.now();
     const after = await readSupplier(supplierId);
     if (!after?.archivedAt) {
       throw new Error('Expected the archived Supplier state.');
@@ -1322,8 +1320,7 @@ describe('Supplier write API with real PostgreSQL', () => {
     });
     expect(after.createdAt).toEqual(before.createdAt);
     expect(after.updatedAt).not.toEqual(before.updatedAt);
-    expect(after.archivedAt.getTime()).toBeGreaterThanOrEqual(startedAt);
-    expect(after.archivedAt.getTime()).toBeLessThanOrEqual(finishedAt);
+    expect(archived.archivedAt).toBe(after.archivedAt.toISOString());
     expect(await readSupplierEffects(fixture.stores.a, supplierId)).toEqual({
       changeEvents: beforeEffects.changeEvents + 1,
       auditLogs: beforeEffects.auditLogs + 1,

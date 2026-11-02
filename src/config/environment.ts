@@ -261,6 +261,12 @@ export const environmentSchema = z
     RECOVERY_TARGET_ATTACHMENT_S3_SECRET_ACCESS_KEY: optionalNonEmptyStringSchema,
     RECOVERY_TARGET_ATTACHMENT_S3_FORCE_PATH_STYLE: booleanStringSchema.default(false),
     RECOVERY_STORAGE_TIMEOUT_MS: z.coerce.number().int().min(100).max(600_000).default(30_000),
+    RECOVERY_POSTGRES_TOOL_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(21_600_000)
+      .default(1_800_000),
     RECOVERY_LOGICAL_MAX_AGE_HOURS: z.coerce.number().int().min(24).max(72).default(36),
     RECOVERY_ATTACHMENT_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
     RECOVERY_ATTACHMENT_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),

@@ -25,6 +25,7 @@ export interface RecoveryStoredObject {
   checksumSha256: string | null;
   encryption: 'AES256' | 'aws:kms' | 'test-only-filesystem' | null;
   lastModified: Date;
+  versionToken: string | null;
 }
 
 export interface RecoveryObjectPage {
@@ -47,6 +48,7 @@ export interface RecoveryArtifactStoragePort {
   downloadToFile(key: string, targetPath: string, maximumBytes: number): Promise<boolean>;
   headObject(key: string): Promise<RecoveryStoredObject | null>;
   deleteObject(key: string): Promise<void>;
+  deleteObjectIfVersion(key: string, versionToken: string): Promise<boolean>;
   listObjects(input: {
     prefix: string;
     limit: number;
@@ -92,6 +94,10 @@ export class UnavailableRecoveryArtifactStorage implements RecoveryArtifactStora
   }
 
   deleteObject(): Promise<never> {
+    return Promise.reject(new RecoveryStorageUnavailableError());
+  }
+
+  deleteObjectIfVersion(): Promise<never> {
     return Promise.reject(new RecoveryStorageUnavailableError());
   }
 

@@ -17,7 +17,7 @@ import { FilesystemRecoveryArtifactStorage } from '../src/recovery/filesystem-re
 import { RecoveryCatalogService } from '../src/recovery/recovery-catalog.service';
 import type { RecoveryRuntimeConfig } from '../src/recovery/recovery-config';
 import { RECOVERY_ARTIFACT_MAXIMUM_BYTES } from '../src/recovery/recovery-manifest';
-import { readAttachmentInventory } from '../scripts/recovery/attachment-recovery-files';
+import { readAttachmentInventory } from '../src/recovery/attachment-recovery-files';
 import {
   protectAttachmentRecoveryPoint,
   verifyAttachmentRecoveryPoint,

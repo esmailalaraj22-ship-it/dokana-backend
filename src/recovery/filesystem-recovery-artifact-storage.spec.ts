@@ -87,6 +87,24 @@ describe('FilesystemRecoveryArtifactStorage', () => {
     await expect(storage.readBuffer(key, 100)).resolves.toEqual(original);
   });
 
+  it('deletes only the exact immutable object version requested', async () => {
+    const key = 'recovery/v1/locks/logical-backup.json';
+    const body = Buffer.from('lock');
+    const versionToken = sha256(body);
+    await storage.putBuffer({
+      key,
+      body,
+      contentType: 'application/json',
+      contentLength: body.byteLength,
+      checksumSha256: versionToken,
+    });
+
+    await expect(storage.deleteObjectIfVersion(key, 'f'.repeat(64))).resolves.toBe(false);
+    await expect(storage.readBuffer(key, 100)).resolves.toEqual(body);
+    await expect(storage.deleteObjectIfVersion(key, versionToken)).resolves.toBe(true);
+    await expect(storage.readBuffer(key, 100)).resolves.toBeNull();
+  });
+
   it('streams files to and from storage with exact declared lengths', async () => {
     const source = join(root, 'source.tmp');
     const target = join(root, 'download.tmp');

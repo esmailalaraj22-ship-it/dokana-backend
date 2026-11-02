@@ -9,7 +9,7 @@ import {
   attachmentRecoveryEntrySchema,
   type AttachmentInventoryEntry,
   type AttachmentRecoveryEntry,
-} from '../../src/recovery/attachment-recovery-manifest';
+} from './attachment-recovery-manifest';
 
 const MAXIMUM_NDJSON_LINE_BYTES = 16 * 1024;
 
@@ -80,7 +80,7 @@ export async function* readAttachmentRecoveryEntries(
         throw new Error('Attachment recovery entry totals are invalid.');
       }
       if (!(await records.next()).done) {
-        throw new Error('Attachment recovery entries contain records after their footer.');
+        throw new Error('Attachment recovery entries contain records after its footer.');
       }
       return;
     }

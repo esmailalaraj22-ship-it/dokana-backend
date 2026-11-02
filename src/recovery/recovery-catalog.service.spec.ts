@@ -1,9 +1,12 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { FilesystemRecoveryArtifactStorage } from './filesystem-recovery-artifact-storage';
-import { RecoveryCatalogService } from './recovery-catalog.service';
+import {
+  RECOVERY_JOB_LOCK_STALE_AFTER_MS,
+  RecoveryCatalogService,
+} from './recovery-catalog.service';
 import {
   recoveryArtifactKey,
   recoveryManifestKey,
@@ -134,6 +137,42 @@ describe('RecoveryCatalogService', () => {
     await expect(catalog.releaseJobLock('wrong-token')).rejects.toThrow('ownership');
     await catalog.releaseJobLock(token);
     await expect(catalog.acquireJobLock()).resolves.toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('recovers an abandoned stale lock without trusting its client-supplied acquiredAt', async () => {
+    const oldBodyTime = new Date('2020-01-01T00:00:00.000Z');
+    const token = await catalog.acquireJobLock(oldBodyTime);
+    const lockPath = join(root, 'recovery', 'v1', 'locks', 'logical-backup.json');
+    const now = new Date('2026-10-20T00:00:00.000Z');
+
+    await expect(catalog.acquireJobLock(now)).rejects.toThrow('already active');
+
+    const staleTime = new Date(now.getTime() - RECOVERY_JOB_LOCK_STALE_AFTER_MS - 1);
+    await utimes(lockPath, staleTime, staleTime);
+    const replacement = await catalog.acquireJobLock(now);
+    expect(replacement).not.toBe(token);
+    await expect(catalog.releaseJobLock(token)).rejects.toThrow('ownership');
+    await catalog.releaseJobLock(replacement);
+  });
+
+  it('allows only one contender to recover the same stale lock', async () => {
+    await catalog.acquireJobLock();
+    const lockPath = join(root, 'recovery', 'v1', 'locks', 'logical-backup.json');
+    const now = new Date('2026-10-20T00:00:00.000Z');
+    const staleTime = new Date(now.getTime() - RECOVERY_JOB_LOCK_STALE_AFTER_MS - 1);
+    await utimes(lockPath, staleTime, staleTime);
+
+    const contenders = await Promise.allSettled([
+      new RecoveryCatalogService(storage).acquireJobLock(now),
+      new RecoveryCatalogService(storage).acquireJobLock(now),
+    ]);
+    const winners = contenders.filter(
+      (result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled',
+    );
+    expect(winners).toHaveLength(1);
+    const winner = winners[0];
+    if (!winner) throw new Error('Expected one stale-lock recovery winner.');
+    await catalog.releaseJobLock(winner.value);
   });
 });
 

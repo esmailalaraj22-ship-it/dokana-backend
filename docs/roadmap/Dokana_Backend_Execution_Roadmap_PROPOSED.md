@@ -9,7 +9,7 @@
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
 | Closed execution history  | Stations S0-S22                            |
-| Current Station           | S23; S23.1-S23.2 closed; S23.3 next        |
+| Current Station           | S23; S23.1-S23.3 closed; S23.4 next        |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,7 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S22                                        |
-| Current task                    | S23.2 closed; S23.3 next                   |
+| Current task                    | S23.3 closed; S23.4 next                   |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -2252,7 +2252,7 @@ accounting, synchronization, attachment, or recovery gate as release success.
 
 ### S23 - Final Validation and Release Readiness
 
-- **Status:** CURRENT - S23.1-S23.2 CLOSED; S23.3 NEXT.
+- **Status:** CURRENT - S23.1-S23.3 CLOSED; S23.4 NEXT.
 - **Purpose:** Execute the complete backend release gate.
 - **Distinct boundary:** Cross-domain assurance cannot be proven by isolated Station
   tests alone.
@@ -2385,8 +2385,8 @@ will be an artifact, not an upgrade authority or permission to rewrite history.
 | ----- | ----------- | --------------------------------------------------- | -------------- | ------------------------------------------------------- | -------------------------------------------------- |
 | S23.1 | CLOSED      | Freeze release inventory, invariants, and authority | `0`            | 29/29 ownership; severity and evidence policy           | Scope and gates recorded without non-Roadmap delta |
 | S23.2 | CLOSED      | Reconcile PostgreSQL, security, migrations, Drizzle | `0034`         | Catalog, RLS, grants, roles, functions, auth wrapper    | Wrapper retired; recovery compatibility preserved  |
-| S23.3 | NEXT        | Verify offline contract and application hardening   | `0` default    | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
-| S23.4 | NOT STARTED | Prove clean install and release schema baseline     | `0` live       | Canonical metadata, S3 fixture, restorable baseline     | Deterministic equivalent disposable environments   |
+| S23.3 | CLOSED      | Verify offline contract and application hardening   | `0`            | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
+| S23.4 | NEXT        | Prove clean install and release schema baseline     | `0` live       | Canonical metadata, S3 fixture, restorable baseline     | Deterministic equivalent disposable environments   |
 | S23.5 | NOT STARTED | Prove production infrastructure and recovery        | `0` default    | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators   | Real provider and operational evidence accepted    |
 | S23.6 | NOT STARTED | Execute the integrated final release gate           | `0` default    | Zero-skip static/test/security/accounting/recovery gate | Evidence-backed release decision                   |
 
@@ -2420,7 +2420,26 @@ is recorded as L2 and the frozen accounting contract remains untouched.
   recovery drill, RLS/security checks, Drizzle reconciliation, full unit suite, and broad
   integration suite passed. Accounting, S18, S19, S21, SQLite, and historical PostgreSQL
   reference semantic deltas are `0`.
-- **Next:** S23.3 is next and requires its own execution authorization.
+- **Handoff:** S23.3 followed under separate execution authorization.
+
+#### S23.3 - Offline Contract and Application Hardening
+
+- **Status:** CLOSED.
+- **Offline contract:** The S19 protocol retains exactly `APPLIED`, `EXACT_REPLAY`, `REJECTED`,
+  `DEPENDENCY_PENDING`, `CONFLICT`, and `QUARANTINED`. Recovery Generation, bootstrap, cursor,
+  PUSH, stale-authority rejection, and SQLite semantic parity passed with no protocol or SQLite
+  delta.
+- **Application hardening:** Protected recovery health now revalidates required binary integrity;
+  recovery subprocesses have bounded timeouts; recovery-job locks have deterministic stale-owner
+  recovery without dual execution; OpenAPI exposes the existing recovery/sync contract; and failed
+  authentication rollback disposes uncertain clients without changing auth semantics.
+- **Test reliability:** The Supplier archive blocker was a cross-clock test defect. The test now
+  compares the returned authoritative `archivedAt` value with the persisted PostgreSQL timestamp,
+  with no tolerance and no production semantic change. Broad integration passed 82/82 suites and
+  907/907 tests with 0 skipped.
+- **Post-condition:** PostgreSQL remains 34 applied / 0 pending; migration `0035` is absent; database,
+  Drizzle, SQLite, historical-reference, and accounting-authority deltas are `0`.
+- **Next:** S23.4 is next and requires its own execution authorization.
 
 ## 12. Dependency Model and Sequence Proof
 
@@ -2553,9 +2572,9 @@ new explicit owner decision.
 | ----------------------------------- | ------------------------------------------ |
 | Last fully closed Station           | S22 - Backup, Restore, and Recovery        |
 | S23.1 starting checkpoint           | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
-| Safe completed capabilities         | S0-S22; S23.1-S23.2                        |
-| First incomplete release dependency | S23.3 offline/application hardening        |
-| Current Station                     | S23 CURRENT; S23.1-S23.2 CLOSED            |
+| Safe completed capabilities         | S0-S22; S23.1-S23.3                        |
+| First incomplete release dependency | S23.4 clean installation/release baseline  |
+| Current Station                     | S23 CURRENT; S23.1-S23.3 CLOSED            |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2596,10 +2615,10 @@ new explicit owner decision.
 | S23 current status                  | CURRENT                                    |
 | S23.1 current status                | CLOSED                                     |
 | S23.2 current status                | CLOSED                                     |
-| S23.3 current status                | NEXT                                       |
-| S23.4 current status                | NOT STARTED                                |
+| S23.3 current status                | CLOSED                                     |
+| S23.4 current status                | NEXT                                       |
 | S23.5 current status                | NOT STARTED                                |
 | S23.6 current status                | NOT STARTED                                |
 
-Do not start S23.3 from this document. It requires a separate execution prompt. Database,
+Do not start S23.4 from this document. It requires a separate execution prompt. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.

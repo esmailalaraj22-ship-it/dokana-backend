@@ -139,6 +139,7 @@ export class S3RecoveryArtifactStorage implements RecoveryArtifactStoragePort {
             ? result.ServerSideEncryption
             : null,
         lastModified: result.LastModified ?? new Date(0),
+        versionToken: result.ETag ?? null,
       };
     } catch (error) {
       if (isNotFound(error)) return null;
@@ -155,6 +156,26 @@ export class S3RecoveryArtifactStorage implements RecoveryArtifactStoragePort {
         }),
       );
     } catch {
+      throw new RecoveryStorageUnavailableError();
+    }
+  }
+
+  async deleteObjectIfVersion(key: string, versionToken: string): Promise<boolean> {
+    this.assertKey(key);
+    try {
+      await this.withTimeout((abortSignal) =>
+        this.client.send(
+          new DeleteObjectCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+            IfMatch: versionToken,
+          }),
+          { abortSignal },
+        ),
+      );
+      return true;
+    } catch (error) {
+      if (isNotFound(error) || httpStatus(error) === 412) return false;
       throw new RecoveryStorageUnavailableError();
     }
   }
@@ -189,6 +210,7 @@ export class S3RecoveryArtifactStorage implements RecoveryArtifactStoragePort {
                   checksumSha256: null,
                   encryption: null,
                   lastModified: object.LastModified,
+                  versionToken: object.ETag ?? null,
                 } satisfies RecoveryStoredObject,
               ]
             : [],

@@ -38,6 +38,9 @@ export class RecoveryHealthService {
 
     try {
       const catalog = await this.attachmentCatalog.inspectCoherentCatalog();
+      if (catalog.latestVerified) {
+        await this.attachmentCatalog.verifyRecoveryPoint(catalog.latestVerified.recoveryPointId);
+      }
       const lastVerified = catalog.latestVerified
         ? new Date(catalog.latestVerified.verifiedAt)
         : null;

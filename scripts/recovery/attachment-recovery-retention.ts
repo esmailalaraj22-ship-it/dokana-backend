@@ -17,7 +17,7 @@ import {
   RECOVERY_CATALOG_PREFIX,
   type VerifiedRecoveryManifest,
 } from '../../src/recovery/recovery-manifest';
-import { readAttachmentRecoveryEntries } from './attachment-recovery-files';
+import { readAttachmentRecoveryEntries } from '../../src/recovery/attachment-recovery-files';
 import { sha256File } from './recovery-point-job';
 
 const RECOVERY_POINT_DELETE_LIMIT = 25;

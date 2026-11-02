@@ -89,6 +89,17 @@ describe('attachment recovery protection', () => {
       protectedAttachmentObjectKey({ attachmentId: attachmentA, sha256: first.sha256 }),
       protectedAttachmentObjectKey({ attachmentId: attachmentB, sha256: second.sha256 }),
     ]);
+    const unreferencedBody = Buffer.from('unreferenced removed attachment');
+    await recoveryStorage.putBuffer({
+      key: protectedAttachmentObjectKey({
+        attachmentId: '53000000-0000-4000-8000-000000000099',
+        sha256: sha256(unreferencedBody),
+      }),
+      body: unreferencedBody,
+      contentType: 'application/pdf',
+      contentLength: unreferencedBody.byteLength,
+      checksumSha256: sha256(unreferencedBody),
+    });
     await expect(
       verifyAttachmentRecoveryPoint({ recoveryPointId, recoveryStorage }),
     ).resolves.toMatchObject({ attachmentEntryCount: 2 });
@@ -365,6 +376,7 @@ function failFinalManifestOnce(
       storage.downloadToFile(key, targetPath, maximumBytes),
     headObject: (key) => storage.headObject(key),
     deleteObject: (key) => storage.deleteObject(key),
+    deleteObjectIfVersion: (key, versionToken) => storage.deleteObjectIfVersion(key, versionToken),
     listObjects: (input) => storage.listObjects(input),
   };
 }

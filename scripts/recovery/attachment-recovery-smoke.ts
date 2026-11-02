@@ -10,7 +10,7 @@ import { AttachmentRecoveryCatalogService } from '../../src/recovery/attachment-
 import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-artifact-storage.port';
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
 import { sha256 } from '../../src/recovery/recovery-manifest';
-import { readAttachmentRecoveryEntries } from './attachment-recovery-files';
+import { readAttachmentRecoveryEntries } from '../../src/recovery/attachment-recovery-files';
 import { sha256File } from './recovery-point-job';
 
 interface RestoredAttachmentRow {

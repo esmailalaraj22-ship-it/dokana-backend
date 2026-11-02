@@ -18,6 +18,10 @@ import {
   type AttachmentRecoveryEntry,
   type VerifiedAttachmentRecoveryManifest,
 } from '../../src/recovery/attachment-recovery-manifest';
+import {
+  readAttachmentInventory,
+  readAttachmentRecoveryEntries,
+} from '../../src/recovery/attachment-recovery-files';
 import { AttachmentRecoveryCatalogService } from '../../src/recovery/attachment-recovery-catalog.service';
 import {
   RecoveryStorageConflictError,
@@ -26,10 +30,6 @@ import {
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
 import type { RecoveryRuntimeConfig } from '../../src/recovery/recovery-config';
 import { sha256, verifiedRecoveryManifestKey } from '../../src/recovery/recovery-manifest';
-import {
-  readAttachmentInventory,
-  readAttachmentRecoveryEntries,
-} from './attachment-recovery-files';
 import { sha256File } from './recovery-point-job';
 
 export interface AttachmentRecoveryJobInput {
@@ -210,66 +210,7 @@ export async function verifyAttachmentRecoveryPoint(input: {
     input.recoveryStorage,
     databaseCatalog,
   );
-  const database = await databaseCatalog.readVerifiedRecoveryPoint(input.recoveryPointId);
-  if (!database) throw new Error('Verified database recovery point is unavailable.');
-  const manifest = await attachmentCatalog.readVerifiedManifest(input.recoveryPointId, database);
-  if (!manifest)
-    throw new Error('Verified attachment recovery manifest is unavailable or invalid.');
-
-  const directory = await mkdtemp(join(tmpdir(), 'dokana-attachment-verify-'));
-  await chmod(directory, 0o700);
-  try {
-    const inventoryPath = join(directory, 'inventory.ndjson');
-    await downloadVerifiedObject({
-      storage: input.recoveryStorage,
-      key: manifest.snapshotInventory.key,
-      targetPath: inventoryPath,
-      maximumBytes: ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES,
-      expectedSha256: manifest.snapshotInventory.sha256,
-      expectedSize: manifest.snapshotInventory.sizeBytes,
-    });
-    const entriesPath = join(directory, 'entries.ndjson');
-    await downloadVerifiedObject({
-      storage: input.recoveryStorage,
-      key: manifest.entries.key,
-      targetPath: entriesPath,
-      maximumBytes: ATTACHMENT_RECOVERY_ENTRIES_MAXIMUM_BYTES,
-      expectedSha256: manifest.entries.sha256,
-      expectedSize: manifest.entries.sizeBytes,
-    });
-
-    const inventory = readAttachmentInventory(inventoryPath, input.recoveryPointId);
-    const entries = readAttachmentRecoveryEntries(entriesPath, input.recoveryPointId);
-    let count = 0;
-    let totalBytes = 0n;
-    for (;;) {
-      const [inventoryItem, protectedItem] = await Promise.all([inventory.next(), entries.next()]);
-      if (inventoryItem.done || protectedItem.done) {
-        if (inventoryItem.done !== protectedItem.done) {
-          throw new Error('Attachment recovery inventory and protected entries differ.');
-        }
-        break;
-      }
-      assertMatchingEntry(inventoryItem.value, protectedItem.value);
-      await verifyProtectedObject(input.recoveryStorage, protectedItem.value);
-      count += 1;
-      totalBytes += BigInt(protectedItem.value.sizeBytes);
-    }
-    if (
-      count !== manifest.attachmentEntryCount ||
-      totalBytes !== BigInt(manifest.totalProtectedBytes)
-    ) {
-      throw new Error('Attachment recovery manifest totals do not match its entries.');
-    }
-    return {
-      recoveryPointId: input.recoveryPointId,
-      attachmentEntryCount: count,
-      totalProtectedBytes: totalBytes.toString(),
-      verifiedAt: manifest.verifiedAt,
-    };
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  return attachmentCatalog.verifyRecoveryPoint(input.recoveryPointId);
 }
 
 async function protectBatch(
@@ -412,23 +353,4 @@ async function downloadVerifiedObject(input: {
     throw new Error('Recovery object failed digest verification.');
   }
   return { sha256: digest, sizeBytes: details.size };
-}
-
-function assertMatchingEntry(
-  inventory: AttachmentInventoryEntry,
-  entry: AttachmentRecoveryEntry,
-): void {
-  const expectedKey = protectedAttachmentObjectKey({
-    attachmentId: inventory.attachmentId,
-    sha256: inventory.sha256,
-  });
-  if (
-    entry.attachmentId !== inventory.attachmentId ||
-    entry.protectedObjectKey !== expectedKey ||
-    entry.mediaType !== inventory.mediaType ||
-    entry.sizeBytes !== inventory.sizeBytes ||
-    entry.sha256 !== inventory.sha256
-  ) {
-    throw new Error('Attachment recovery inventory and protected entry do not match.');
-  }
 }

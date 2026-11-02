@@ -21,6 +21,7 @@ import {
 
 const VERIFIED_MANIFEST_PREFIX = `${RECOVERY_CATALOG_PREFIX}/manifests/verified/`;
 const CATALOG_SCAN_LIMIT = 1_000;
+export const RECOVERY_JOB_LOCK_STALE_AFTER_MS = 24 * 60 * 60 * 1_000;
 
 export interface RecoveryCatalogState {
   latestVerified: VerifiedRecoveryManifest | null;
@@ -126,7 +127,7 @@ export class RecoveryCatalogService {
     return 'MONTHLY';
   }
 
-  async acquireJobLock(): Promise<string> {
+  async acquireJobLock(now = new Date()): Promise<string> {
     const token = randomUUID();
     const body = Buffer.from(
       `${JSON.stringify({ version: 1, token, acquiredAt: new Date().toISOString() })}\n`,
@@ -143,20 +144,58 @@ export class RecoveryCatalogService {
       return token;
     } catch (error) {
       if (error instanceof RecoveryStorageConflictError) {
-        throw new Error('A recovery-point operation is already active.');
+        const existing = await this.storage.headObject(recoveryJobLockKey());
+        const versionToken = existing?.versionToken ?? null;
+        if (!existing || !versionToken) {
+          throw new Error('A recovery-point operation is already active.');
+        }
+        const stale =
+          existing.lastModified.getTime() <= now.getTime() &&
+          now.getTime() - existing.lastModified.getTime() >= RECOVERY_JOB_LOCK_STALE_AFTER_MS;
+        if (
+          !stale ||
+          !(await this.storage.deleteObjectIfVersion(recoveryJobLockKey(), versionToken))
+        ) {
+          throw new Error('A recovery-point operation is already active.');
+        }
+        try {
+          await this.storage.putBuffer({
+            key: recoveryJobLockKey(),
+            body,
+            contentType: 'application/json',
+            contentLength: body.byteLength,
+            checksumSha256: sha256(body),
+          });
+          return token;
+        } catch (retryError) {
+          if (retryError instanceof RecoveryStorageConflictError) {
+            throw new Error('A recovery-point operation is already active.');
+          }
+          throw retryError;
+        }
       }
       throw error;
     }
   }
 
   async releaseJobLock(token: string): Promise<void> {
-    const body = await this.storage.readBuffer(recoveryJobLockKey(), 4_096);
+    const key = recoveryJobLockKey();
+    const [body, metadata] = await Promise.all([
+      this.storage.readBuffer(key, 4_096),
+      this.storage.headObject(key),
+    ]);
     if (!body) return;
     const parsed: unknown = JSON.parse(body.toString('utf8'));
-    if (!isMatchingLock(parsed, token)) {
+    if (
+      !isMatchingLock(parsed, token) ||
+      !metadata?.versionToken ||
+      metadata.checksumSha256 !== sha256(body)
+    ) {
       throw new Error('Recovery-point lock ownership verification failed.');
     }
-    await this.storage.deleteObject(recoveryJobLockKey());
+    if (!(await this.storage.deleteObjectIfVersion(key, metadata.versionToken))) {
+      throw new Error('Recovery-point lock ownership verification failed.');
+    }
   }
 
   async assertJobLockOwnership(token: string): Promise<void> {

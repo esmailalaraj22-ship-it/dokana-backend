@@ -21,6 +21,7 @@ interface FilesystemMetadata {
 }
 
 export class FilesystemRecoveryArtifactStorage implements RecoveryArtifactStoragePort {
+  private static readonly mutationTails = new Map<string, Promise<void>>();
   readonly configured = true;
   private readonly rootDirectory: string;
   private readonly metadataDirectory: string;
@@ -34,19 +35,21 @@ export class FilesystemRecoveryArtifactStorage implements RecoveryArtifactStorag
     if (input.body.byteLength !== input.contentLength) {
       throw new RecoveryStorageUnavailableError();
     }
-    const target = this.pathFor(input.key);
-    await this.prepareTarget(target);
-    let objectCreated = false;
-    try {
-      await writeFile(target, input.body, { flag: 'wx', mode: 0o600 });
-      objectCreated = true;
-      await this.writeMetadata(input);
-    } catch (error) {
-      if (objectCreated) await rm(target, { force: true }).catch(() => undefined);
-      if (isAlreadyExists(error)) throw new RecoveryStorageConflictError();
-      if (error instanceof RecoveryStorageConflictError) throw error;
-      throw new RecoveryStorageUnavailableError();
-    }
+    await this.withMutation(input.key, async () => {
+      const target = this.pathFor(input.key);
+      await this.prepareTarget(target);
+      let objectCreated = false;
+      try {
+        await writeFile(target, input.body, { flag: 'wx', mode: 0o600 });
+        objectCreated = true;
+        await this.writeMetadata(input);
+      } catch (error) {
+        if (objectCreated) await rm(target, { force: true }).catch(() => undefined);
+        if (isAlreadyExists(error)) throw new RecoveryStorageConflictError();
+        if (error instanceof RecoveryStorageConflictError) throw error;
+        throw new RecoveryStorageUnavailableError();
+      }
+    });
   }
 
   async putFile(input: RecoveryPutInput & { sourcePath: string }): Promise<void> {
@@ -54,20 +57,22 @@ export class FilesystemRecoveryArtifactStorage implements RecoveryArtifactStorag
     if (!source?.isFile() || source.size !== input.contentLength) {
       throw new RecoveryStorageUnavailableError();
     }
-    const target = this.pathFor(input.key);
-    await this.prepareTarget(target);
-    let objectCreated = false;
-    try {
-      await copyFile(input.sourcePath, target, constants.COPYFILE_EXCL);
-      objectCreated = true;
-      await chmod(target, 0o600);
-      await this.writeMetadata(input);
-    } catch (error) {
-      if (objectCreated) await rm(target, { force: true }).catch(() => undefined);
-      if (isAlreadyExists(error)) throw new RecoveryStorageConflictError();
-      if (error instanceof RecoveryStorageConflictError) throw error;
-      throw new RecoveryStorageUnavailableError();
-    }
+    await this.withMutation(input.key, async () => {
+      const target = this.pathFor(input.key);
+      await this.prepareTarget(target);
+      let objectCreated = false;
+      try {
+        await copyFile(input.sourcePath, target, constants.COPYFILE_EXCL);
+        objectCreated = true;
+        await chmod(target, 0o600);
+        await this.writeMetadata(input);
+      } catch (error) {
+        if (objectCreated) await rm(target, { force: true }).catch(() => undefined);
+        if (isAlreadyExists(error)) throw new RecoveryStorageConflictError();
+        if (error instanceof RecoveryStorageConflictError) throw error;
+        throw new RecoveryStorageUnavailableError();
+      }
+    });
   }
 
   async readBuffer(key: string, maximumBytes: number): Promise<Buffer | null> {
@@ -111,16 +116,21 @@ export class FilesystemRecoveryArtifactStorage implements RecoveryArtifactStorag
       checksumSha256: metadata?.checksumSha256 ?? null,
       encryption: metadata?.encryption ?? null,
       lastModified: details.mtime,
+      versionToken: metadata?.checksumSha256 ?? null,
     };
   }
 
   async deleteObject(key: string): Promise<void> {
-    try {
-      await rm(this.pathFor(key), { force: true });
-      await rm(this.metadataPath(key), { force: true });
-    } catch {
-      throw new RecoveryStorageUnavailableError();
-    }
+    await this.withMutation(key, () => this.deleteObjectUnchecked(key));
+  }
+
+  async deleteObjectIfVersion(key: string, versionToken: string): Promise<boolean> {
+    return this.withMutation(key, async () => {
+      const metadata = await this.readMetadata(key);
+      if (metadata?.checksumSha256 !== versionToken) return false;
+      await this.deleteObjectUnchecked(key);
+      return true;
+    });
   }
 
   async listObjects(input: {
@@ -230,6 +240,34 @@ export class FilesystemRecoveryArtifactStorage implements RecoveryArtifactStorag
       }
     }
     return found.sort((left, right) => left.localeCompare(right, 'en'));
+  }
+
+  private async deleteObjectUnchecked(key: string): Promise<void> {
+    try {
+      await rm(this.pathFor(key), { force: true });
+      await rm(this.metadataPath(key), { force: true });
+    } catch {
+      throw new RecoveryStorageUnavailableError();
+    }
+  }
+
+  private async withMutation<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const mutationKey = `${this.rootDirectory}\n${key}`;
+    const previous = FilesystemRecoveryArtifactStorage.mutationTails.get(mutationKey);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    FilesystemRecoveryArtifactStorage.mutationTails.set(mutationKey, current);
+    if (previous) await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+      if (FilesystemRecoveryArtifactStorage.mutationTails.get(mutationKey) === current) {
+        FilesystemRecoveryArtifactStorage.mutationTails.delete(mutationKey);
+      }
+    }
   }
 }
 

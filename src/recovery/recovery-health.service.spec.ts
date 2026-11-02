@@ -18,7 +18,10 @@ describe('RecoveryHealthService', () => {
   };
   const attachmentCatalog = {
     inspectCoherentCatalog: jest.fn(),
-  } as unknown as jest.Mocked<Pick<AttachmentRecoveryCatalogService, 'inspectCoherentCatalog'>>;
+    verifyRecoveryPoint: jest.fn(),
+  } as unknown as jest.Mocked<
+    Pick<AttachmentRecoveryCatalogService, 'inspectCoherentCatalog' | 'verifyRecoveryPoint'>
+  >;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -27,6 +30,12 @@ describe('RecoveryHealthService', () => {
       status: 'unverified',
       retentionDays: null,
       latestRecoverableAt: null,
+    });
+    attachmentCatalog.verifyRecoveryPoint.mockResolvedValue({
+      recoveryPointId: '43000000-0000-4000-8000-000000000010',
+      attachmentEntryCount: 0,
+      totalProtectedBytes: '0',
+      verifiedAt: '2026-10-19T00:00:00.000Z',
     });
   });
 
@@ -47,6 +56,30 @@ describe('RecoveryHealthService', () => {
     await expect(
       service.notificationCause(storeId, new Date('2026-10-19T12:00:00.000Z')),
     ).resolves.toBeNull();
+    expect(attachmentCatalog.verifyRecoveryPoint).toHaveBeenCalledWith(
+      '43000000-0000-4000-8000-000000000010',
+    );
+  });
+
+  it('marks protection unhealthy when a required protected binary fails verification', async () => {
+    attachmentCatalog.inspectCoherentCatalog.mockResolvedValue({
+      latestVerified: manifest('2026-10-19T00:00:00.000Z'),
+      verifiedCount: 1,
+      invalidCount: 0,
+    });
+    attachmentCatalog.verifyRecoveryPoint.mockRejectedValue(
+      new Error('Protected attachment failed integrity verification.'),
+    );
+
+    await expect(
+      createService('production').evaluate(new Date('2026-10-19T12:00:00.000Z')),
+    ).resolves.toEqual({
+      protectionStatus: 'attention_required',
+      logicalBackupStatus: 'attention_required',
+      pitrStatus: 'unverified',
+      lastVerifiedRecoveryPointAt: null,
+      attentionRequired: true,
+    });
   });
 
   it('creates one stable Store-scoped cause only after verified protection is lost', async () => {

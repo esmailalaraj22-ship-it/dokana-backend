@@ -53,11 +53,19 @@ async function main(): Promise<void> {
     const state = await attachmentCatalog.inspectCoherentCatalog();
     const latestAt = state.latestVerified?.verifiedAt ?? null;
     const latestTime = latestAt === null ? null : new Date(latestAt).getTime();
-    const healthy =
+    const ageAndCatalogHealthy =
       latestTime !== null &&
       latestTime <= Date.now() &&
       Date.now() - latestTime <= config.logicalMaximumAgeHours * 3_600_000 &&
       state.invalidCount === 0;
+    const protectedBinariesHealthy =
+      ageAndCatalogHealthy && state.latestVerified
+        ? await attachmentCatalog
+            .verifyRecoveryPoint(state.latestVerified.recoveryPointId)
+            .then(() => true)
+            .catch(() => false)
+        : false;
+    const healthy = ageAndCatalogHealthy && protectedBinariesHealthy;
     writeResult({ command, healthy, latestVerifiedRecoveryPointAt: latestAt });
     return;
   }
@@ -81,7 +89,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const toolchain = await resolvePostgresToolchain(environment.RECOVERY_POSTGRES_BIN_DIR);
+  const toolchain = await resolvePostgresToolchain(
+    environment.RECOVERY_POSTGRES_BIN_DIR,
+    environment.RECOVERY_POSTGRES_TOOL_TIMEOUT_MS,
+  );
   if (
     command === 'prepare' ||
     command === 'restore-database' ||

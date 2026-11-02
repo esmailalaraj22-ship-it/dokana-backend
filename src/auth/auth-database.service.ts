@@ -155,6 +155,7 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
   async issueSession(input: SessionIssueInput): Promise<AuthenticatedPrincipal | undefined> {
     const client = await this.pool.connect();
     let transactionStarted = false;
+    let releaseError: Error | undefined;
 
     try {
       await client.query('begin');
@@ -207,11 +208,19 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
       return principal;
     } catch (error) {
       if (transactionStarted) {
-        await client.query('rollback').catch(() => undefined);
+        try {
+          await client.query('rollback');
+        } catch {
+          releaseError = new Error('Authentication transaction rollback failed.');
+          this.logger.error({
+            event: 'authentication_transaction_rollback_failed',
+            clientDiscarded: true,
+          });
+        }
       }
       throw error;
     } finally {
-      client.release();
+      client.release(releaseError);
     }
   }
 

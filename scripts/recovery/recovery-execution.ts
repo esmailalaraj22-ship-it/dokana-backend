@@ -23,7 +23,7 @@ import type {
 import type { RecoveryArtifactStoragePort } from '../../src/recovery/recovery-artifact-storage.port';
 import { RecoveryCatalogService } from '../../src/recovery/recovery-catalog.service';
 import { serializeRecoveryManifest, sha256 } from '../../src/recovery/recovery-manifest';
-import { readAttachmentRecoveryEntries } from './attachment-recovery-files';
+import { readAttachmentRecoveryEntries } from '../../src/recovery/attachment-recovery-files';
 import { isRecoveryMigrationCompatible, readVerifiedMigrationState } from './migration-state';
 import { restoreCustomFormatDump, type PostgresToolchain } from './postgres-tools';
 import {

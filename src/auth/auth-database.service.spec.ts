@@ -139,7 +139,9 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
     Promise<{ rows: unknown[] }>,
     [text: string, values?: readonly unknown[]]
   >();
-  const release = jest.fn();
+  const release = jest.fn((error?: Error | boolean) => {
+    void error;
+  });
   const client = { query, release } as unknown as PoolClient;
   const connect = jest.fn().mockResolvedValue(client);
   const pool = { connect, on: jest.fn(), end: jest.fn() } as unknown as Pool;
@@ -234,7 +236,7 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
     expect(query).toHaveBeenLastCalledWith('rollback');
     expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
-    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(undefined);
   });
 
   it('rolls back malformed issuance results before recovery validation', async () => {
@@ -249,6 +251,32 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
     expect(query).toHaveBeenLastCalledWith('rollback');
     expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
+    expect(release).toHaveBeenCalledWith(undefined);
+  });
+
+  it('discards the uncertain client while preserving the original error when rollback fails', async () => {
+    const originalError = Object.assign(new Error('platform fenced'), { code: '55000' });
+    const rollbackError = new Error(
+      'rollback failed for postgresql://user:secret@localhost:5432/DOCANA',
+    );
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(originalError)
+      .mockRejectedValueOnce(rollbackError);
+
+    await expect(service.issueSession(input)).rejects.toBe(originalError);
+
+    expect(query).toHaveBeenLastCalledWith('rollback');
     expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(expect.any(Error));
+    const releasedWith = release.mock.calls[0]?.[0];
+    if (!(releasedWith instanceof Error)) throw new Error('Expected a client release error.');
+    expect(releasedWith.message).toBe('Authentication transaction rollback failed.');
+    expect(logger.error).toHaveBeenCalledWith({
+      event: 'authentication_transaction_rollback_failed',
+      clientDiscarded: true,
+    });
+    expect(JSON.stringify(jest.mocked(logger.error).mock.calls)).not.toContain('postgresql://');
+    expect(JSON.stringify(jest.mocked(logger.error).mock.calls)).not.toContain('secret');
   });
 });

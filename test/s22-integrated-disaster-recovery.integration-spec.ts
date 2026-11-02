@@ -16,7 +16,7 @@ import type { Response } from 'supertest';
 
 import { applyMigration, verifyMigrationSession } from '../scripts/migrate';
 import { protectAttachmentRecoveryPoint } from '../scripts/recovery/attachment-recovery-job';
-import { readAttachmentRecoveryEntries } from '../scripts/recovery/attachment-recovery-files';
+import { readAttachmentRecoveryEntries } from '../src/recovery/attachment-recovery-files';
 import { readVerifiedMigrationState } from '../scripts/recovery/migration-state';
 import { resolvePostgresToolchain } from '../scripts/recovery/postgres-tools';
 import { RecoveryExecutionService } from '../scripts/recovery/recovery-execution';
