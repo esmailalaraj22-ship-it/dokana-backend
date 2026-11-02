@@ -402,7 +402,7 @@ export const environmentSchema = z
     if (
       environment.APP_ENV === 'production' &&
       environment.RECOVERY_STORAGE_DRIVER === 's3' &&
-      environment.RECOVERY_S3_ENDPOINT?.startsWith('http:')
+      usesPlainHttp(environment.RECOVERY_S3_ENDPOINT)
     ) {
       context.addIssue({
         code: 'custom',
@@ -413,7 +413,7 @@ export const environmentSchema = z
 
     if (
       environment.APP_ENV === 'production' &&
-      environment.RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT?.startsWith('http:')
+      usesPlainHttp(environment.RECOVERY_TARGET_ATTACHMENT_S3_ENDPOINT)
     ) {
       context.addIssue({
         code: 'custom',
@@ -439,7 +439,7 @@ export const environmentSchema = z
         });
       }
 
-      if (environment.ATTACHMENT_S3_ENDPOINT?.startsWith('http:')) {
+      if (usesPlainHttp(environment.ATTACHMENT_S3_ENDPOINT)) {
         context.addIssue({
           code: 'custom',
           path: ['ATTACHMENT_S3_ENDPOINT'],
@@ -490,6 +490,10 @@ export const environmentSchema = z
   });
 
 export type Environment = z.infer<typeof environmentSchema>;
+
+function usesPlainHttp(value: string | undefined): boolean {
+  return value !== undefined && new URL(value).protocol === 'http:';
+}
 
 export function validateEnvironment(rawEnvironment: Record<string, unknown>): Environment {
   const result = environmentSchema.safeParse(rawEnvironment);

@@ -231,7 +231,7 @@ describe('validateEnvironment', () => {
     expect(() =>
       validateEnvironment({
         ...productionEnvironment,
-        ATTACHMENT_S3_ENDPOINT: 'http://objects.internal',
+        ATTACHMENT_S3_ENDPOINT: 'HTTP://objects.internal',
       }),
     ).toThrow('ATTACHMENT_S3_ENDPOINT: must use HTTPS in production');
 
