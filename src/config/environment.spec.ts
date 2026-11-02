@@ -23,6 +23,19 @@ const minimumEnvironment = {
   }),
 };
 
+const productionEnvironment = {
+  ...minimumEnvironment,
+  APP_ENV: 'production',
+  DATABASE_SSL_MODE: 'verify-full',
+  ATTACHMENT_S3_BUCKET: 'private-live-attachments',
+  ATTACHMENT_CLAMAV_HOST: 'clamav.internal',
+  RECOVERY_ENVIRONMENT_ID: 'production-primary',
+  RECOVERY_SOURCE_REVISION: '0123456789abcdef0123456789abcdef01234567',
+  RECOVERY_STORAGE_DRIVER: 's3',
+  RECOVERY_S3_BUCKET: 'private-recovery-artifacts',
+  RECOVERY_S3_KMS_KEY_ID: 'alias/dokana-recovery',
+};
+
 describe('validateEnvironment', () => {
   it('applies safe deterministic defaults', () => {
     const environment = validateEnvironment(minimumEnvironment);
@@ -186,5 +199,77 @@ describe('validateEnvironment', () => {
         RECOVERY_FILESYSTEM_ROOT: 'C:\\temporary\\recovery',
       }),
     ).toThrow('filesystem recovery storage is forbidden in production');
+  });
+
+  it('accepts the minimum production-safe infrastructure configuration', () => {
+    expect(validateEnvironment(productionEnvironment)).toMatchObject({
+      APP_ENV: 'production',
+      DATABASE_SSL_MODE: 'verify-full',
+      ATTACHMENT_S3_BUCKET: 'private-live-attachments',
+      RECOVERY_STORAGE_DRIVER: 's3',
+      RECOVERY_S3_KMS_KEY_ID: 'alias/dokana-recovery',
+    });
+  });
+
+  it('requires verified PostgreSQL TLS in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        DATABASE_SSL_MODE: 'disable',
+      }),
+    ).toThrow('DATABASE_SSL_MODE: must be verify-full in production');
+  });
+
+  it('requires private attachment storage and fail-closed scanning in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        ATTACHMENT_S3_BUCKET: '',
+      }),
+    ).toThrow('ATTACHMENT_S3_BUCKET: is required in production');
+
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        ATTACHMENT_S3_ENDPOINT: 'http://objects.internal',
+      }),
+    ).toThrow('ATTACHMENT_S3_ENDPOINT: must use HTTPS in production');
+
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        ATTACHMENT_CLAMAV_HOST: '',
+      }),
+    ).toThrow('ATTACHMENT_CLAMAV_HOST: is required in production');
+  });
+
+  it('requires encrypted S3 recovery storage with production provenance', () => {
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        RECOVERY_STORAGE_DRIVER: 'unconfigured',
+      }),
+    ).toThrow('RECOVERY_STORAGE_DRIVER: must be s3 in production');
+
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        RECOVERY_S3_KMS_KEY_ID: '',
+      }),
+    ).toThrow('RECOVERY_S3_KMS_KEY_ID: is required in production');
+
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        RECOVERY_ENVIRONMENT_ID: 'local-development',
+      }),
+    ).toThrow('RECOVERY_ENVIRONMENT_ID: must identify the production environment explicitly');
+
+    expect(() =>
+      validateEnvironment({
+        ...productionEnvironment,
+        RECOVERY_SOURCE_REVISION: '',
+      }),
+    ).toThrow('RECOVERY_SOURCE_REVISION: is required in production');
   });
 });

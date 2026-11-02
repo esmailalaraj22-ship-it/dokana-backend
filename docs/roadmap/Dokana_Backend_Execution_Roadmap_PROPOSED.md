@@ -2252,7 +2252,8 @@ accounting, synchronization, attachment, or recovery gate as release success.
 
 ### S23 - Final Validation and Release Readiness
 
-- **Status:** CURRENT - S23.1-S23.4 CLOSED; S23.5 NEXT.
+- **Status:** CURRENT - S23.1-S23.4 CLOSED; S23.5 ENGINEERING COMPLETE WITH EXTERNAL
+  PRODUCTION EVIDENCE AND AN OWNER PRODUCT DECISION PENDING; S23.6 NOT STARTED.
 - **Purpose:** Execute the complete backend release gate.
 - **Distinct boundary:** Cross-domain assurance cannot be proven by isolated Station
   tests alone.
@@ -2388,7 +2389,7 @@ permission to rewrite history.
 | S23.2 | CLOSED      | Reconcile PostgreSQL, security, migrations, Drizzle | `0034`         | Catalog, RLS, grants, roles, functions, auth wrapper    | Wrapper retired; recovery compatibility preserved  |
 | S23.3 | CLOSED      | Verify offline contract and application hardening   | `0`            | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
 | S23.4 | CLOSED      | Prove migration provenance and clean installation   | `0035`         | Truthful effective state, S3 fixture, clean install     | Deterministic equivalent disposable environments   |
-| S23.5 | NOT STARTED | Prove production infrastructure and recovery        | `0` default    | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators   | Real provider and operational evidence accepted    |
+| S23.5 | ENGINEERING COMPLETE; EXTERNAL EVIDENCE PENDING | Prove production infrastructure and recovery | `0` | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators | Backend-owner review before S23.6; production deployment remains gated |
 | S23.6 | NOT STARTED | Execute the integrated final release gate           | `0` default    | Zero-skip static/test/security/accounting/recovery gate | Evidence-backed release decision                   |
 
 Local/repository evidence covers catalog, RLS/grants/roles, Drizzle, SQLite, S19, static/tests,
@@ -2462,6 +2463,54 @@ is recorded as L2 and the frozen accounting contract remains untouched.
   changed by 0. No final release database, schema dump, release manifest/checksum package, deployment
   archive, or final OpenAPI/Swagger package was generated. Final release database/schema baseline and
   final OpenAPI/Swagger packaging remain deferred until after S23.6.
+
+#### S23.5 - Production Infrastructure, Security, and Recovery Readiness
+
+- **Status:** ENGINEERING COMPLETE - EXTERNAL PRODUCTION EVIDENCE AND BACKEND-OWNER REVIEW
+  REQUIRED BEFORE S23.6. This is not a production-readiness approval.
+- **Repository hardening:** Production startup now requires verified PostgreSQL TLS, private
+  S3-compatible attachment storage, fail-closed malware scanning, dedicated S3 recovery storage,
+  KMS-backed recovery encryption, explicit production-environment identity, and deployed source
+  revision. Development and test defaults remain unchanged.
+- **Verified repository evidence:** PostgreSQL remains 35 applied / 0 pending with valid migration
+  checksums. Local runtime, authentication, migration, and administrative connectivity checks pass;
+  least-privilege role checks remain intact. Attachment validation/storage, recovery storage and
+  integrity, recovery health, locking, Recovery Generation, and BACKUP_FAILURE paths pass focused
+  tests. Tracked-secret scanning found no credential, private-key, cloud-key, or token exposure.
+- **Production gate status:**
+
+| Gate | S23.5 status |
+| --- | --- |
+| Managed PostgreSQL | `NOT_CONFIGURED` |
+| PITR | `NOT_CONFIGURED` |
+| PITR retention at least 7 days | `NOT_CONFIGURED` |
+| RPO at most 15 minutes | `NOT_CONFIGURED` |
+| RTO at most 4 hours | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| Real business-attachment storage | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| Real recovery storage | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| KMS and key custody | `NOT_CONFIGURED` |
+| IAM least privilege | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| Object versioning, retention, replication, and lock protection | `NOT_CONFIGURED` |
+| Production network, TLS termination, and restricted administration | `NOT_CONFIGURED` |
+| Retired-environment fencing | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| Authenticated recovery-operator identity and audit attribution | `NOT_CONFIGURED` |
+| Recovery dual control | `NOT_CONFIGURED` |
+| BACKUP_FAILURE lifecycle | `IMPLEMENTED_NOT_ENVIRONMENT_VERIFIED` |
+| Owner lost-device revocation/replacement | `OWNER_DECISION_REQUIRED` |
+
+- **External evidence required:** An approved managed-PostgreSQL deployment and isolated PITR test;
+  at least seven days of PITR retention; measured production-like RPO/RTO; private attachment and
+  recovery providers with denied public access; KMS/secret custody and rotation; provider IAM denial
+  tests; object protection; private network/load-balancer/firewall evidence; old-environment
+  credential and writer fencing; authenticated named recovery operators; independent approval and
+  cutover audit; and one isolated provider-backed recovery drill.
+- **Owner decision:** PRD v1.1 names device activation/revocation but does not define a safe Owner
+  lost-device revocation/replacement authorization and lifecycle contract. No endpoint or database
+  authority was invented. This remains `OWNER_DECISION_REQUIRED` and a conditional deployment gate.
+- **Deltas and deferrals:** Database, PostgreSQL reference, SQLite, accounting, S18, S19, S20, and
+  S21 semantic deltas are 0; migration `0036` is absent. No final database, SQL baseline, release
+  manifest, checksum package, deployment archive, or final OpenAPI/Swagger package was created;
+  those artifacts remain deferred until after S23.6.
 
 ## 12. Dependency Model and Sequence Proof
 
@@ -2564,7 +2613,9 @@ authorize editing or replaying the baseline or changing the read-only reference 
 
 ## 16. Open Roadmap-Level Owner Decisions
 
-No roadmap-structure, S18 policy, or S19.2 contract decision is open. The S19.2 backend-owner
+The Owner lost-device revocation/replacement contract remains open and must be decided before
+production deployment or classified explicitly by the backend owner. No roadmap-structure, S18
+policy, or S19.2 contract decision is otherwise open. The S19.2 backend-owner
 decisions freeze bounded creation-time trust with quarantine for insufficient evidence,
 historical entitlement eligibility after later Store suspension before device knowledge, and
 an initial offline allow-list limited to proven daily operations while sensitive setup and
@@ -2595,8 +2646,8 @@ new explicit owner decision.
 | Last fully closed Station           | S22 - Backup, Restore, and Recovery        |
 | S23.1 starting checkpoint           | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
 | Safe completed capabilities         | S0-S22; S23.1-S23.4                        |
-| First incomplete release dependency | S23.5 production infrastructure/readiness  |
-| Current Station                     | S23 CURRENT; S23.1-S23.4 CLOSED            |
+| First incomplete release dependency | S23.5 external production evidence and Owner review |
+| Current Station                     | S23 CURRENT; S23.1-S23.4 CLOSED; S23.5 ENGINEERING COMPLETE |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2639,8 +2690,9 @@ new explicit owner decision.
 | S23.2 current status                | CLOSED                                     |
 | S23.3 current status                | CLOSED                                     |
 | S23.4 current status                | CLOSED                                     |
-| S23.5 current status                | NEXT                                       |
+| S23.5 current status                | ENGINEERING COMPLETE; EXTERNAL EVIDENCE AND OWNER REVIEW PENDING |
 | S23.6 current status                | NOT STARTED                                |
 
-Do not start S23.5 from this document. It requires a separate execution prompt. Database,
+Do not start S23.6 from this document. Backend-owner review of S23.5, the Owner lost-device
+decision, and required production-deployment evidence remain separate gates. Database,
 PostgreSQL-reference, and SQLite deltas remain 0 by default.

@@ -421,6 +421,72 @@ export const environmentSchema = z
         message: 'must use HTTPS in production',
       });
     }
+
+    if (environment.APP_ENV === 'production') {
+      if (environment.DATABASE_SSL_MODE !== 'verify-full') {
+        context.addIssue({
+          code: 'custom',
+          path: ['DATABASE_SSL_MODE'],
+          message: 'must be verify-full in production',
+        });
+      }
+
+      if (environment.ATTACHMENT_S3_BUCKET === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['ATTACHMENT_S3_BUCKET'],
+          message: 'is required in production',
+        });
+      }
+
+      if (environment.ATTACHMENT_S3_ENDPOINT?.startsWith('http:')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['ATTACHMENT_S3_ENDPOINT'],
+          message: 'must use HTTPS in production',
+        });
+      }
+
+      if (environment.ATTACHMENT_CLAMAV_HOST === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['ATTACHMENT_CLAMAV_HOST'],
+          message: 'is required in production',
+        });
+      }
+
+      if (environment.RECOVERY_STORAGE_DRIVER !== 's3') {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECOVERY_STORAGE_DRIVER'],
+          message: 'must be s3 in production',
+        });
+      }
+
+      if (environment.RECOVERY_S3_KMS_KEY_ID === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECOVERY_S3_KMS_KEY_ID'],
+          message: 'is required in production',
+        });
+      }
+
+      if (environment.RECOVERY_ENVIRONMENT_ID === 'local-development') {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECOVERY_ENVIRONMENT_ID'],
+          message: 'must identify the production environment explicitly',
+        });
+      }
+
+      if (environment.RECOVERY_SOURCE_REVISION === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECOVERY_SOURCE_REVISION'],
+          message: 'is required in production',
+        });
+      }
+    }
   });
 
 export type Environment = z.infer<typeof environmentSchema>;
