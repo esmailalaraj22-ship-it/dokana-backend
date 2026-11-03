@@ -8,8 +8,8 @@
 | Repository                | `C:\Users\esmail\Desktop\Dokana`           |
 | Review branch             | `main`                                     |
 | S19.4 starting checkpoint | `139b408c6e2fc367d02604b6af30e3201fe8c65e` |
-| Closed execution history  | Stations S0-S22                            |
-| Current Station           | S23; S23.1-S23.4 closed; S23.5 next        |
+| Closed execution history  | Stations S0-S22; S23 engineering validation |
+| Current Station           | S23 engineering RC passed; deployment gated |
 
 This document is the approved execution-tracking roadmap. It is not a product contract,
 does not by itself authorize implementation, and does not start or freeze any future
@@ -69,7 +69,8 @@ The roadmap was reconstructed against this verified state:
 | Migration checksum verification | Pass                                       |
 | Reference SHA-256 verification  | 11 files checked, 0 mismatches             |
 | Last fully closed Station       | S22                                        |
-| Current task                    | S23.4 closed; S23.5 next                   |
+| S23.6 starting HEAD             | `5d7371bb056f550cb5e90817b21338573b2a93d5` |
+| Current task                    | S23 engineering validation complete       |
 
 The approved reference package under
 [`database/reference/backend_database_reference`](../../database/reference/backend_database_reference/)
@@ -2252,8 +2253,9 @@ accounting, synchronization, attachment, or recovery gate as release success.
 
 ### S23 - Final Validation and Release Readiness
 
-- **Status:** CURRENT - S23.1-S23.4 CLOSED; S23.5 ENGINEERING COMPLETE WITH EXTERNAL
-  PRODUCTION EVIDENCE AND AN OWNER PRODUCT DECISION PENDING; S23.6 NOT STARTED.
+- **Status:** ENGINEERING VALIDATION COMPLETE - S23.1-S23.6 CLOSED. The engineering release
+  candidate passed; production deployment remains gated by external infrastructure/operational
+  evidence and the Owner lost-device product decision.
 - **Purpose:** Execute the complete backend release gate.
 - **Distinct boundary:** Cross-domain assurance cannot be proven by isolated Station
   tests alone.
@@ -2390,7 +2392,7 @@ permission to rewrite history.
 | S23.3 | CLOSED      | Verify offline contract and application hardening   | `0`            | SQLite, S19, M1, M2, M3, L1                             | Protocol preserved; approved hardening verified    |
 | S23.4 | CLOSED      | Prove migration provenance and clean installation   | `0035`         | Truthful effective state, S3 fixture, clean install     | Deterministic equivalent disposable environments   |
 | S23.5 | ENGINEERING COMPLETE; EXTERNAL EVIDENCE PENDING | Prove production infrastructure and recovery | `0` | PITR, RPO/RTO, providers, KMS/IAM, fencing, operators | Backend-owner review before S23.6; production deployment remains gated |
-| S23.6 | NOT STARTED | Execute the integrated final release gate           | `0` default    | Zero-skip static/test/security/accounting/recovery gate | Evidence-backed release decision                   |
+| S23.6 | CLOSED      | Execute the integrated final release gate           | `0`            | Zero-skip static/test/security/accounting/recovery gate | Engineering RC passed; production remains gated    |
 
 Local/repository evidence covers catalog, RLS/grants/roles, Drizzle, SQLite, S19, static/tests,
 clean install, local restore, and baseline verification. Real-provider evidence covers managed
@@ -2512,6 +2514,44 @@ is recorded as L2 and the frozen accounting contract remains untouched.
   manifest, checksum package, deployment archive, or final OpenAPI/Swagger package was created;
   those artifacts remain deferred until after S23.6.
 
+#### S23.6 - Integrated Final Release Gate
+
+- **Status:** CLOSED - ENGINEERING RELEASE CANDIDATE PASS. Production deployment remains gated;
+  this is not a production-deployment authorization.
+- **Source and database:** The gate started at
+  `5d7371bb056f550cb5e90817b21338573b2a93d5` with `HEAD == origin/main`, ahead/behind `0/0`, and a
+  clean tree. PostgreSQL remained 35 applied / 0 pending with checksum-valid executed migration
+  history, immutable migrations `0033`-`0035`, no migration `0036`, and zero PostgreSQL-reference,
+  Drizzle, SQLite, or accounting-authority delta.
+- **Clean install and security:** One isolated canonical clean installation reached migration state
+  35/0 without manual schema fixes. Application startup, health, authentication, session authority,
+  RLS/FORCE RLS, fail-closed tenant context, cross-Store isolation, role/grant boundaries, and
+  production-configuration fail-closed behavior passed. The disposable database and all temporary
+  roles, locks, transactions, and recovery storage were removed. The bounded tracked-secret scan
+  found no private key, production password, cloud credential, or signing secret.
+- **Business and offline verification:** Existing accounting, inventory, period, reversal,
+  idempotency, and Store-isolation tests passed without a second authority or duplicate financial or
+  inventory effect. S19 retained exactly six canonical outcomes; exact replay, changed-request
+  conflict, dependency handling, bootstrap, PUSH, PULL, cursor/rebootstrap, Recovery Generation,
+  stale-authority rejection, and SQLite semantic parity passed with no protocol delta.
+- **Recovery:** Migration `0033` capability, effective migration-state resolution, source/manifest
+  consistency, attachment integrity, recovery locking, stale lock recovery, session/cursor/PUSH
+  fencing, fresh authentication/bootstrap, and exactly-once post-recovery behavior passed. The final
+  isolated integrated drill covered two Stores and completed in 16.322 seconds with an observed local
+  point age/loss window of 1.955 seconds. These local measurements are not provider-backed PITR,
+  production RPO, or production RTO evidence.
+- **Final gates:** Typecheck, lint, build, runtime OpenAPI, `git diff --check`, 163/163 unit suites
+  with 1,362/1,362 tests, and one canonical broad integration run of 83/83 suites with 908/908 tests
+  passed; skipped tests were 0. `format:check` retained only the two previously accepted L2 warnings
+  in `money-posting-v1.md` and this Roadmap; the warning set did not expand. New Critical findings: 0.
+  New High findings: 0.
+- **Deployment and artifacts:** The 12 S23.5 external infrastructure/operational gates remain open.
+  Owner lost-device revocation/replacement remains separately `OWNER_DECISION_REQUIRED` and must be
+  resolved before production deployment. No final production database, SQL baseline, release
+  manifest, checksum package, OpenAPI/Swagger package, or deployment package was generated. The next
+  step is a separate backend-owner final-packaging authorization and production-deployment gate
+  completion.
+
 ## 12. Dependency Model and Sequence Proof
 
 The hard-dependency graph is:
@@ -2624,10 +2664,10 @@ new explicit owner decision.
 
 ## 17. Roadmap Maintenance and Approval Rules
 
-- Completed Stations S0-S22 remain historical records and are not renumbered or reopened
+- Completed Stations S0-S22 and S23 engineering validation remain historical records and are not renumbered or reopened
   without new concrete blocking evidence and backend-owner approval.
-- Station S23 is current under its approved orientation and frozen S23.1 release-gate boundary.
-  Each remaining substage still requires its own backend-owner execution prompt.
+- Station S23 engineering validation is complete under its approved orientation and frozen S23.1
+  release-gate boundary. Production deployment and final packaging remain separately gated.
 - Adding a Station to this document does not authorize implementation.
 - Material roadmap changes require repository evidence, PRD coverage analysis,
   dependency review, independent review, and backend-owner approval.
@@ -2643,11 +2683,11 @@ new explicit owner decision.
 
 | Field                               | Current position                           |
 | ----------------------------------- | ------------------------------------------ |
-| Last fully closed Station           | S22 - Backup, Restore, and Recovery        |
+| Last fully closed engineering Station | S23 - Final Validation and Release Readiness |
 | S23.1 starting checkpoint           | `98f5d226d4d65d43ed7d0da527c82e7689e0ff72` |
-| Safe completed capabilities         | S0-S22; S23.1-S23.4                        |
-| First incomplete release dependency | S23.5 external production evidence and Owner review |
-| Current Station                     | S23 CURRENT; S23.1-S23.4 CLOSED; S23.5 ENGINEERING COMPLETE |
+| Safe completed capabilities         | S0-S22; S23.1-S23.6 engineering validation |
+| First incomplete release dependency | External production evidence and Owner lost-device decision |
+| Current Station                     | S23 ENGINEERING COMPLETE; PRODUCTION DEPLOYMENT GATED |
 | S18 current status                  | CLOSED                                     |
 | S18.1 current status                | CLOSED                                     |
 | S18.2 current status                | CLOSED                                     |
@@ -2685,14 +2725,15 @@ new explicit owner decision.
 | S22.3 current status                | CLOSED                                     |
 | S22.4 current status                | CLOSED                                     |
 | S22.5 current status                | CLOSED                                     |
-| S23 current status                  | CURRENT                                    |
+| S23 current status                  | ENGINEERING VALIDATION COMPLETE            |
 | S23.1 current status                | CLOSED                                     |
 | S23.2 current status                | CLOSED                                     |
 | S23.3 current status                | CLOSED                                     |
 | S23.4 current status                | CLOSED                                     |
-| S23.5 current status                | ENGINEERING COMPLETE; EXTERNAL EVIDENCE AND OWNER REVIEW PENDING |
-| S23.6 current status                | NOT STARTED                                |
+| S23.5 current status                | ENGINEERING COMPLETE; EXTERNAL EVIDENCE PENDING |
+| S23.6 current status                | CLOSED - ENGINEERING RC PASS               |
 
-Do not start S23.6 from this document. Backend-owner review of S23.5, the Owner lost-device
-decision, and required production-deployment evidence remain separate gates. Database,
-PostgreSQL-reference, and SQLite deltas remain 0 by default.
+Do not generate final release artifacts or authorize production deployment from this document.
+Backend-owner final-packaging authorization, the Owner lost-device decision, and required external
+production-deployment evidence remain separate gates. Database, PostgreSQL-reference, and SQLite
+deltas remain 0 by default.
