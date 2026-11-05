@@ -2757,3 +2757,43 @@ The backend owner authorized bounded remediation of S1A-01 through S1A-04. Stage
   SQLite semantic deltas remain zero. Production and final artifact gates above remain separate.
 
 Ready for the next approved master-review checkpoint. No later review stage was started.
+
+### Stage 2A Independent Review Closure — 2026-11-06
+
+Stage 2A is PASS within identity/session scope. Reviewed baseline:
+`0ee4b9307eafc715b0c67607cefb605fe2fa3dca`; final reviewed implementation HEAD:
+`11a760828d71403fc2ff6336201b39e481ef2759` (`fix(auth): close stage 2a identity findings`).
+This closure record is a documentation-only follow-up to that reviewed implementation.
+
+- S2A-01 (Medium) CLOSED: refresh signing/response preparation now precedes transaction commit;
+  signing failures roll back rotation, while replay/ineligibility revocations still commit.
+- S2A-02 (Medium) CLOSED: the owner explicitly authorized bounded migration
+  `0037_auth_refresh_session_lock_order.sql`. Refresh now locks its owning session before tokens,
+  matching logout. Both logout/refresh orderings and parent-replay/child-rotation orderings pass
+  deterministic PostgreSQL lock-barrier tests with zero deadlocks and no surviving authority.
+- S2A-03 (Medium) CLOSED: login rejects nil/max UUIDs that cannot produce usable identity tokens.
+- S2A-04 (Low) CLOSED: equivalent UUID casing no longer causes valid login issuance to roll back.
+- Verification: 72 focused unit tests; 31 authentication/migration integration cases, including
+  30 real-HTTP scenarios; four affected historical migration regression cases. All passed with
+  zero skips in the complete selected suites. Typecheck, lint, build, migration verification,
+  auth-role validation and migration-role validation passed. Broad suites, full Recovery,
+  release clean-install/packaging and Stage 2B were not run.
+- The isolated 0036-to-0037 upgrade proved atomic migration rollback, checksum/history retention,
+  no-op repeat application and preservation of the complete security catalog. Only the internal
+  timestamp-overload refresh function body changed; its owner, ACL, SECURITY DEFINER/search_path,
+  wrappers, RLS, triggers, defaults and table contracts remain intact. Local development is
+  **37 applied / 0 pending**. Test databases, fixture users and test connections were cleaned up.
+- Recovery-facing HTTP checks reject fenced/stale sessions in both identity channels and admit
+  fresh sessions after activation. Existing error mapping is preserved: stale/fenced refresh
+  returns generic `500 INTERNAL_ERROR`; access/sync identity checks reject with 401. Lost-response
+  retry was modeled by discarding the committed refresh response; parent reuse revokes the family
+  and requires reauthentication. No token lifetime, claims or intentional API semantics changed.
+- Owner-accepted formatting exception: `git diff --check` reports one terminal blank line in
+  applied migration 0037 (line 294). The owner explicitly accepted closure with this warning;
+  the applied SQL and checksum were preserved unchanged. Its SHA-256 is
+  `edbf34a3f66a151e53111627a2dd7882f4c789f9c051bab6100ff892e9cb71cb`.
+  A file-specific Git attribute preserves LF bytes. No security assertion was weakened.
+
+Unresolved authentication findings: zero. Stage 2B candidate findings: none identified in this
+bounded review. Ready for Stage 2B — Tenant / Subscription / Admin Authority; Stage 2B was not
+started. Production deployment and final artifact approval remain separate gates.
