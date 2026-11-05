@@ -101,6 +101,13 @@ export async function readEffectiveMigrationState(
   const effective = [...(baseline?.migrationChecksumManifest ?? []), ...executed].sort(
     (left, right) => left.filename.localeCompare(right.filename, 'en'),
   );
+  // A valid installation is a repository prefix, including any restored baseline.
+  // Treating holes as pending can replay old SQL over newer database definitions.
+  for (let index = 0; index < effective.length; index += 1) {
+    if (effective[index]?.filename !== files[index]?.filename) {
+      throw new Error('Effective migration history is not a contiguous repository prefix.');
+    }
+  }
   const effectiveNames = new Set(effective.map((migration) => migration.filename));
   const pending = files.filter((file) => !effectiveNames.has(file.filename));
 

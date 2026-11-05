@@ -212,6 +212,8 @@ export async function readCatalogFingerprint(
       left join pg_namespace n on n.oid = d.defaclnamespace
       cross join lateral aclexplode(d.defaclacl) privilege
       where n.nspname = any($1::text[])
+         or (d.defaclnamespace = 0 and d.defaclobjtype = 'f'
+             and pg_get_userbyid(d.defaclrole) in ('shop_app_migrator', 'shop_app_auth_owner'))
       order by owner, schema, type, grantee, grantor, privilege, "grantable"
     `,
       [schemaFilter],

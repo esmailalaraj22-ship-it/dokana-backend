@@ -95,12 +95,14 @@ export const platformAdminAssignments = platformSchema.table(
     status: text('status').$type<'active' | 'revoked'>().notNull().default('active'),
     assignedAt: timestamp('assigned_at', { withTimezone: true, mode: 'date' })
       .notNull()
-      .defaultNow(),
+      .default(sql`clock_timestamp()`),
     assignedByUserId: uuid('assigned_by_user_id'),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
     revokedByUserId: uuid('revoked_by_user_id'),
     revokeReason: text('revoke_reason'),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`clock_timestamp()`),
     version: bigint('version', { mode: 'bigint' }).notNull().default(1n),
   },
   (table) => [
@@ -252,7 +254,9 @@ export const recoveryControl = platformSchema.table(
     serviceState: text('service_state').$type<'ACTIVE' | 'FENCED'>().notNull(),
     authorityNotBefore: timestamp('authority_not_before', { withTimezone: true, mode: 'date' }),
     fencedAt: timestamp('fenced_at', { withTimezone: true, mode: 'date' }),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`clock_timestamp()`),
   },
   (table) => [
     check('recovery_control_singleton_check', sql`${table.singletonKey}`),
@@ -383,7 +387,7 @@ export const schemaMigrations = platformSchema.table(
     appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'date' }).notNull(),
     registeredAt: timestamp('registered_at', { withTimezone: true, mode: 'date' })
       .notNull()
-      .defaultNow(),
+      .default(sql`clock_timestamp()`),
     appliedBy: text('applied_by').notNull(),
     executionMs: integer('execution_ms').notNull(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),

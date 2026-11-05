@@ -59,6 +59,7 @@ describe('controlled migration runner', () => {
       '0033_platform_recovery_generation_fencing.sql',
       '0034_retire_broken_recovery_session_wrapper.sql',
       '0035_release_baseline_provenance.sql',
+      '0036_harden_default_function_privileges.sql',
     ]);
   });
 

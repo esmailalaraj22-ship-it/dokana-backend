@@ -2737,3 +2737,23 @@ Do not generate final release artifacts or authorize production deployment from 
 Backend-owner final-packaging authorization, the Owner lost-device decision, and required external
 production-deployment evidence remain separate gates. Database, PostgreSQL-reference, and SQLite
 deltas remain 0 by default.
+
+### Stage 1A Independent Review Closure — 2026-11-05
+
+The backend owner authorized bounded remediation of S1A-01 through S1A-04. Stage 1A is PASS:
+
+- S1A-01 CLOSED: `0036_harden_default_function_privileges.sql` removes future PUBLIC EXECUTE
+  defaults for the two proven function creators; existing effective function access is preserved.
+- S1A-02 CLOSED: effective migration history must form a repository prefix, retaining truthful
+  baseline provenance separately from executed migrations and rejecting historical gaps.
+- S1A-03 CLOSED: transaction initialization failures release/discard acquired clients and preserve
+  primary errors. Failed transactions discard their connections; subsequent work reconnects.
+- S1A-04 CLOSED: seven Drizzle timestamp defaults now match PostgreSQL `clock_timestamp()`.
+- Local development: **36 applied / 0 pending**; disposable 0035-to-0036 upgrade and one canonical
+  clean installation PASS. Focused verification: 54 unit tests and 28 PostgreSQL integration tests;
+  application startup/readiness, typecheck, lint, build, and diff checks PASS.
+- Historical migrations 0001–0035 are unchanged. The only database contract delta is the approved
+  default-function privilege hardening; business, accounting, inventory, sync, recovery, API, and
+  SQLite semantic deltas remain zero. Production and final artifact gates above remain separate.
+
+Ready for the next approved master-review checkpoint. No later review stage was started.

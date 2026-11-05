@@ -70,7 +70,9 @@ export const offlineOperationProvenanceV1 = syncSchema.table(
     responseBody: jsonb('response_body').$type<Record<string, unknown>>(),
     authorizedUserId: uuid('authorized_user_id'),
     authorizationXid: xid8('authorization_xid'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`clock_timestamp()`),
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
   },
   (table) => [
@@ -120,7 +122,7 @@ export const offlineOperationRecoveryEventsV1 = syncSchema.table(
     authorizationXid: xid8('authorization_xid'),
     recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' })
       .notNull()
-      .defaultNow(),
+      .default(sql`clock_timestamp()`),
   },
   (table) => [
     primaryKey({ columns: [table.storeId, table.recoveryAttemptId, table.eventSequence] }),
@@ -196,7 +198,7 @@ export const storeChangeEventsV1 = syncSchema.table(
     occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
     capturedAt: timestamp('captured_at', { withTimezone: true, mode: 'date' })
       .notNull()
-      .defaultNow(),
+      .default(sql`clock_timestamp()`),
   },
   (table) => [
     primaryKey({ columns: [table.storeId, table.storeSequence] }),

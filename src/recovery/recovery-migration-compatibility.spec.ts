@@ -5,10 +5,27 @@ import {
   type RecoveryManifestMigrationState,
   type VerifiedMigrationState,
 } from '../../scripts/recovery/migration-state';
+import { readMigrationFiles } from '../../scripts/migrations/migration-files';
 
 const migration0034 = '0034_retire_broken_recovery_session_wrapper.sql';
 
 describe('recovery migration compatibility', () => {
+  it('supports the repository ceiling, including 0036, without moving the 0033 capability floor', async () => {
+    const files = await readMigrationFiles();
+    expect(REQUIRED_RECOVERY_MIGRATION).toBe('0033_platform_recovery_generation_fencing.sql');
+    expect(
+      files.some((file) => file.filename === '0036_harden_default_function_privileges.sql'),
+    ).toBe(true);
+    const filenames = verifyAppliedMigrationLedger(files, files);
+    const source = migrationState(filenames, 'a');
+    expect(isRecoveryMigrationCompatible(source, manifestState(source))).toBe(true);
+    expect(
+      isRecoveryMigrationCompatible(source, {
+        ...manifestState(source),
+        latestFilename: '0035_release_baseline_provenance.sql',
+      }),
+    ).toBe(false);
+  });
   it('accepts an exact post-0033 source and manifest state', () => {
     const source = migrationState([REQUIRED_RECOVERY_MIGRATION, migration0034], 'a');
 

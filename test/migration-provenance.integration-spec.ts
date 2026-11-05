@@ -207,7 +207,7 @@ describeDatabase('release baseline provenance with real PostgreSQL', () => {
 
     const syntheticContents = `create table platform.s23_4_future_upgrade_probe (id integer primary key);`;
     const synthetic: MigrationFile = {
-      filename: '0036_test_only_future_upgrade.sql',
+      filename: '9999_test_only_future_upgrade.sql',
       absolutePath: '<test-only>',
       contents: syntheticContents,
       checksumSha256: sha256(syntheticContents),
