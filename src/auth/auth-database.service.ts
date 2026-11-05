@@ -164,8 +164,8 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
       const issued = await this.issueLegacySession(client, input);
       if (
         issued?.userId !== input.userId ||
-        issued.storeId !== input.storeId ||
-        issued.deviceId !== input.deviceId ||
+        issued.storeId !== input.storeId.toLowerCase() ||
+        issued.deviceId !== input.deviceId.toLowerCase() ||
         issued.deviceStatus !== 'active' ||
         issued.sessionId !== input.sessionId
       ) {
@@ -357,9 +357,18 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
     return result.rows[0];
   }
 
-  async rotateRefreshToken(input: RefreshRotationInput): Promise<RefreshRotationResult> {
-    const result = await this.pool.query<RefreshRotationResult>(
-      `
+  async rotateRefreshToken<T>(
+    input: RefreshRotationInput,
+    prepare: (rotation: RefreshRotationResult) => Promise<T>,
+  ): Promise<T | undefined> {
+    const client = await this.pool.connect();
+    let transactionStarted = false;
+    let response: T | undefined;
+    try {
+      await client.query('begin');
+      transactionStarted = true;
+      const result = await client.query<RefreshRotationResult>(
+        `
         select
           outcome,
           user_id as "userId",
@@ -378,19 +387,42 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           $1::text, $2::uuid, $3::text, $4::uuid, $5::integer
         )
       `,
-      [
-        input.currentTokenHash,
-        input.newTokenId,
-        input.newTokenHash,
-        input.newAccessTokenJti,
-        input.refreshTtlSeconds,
-      ],
-    );
-    const row = result.rows[0];
-    if (!row) {
-      throw new Error('Authentication refresh function returned no outcome.');
+        [
+          input.currentTokenHash,
+          input.newTokenId,
+          input.newTokenHash,
+          input.newAccessTokenJti,
+          input.refreshTtlSeconds,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new Error('Authentication refresh function returned no outcome.');
+      }
+      // Prepare signed tokens and the response before committing successful rotation.
+      // Reuse/ineligibility may revoke authority and must commit even though HTTP rejects it.
+      if (row.outcome === 'rotated') response = await prepare(row);
+      await client.query('commit');
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await client.query('rollback');
+        } catch {
+          this.logger.error({
+            event: 'authentication_transaction_rollback_failed',
+            clientDiscarded: true,
+          });
+        }
+      }
+      try {
+        client.release(true);
+      } catch {
+        // Preserve the primary failure if cleanup also fails.
+      }
+      throw error;
     }
-    return row;
+    client.release();
+    return response;
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<boolean> {

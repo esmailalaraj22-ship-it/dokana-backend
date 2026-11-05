@@ -1,6 +1,13 @@
-import { IsEmail, IsIn, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsString, MaxLength, MinLength, ValidateBy } from 'class-validator';
 
+import { isUuid } from '../../common/logging/request-id';
 import type { DevicePlatform } from '../auth.types';
+
+// Login must accept the same identity UUIDs that the issued token can authenticate.
+const identityUuidValidator = {
+  name: 'isUuid',
+  validator: { validate: (value: unknown) => typeof value === 'string' && isUuid(value) },
+};
 
 export class LoginDto {
   @IsEmail()
@@ -12,10 +19,10 @@ export class LoginDto {
   @MaxLength(1_024)
   password!: string;
 
-  @IsUUID()
+  @ValidateBy(identityUuidValidator)
   storeId!: string;
 
-  @IsUUID()
+  @ValidateBy(identityUuidValidator)
   deviceId!: string;
 
   @IsString()

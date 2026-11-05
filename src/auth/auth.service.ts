@@ -89,50 +89,55 @@ export class AuthenticationService {
   async refresh(refreshToken: string): Promise<AuthenticationResponse> {
     const newRefreshToken = this.createRefreshToken();
     const newAccessTokenJti = randomUUID();
-    const rotation = await this.database.rotateRefreshToken({
-      currentTokenHash: this.hashOpaqueValue(refreshToken),
-      newTokenId: randomUUID(),
-      newTokenHash: this.hashOpaqueValue(newRefreshToken),
-      newAccessTokenJti,
-      refreshTtlSeconds: this.refreshTokenTtlSeconds,
-    });
+    const response = await this.database.rotateRefreshToken(
+      {
+        currentTokenHash: this.hashOpaqueValue(refreshToken),
+        newTokenId: randomUUID(),
+        newTokenHash: this.hashOpaqueValue(newRefreshToken),
+        newAccessTokenJti,
+        refreshTtlSeconds: this.refreshTokenTtlSeconds,
+      },
+      async (rotation) => {
+        if (
+          rotation.outcome !== 'rotated' ||
+          !rotation.userId ||
+          !rotation.email ||
+          !rotation.fullName ||
+          !rotation.storeId ||
+          !rotation.storeName ||
+          !rotation.storeStatus ||
+          (rotation.storeStatus !== 'active' && rotation.storeStatus !== 'read_only') ||
+          !rotation.membershipRole ||
+          !rotation.membershipVersion ||
+          !rotation.deviceId ||
+          !rotation.sessionId ||
+          !rotation.sessionExpiresAt ||
+          !rotation.recoveryGenerationId
+        ) {
+          throw new UnauthorizedException(authenticationFailure);
+        }
 
-    if (
-      rotation.outcome !== 'rotated' ||
-      !rotation.userId ||
-      !rotation.email ||
-      !rotation.fullName ||
-      !rotation.storeId ||
-      !rotation.storeName ||
-      !rotation.storeStatus ||
-      (rotation.storeStatus !== 'active' && rotation.storeStatus !== 'read_only') ||
-      !rotation.membershipRole ||
-      !rotation.membershipVersion ||
-      !rotation.deviceId ||
-      !rotation.sessionId ||
-      !rotation.sessionExpiresAt ||
-      !rotation.recoveryGenerationId
-    ) {
-      throw new UnauthorizedException(authenticationFailure);
-    }
+        const principal: AuthenticatedPrincipal = {
+          userId: rotation.userId,
+          email: rotation.email,
+          fullName: rotation.fullName,
+          storeId: rotation.storeId,
+          storeName: rotation.storeName,
+          storeStatus: rotation.storeStatus,
+          membershipRole: rotation.membershipRole,
+          membershipVersion: rotation.membershipVersion,
+          deviceId: rotation.deviceId,
+          sessionId: rotation.sessionId,
+          sessionExpiresAt: rotation.sessionExpiresAt,
+          recoveryGenerationId: rotation.recoveryGenerationId,
+        };
+        const accessToken = await this.tokens.issueAccessToken(principal, newAccessTokenJti);
 
-    const principal: AuthenticatedPrincipal = {
-      userId: rotation.userId,
-      email: rotation.email,
-      fullName: rotation.fullName,
-      storeId: rotation.storeId,
-      storeName: rotation.storeName,
-      storeStatus: rotation.storeStatus,
-      membershipRole: rotation.membershipRole,
-      membershipVersion: rotation.membershipVersion,
-      deviceId: rotation.deviceId,
-      sessionId: rotation.sessionId,
-      sessionExpiresAt: rotation.sessionExpiresAt,
-      recoveryGenerationId: rotation.recoveryGenerationId,
-    };
-    const accessToken = await this.tokens.issueAccessToken(principal, newAccessTokenJti);
-
-    return this.authenticationResponse(principal, accessToken, newRefreshToken);
+        return this.authenticationResponse(principal, accessToken, newRefreshToken);
+      },
+    );
+    if (!response) throw new UnauthorizedException(authenticationFailure);
+    return response;
   }
 
   async logout(principal: AuthenticatedPrincipal): Promise<void> {

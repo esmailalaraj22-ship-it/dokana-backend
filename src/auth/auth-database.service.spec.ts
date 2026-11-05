@@ -2,7 +2,11 @@ import type { PinoLogger } from 'nestjs-pino';
 import type { Pool, PoolClient } from 'pg';
 
 import { AuthenticationDatabaseService } from './auth-database.service';
-import type { AuthenticatedPrincipal, SessionIssueInput } from './auth.types';
+import type {
+  AuthenticatedPrincipal,
+  SessionIssueInput,
+  RefreshRotationResult,
+} from './auth.types';
 
 interface InspectionRow {
   sessionUser: string;
@@ -131,6 +135,86 @@ describe('AuthenticationDatabaseService readiness', () => {
     ].flat();
     expect(JSON.stringify(loggedPayloads)).not.toContain('postgresql://');
     expect(JSON.stringify(loggedPayloads)).not.toContain('secret');
+  });
+});
+
+describe('AuthenticationDatabaseService refresh commit boundary', () => {
+  const input = {
+    currentTokenHash: 'a'.repeat(64),
+    newTokenId: 'b1cf8f6c-d1e2-4a58-b6dd-7294fb98a220',
+    newTokenHash: 'b'.repeat(64),
+    newAccessTokenJti: 'fc8b9fb8-7c18-4551-a6f8-624cb26e5e33',
+    refreshTtlSeconds: 3600,
+  };
+  function harness(outcome: RefreshRotationResult['outcome']) {
+    const events: string[] = [];
+    const query = jest.fn(async (statement: string) => {
+      events.push(statement.trim().startsWith('select') ? 'rotate' : statement);
+      return { rows: statement.trim().startsWith('select') ? [{ outcome }] : [] };
+    });
+    const release = jest.fn();
+    const pool = {
+      connect: jest.fn().mockResolvedValue({ query, release }),
+      on: jest.fn(),
+    } as unknown as Pool;
+    const logger = { error: jest.fn() } as unknown as PinoLogger;
+    return { service: new AuthenticationDatabaseService(pool, logger), query, release, events };
+  }
+
+  it.each(['invalid', 'reused'] as const)(
+    'commits %s authority effects without signing a token',
+    async (outcome) => {
+      const { service, events, release } = harness(outcome);
+      const prepare = jest.fn();
+      await expect(service.rotateRefreshToken(input, prepare)).resolves.toBeUndefined();
+      expect(events).toEqual(['begin', 'rotate', 'commit']);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('prepares the response before committing and returning it', async () => {
+    const { service, events } = harness('rotated');
+    await expect(
+      service.rotateRefreshToken(input, async () => {
+        events.push('prepare');
+        return 'prepared';
+      }),
+    ).resolves.toBe('prepared');
+    expect(events).toEqual(['begin', 'rotate', 'prepare', 'commit']);
+  });
+
+  it('preserves signing failure when rollback and release also fail', async () => {
+    const { service, query, release, events } = harness('rotated');
+    const original = query.getMockImplementation();
+    query.mockImplementation(async (statement) => {
+      if (statement === 'rollback') throw new Error('rollback failure');
+      if (!original) throw new Error('Missing query implementation');
+      return original(statement);
+    });
+    release.mockImplementation(() => {
+      throw new Error('release failure');
+    });
+    const primary = new Error('signing failure');
+    await expect(
+      service.rotateRefreshToken(input, async () => {
+        throw primary;
+      }),
+    ).rejects.toBe(primary);
+    expect(events).not.toContain('commit');
+    expect(release).toHaveBeenCalledWith(true);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards an acquired client when BEGIN fails and preserves that error', async () => {
+    const { service, query, release } = harness('rotated');
+    const primary = new Error('BEGIN failure');
+    query.mockRejectedValueOnce(primary);
+    const prepare = jest.fn();
+    await expect(service.rotateRefreshToken(input, prepare)).rejects.toBe(primary);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(true);
   });
 });
 

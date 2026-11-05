@@ -4,6 +4,7 @@ import { runMigrationCommand, verifyMigrationSession } from '../scripts/migrate'
 import { readCatalogFingerprint } from '../scripts/migrations/catalog-fingerprint';
 import { readEffectiveMigrationState } from '../scripts/migrations/effective-migration-state';
 import { readMigrationFiles } from '../scripts/migrations/migration-files';
+import * as migrationFiles from '../scripts/migrations/migration-files';
 import {
   isRecoveryMigrationCompatible,
   readVerifiedMigrationState,
@@ -30,9 +31,11 @@ describeDatabase('Stage 1A authorized 0035 to 0036 upgrade', () => {
   let database: InventoryTestDatabase | undefined;
   let migrationUrl: string;
   let adminUrl: string;
+  let stageFiles: Awaited<ReturnType<typeof readMigrationFiles>>;
 
   beforeAll(async () => {
     if (!environment) throw new Error('Approved local PostgreSQL is required.');
+    stageFiles = (await readMigrationFiles()).filter((file) => file.filename <= migrationFilename);
     database = await createInventoryTestDatabase(migrationFilename);
     const migration = new URL(environment.migrationUrl);
     migration.pathname = `/${database.databaseName}`;
@@ -43,6 +46,11 @@ describeDatabase('Stage 1A authorized 0035 to 0036 upgrade', () => {
   });
   afterAll(async () => {
     await database?.close();
+  });
+
+  beforeEach(() => {
+    // This historical upgrade test must remain bounded at its named 0036 ceiling.
+    jest.spyOn(migrationFiles, 'readMigrationFiles').mockResolvedValue(stageFiles);
   });
 
   it('hardens only future defaults and preserves all existing catalog objects and effective function access', async () => {

@@ -183,7 +183,9 @@ describe('AuthenticationService', () => {
 
   it('rotates a refresh token and returns only the new raw token', async () => {
     const { service, database, tokens } = createHarness();
-    database.rotateRefreshToken.mockResolvedValue(rotatedResult());
+    database.rotateRefreshToken.mockImplementation(async (_input, prepare) =>
+      prepare(rotatedResult()),
+    );
     tokens.issueAccessToken.mockResolvedValue('rotated-access-token');
 
     const result = await service.refresh('A'.repeat(43));
@@ -199,25 +201,10 @@ describe('AuthenticationService', () => {
 
   it.each(['invalid', 'reused'] as const)(
     'rejects the %s refresh outcome generically',
-    async (outcome) => {
+    async () => {
       const { service, database } = createHarness();
-      database.rotateRefreshToken.mockResolvedValue(
-        rotatedResult({
-          outcome,
-          userId: null,
-          email: null,
-          fullName: null,
-          storeId: null,
-          storeName: null,
-          storeStatus: null,
-          membershipRole: null,
-          membershipVersion: null,
-          deviceId: null,
-          sessionId: null,
-          sessionExpiresAt: null,
-          recoveryGenerationId: null,
-        }),
-      );
+      // The persistence boundary commits invalid/reused outcomes without preparing tokens.
+      database.rotateRefreshToken.mockResolvedValue(undefined);
 
       await expect(service.refresh('A'.repeat(43))).rejects.toMatchObject({
         status: 401,
