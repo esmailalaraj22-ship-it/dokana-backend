@@ -202,9 +202,10 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   async withBusinessWriteTransaction<T>(
     context: TenantTransactionContext,
     work: (transaction: DatabaseTransaction) => Promise<T>,
+    requiredAuthority: 'owner' | 'owner_or_manager' = 'owner',
   ): Promise<T> {
     return this.withTenantTransaction(context, async (transaction) => {
-      await this.assertBusinessWriteAllowed(transaction, context.storeId);
+      await this.assertBusinessWriteAllowed(transaction, context.storeId, requiredAuthority);
 
       return work(transaction);
     });
@@ -213,6 +214,7 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
   async assertBusinessWriteAllowed(
     transaction: DatabaseTransaction,
     storeId: string,
+    requiredAuthority: 'owner' | 'owner_or_manager' = 'owner',
   ): Promise<void> {
     let result;
     try {
@@ -230,6 +232,21 @@ export class DatabaseService implements OnApplicationBootstrap, OnModuleDestroy 
           ) as "writeEligible"
         `);
       } else {
+        result = await transaction.execute(sql`
+          select write_eligible as "writeEligible"
+          from ledger.lock_effective_entitlement(${storeId}::uuid)
+        `);
+      }
+      if ((result.rows[0] as { writeEligible?: unknown } | undefined)?.writeEligible !== true) {
+        this.throwBusinessWriteNotAllowed();
+      }
+      // Fixed operation requirements come from repositories, never request fields.
+      // Keep the authority row locks through effects and commit, including nested offline work.
+      await transaction.execute(sql`
+        select ledger.lock_mutation_actor_v1(${requiredAuthority}::text)
+      `);
+      if (!scope) {
+        // Actor locks can also wait: retain 0038's post-admission clock semantics.
         result = await transaction.execute(sql`
           select write_eligible as "writeEligible"
           from ledger.lock_effective_entitlement(${storeId}::uuid)

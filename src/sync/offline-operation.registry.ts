@@ -153,10 +153,11 @@ export class OfflineOperationRegistry {
 
     switch (envelope.operationType) {
       case 'customers.create.v1':
-        response = await this.customers.create(context, this.rootCreateBody(envelope));
+        response = await this.customers.create(principal, context, this.rootCreateBody(envelope));
         break;
       case 'customers.update.v1':
         response = await this.customers.update(
+          principal,
           context,
           this.aggregateId(envelope),
           this.updateBody(envelope),

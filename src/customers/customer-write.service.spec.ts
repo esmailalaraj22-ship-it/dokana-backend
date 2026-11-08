@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 import type { TenantTransactionContext } from '../database/database.types';
 import type { CustomerWriteRepository } from './customer-write.repository';
@@ -15,6 +20,7 @@ const context: TenantTransactionContext = {
   deviceId: '44200000-0000-4000-8000-000000000001',
   requestId: '44300000-0000-4000-8000-000000000001',
 };
+const principal = { ...context, membershipRole: 'owner' as const };
 const customerId = '44400000-0000-4000-8000-000000000001';
 const operationId = '44500000-0000-4000-8000-000000000001';
 const response: CustomerMutationResponse = {
@@ -66,6 +72,57 @@ describe('CustomerWriteService', () => {
     });
   });
 
+  it.each(['owner', 'manager', 'viewer', 'support'] as const)(
+    'enforces the approved %s role before calling persistence',
+    async (membershipRole) => {
+      const actor = { ...principal, membershipRole };
+      const calls = [
+        () =>
+          service.create(actor, context, {
+            id: customerId,
+            operationId,
+            name: 'Customer',
+            phone: '0599123456',
+          }),
+        () =>
+          service.update(actor, context, customerId, {
+            operationId,
+            expectedVersion: '1',
+            notes: null,
+          }),
+        () => service.archive(actor, context, customerId, { operationId, expectedVersion: '1' }),
+        () => service.restore(actor, context, customerId, { operationId, expectedVersion: '1' }),
+      ];
+      for (const [index, call] of calls.entries()) {
+        jest.clearAllMocks();
+        const allowed = membershipRole === 'owner' || (membershipRole === 'manager' && index < 2);
+        if (allowed) await expect(call()).resolves.toBeDefined();
+        else {
+          await expect(call()).rejects.toBeInstanceOf(ForbiddenException);
+          expect(repository.create).not.toHaveBeenCalled();
+          expect(repository.update).not.toHaveBeenCalled();
+          expect(repository.changeLifecycle).not.toHaveBeenCalled();
+        }
+      }
+    },
+  );
+
+  it.each(['storeId', 'userId', 'deviceId'] as const)(
+    'rejects mismatched trusted %s before persistence',
+    async (field) => {
+      const actor = { ...principal, [field]: 'ffffffff-ffff-4fff-8fff-ffffffffffff' };
+      await expect(
+        service.create(actor, context, {
+          id: customerId,
+          operationId,
+          name: 'Customer',
+          phone: '0599123456',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repository.create).not.toHaveBeenCalled();
+    },
+  );
+
   it('prepares an explicit create with preserved client UUIDs and trusted-context separation', async () => {
     const dto = {
       id: customerId,
@@ -80,7 +137,7 @@ describe('CustomerWriteService', () => {
       normalizedPhone: '+111',
     };
 
-    await expect(service.create(context, dto)).resolves.toBe(response);
+    await expect(service.create(principal, context, dto)).resolves.toBe(response);
 
     expect(repository.create).toHaveBeenCalledTimes(1);
     const prepared = repository.create.mock.calls[0]?.[1];
@@ -107,7 +164,7 @@ describe('CustomerWriteService', () => {
   });
 
   it('canonicalizes omitted and explicit null create notes to the same persisted request', async () => {
-    await service.create(context, {
+    await service.create(principal, context, {
       id: customerId,
       operationId,
       name: 'Alice',
@@ -115,7 +172,7 @@ describe('CustomerWriteService', () => {
     });
     const omitted = repository.create.mock.calls[0]?.[1];
 
-    await service.create(context, {
+    await service.create(principal, context, {
       id: customerId,
       operationId,
       name: 'Alice',
@@ -135,13 +192,13 @@ describe('CustomerWriteService', () => {
     const uppercaseCustomerId = lowercaseCustomerId.toUpperCase();
     const uppercaseOperationId = lowercaseOperationId.toUpperCase();
 
-    await service.create(context, {
+    await service.create(principal, context, {
       id: uppercaseCustomerId,
       operationId: uppercaseOperationId,
       name: 'Semantic Customer',
       phone: '0599 123 456',
     });
-    await service.create(context, {
+    await service.create(principal, context, {
       id: lowercaseCustomerId,
       operationId: lowercaseOperationId,
       name: 'Semantic Customer',
@@ -155,12 +212,12 @@ describe('CustomerWriteService', () => {
     });
     expect(uppercaseCreate?.requestHash).toBe(lowercaseCreate?.requestHash);
 
-    await service.update(context, uppercaseCustomerId, {
+    await service.update(principal, context, uppercaseCustomerId, {
       operationId: uppercaseOperationId,
       expectedVersion: '1',
       notes: 'Canonical update',
     });
-    await service.update(context, lowercaseCustomerId, {
+    await service.update(principal, context, lowercaseCustomerId, {
       operationId: lowercaseOperationId,
       expectedVersion: '1',
       notes: 'Canonical update',
@@ -173,11 +230,11 @@ describe('CustomerWriteService', () => {
     });
     expect(uppercaseUpdate?.requestHash).toBe(lowercaseUpdate?.requestHash);
 
-    await service.archive(context, uppercaseCustomerId, {
+    await service.archive(principal, context, uppercaseCustomerId, {
       operationId: uppercaseOperationId,
       expectedVersion: '1',
     });
-    await service.archive(context, lowercaseCustomerId, {
+    await service.archive(principal, context, lowercaseCustomerId, {
       operationId: lowercaseOperationId,
       expectedVersion: '1',
     });
@@ -197,7 +254,7 @@ describe('CustomerWriteService', () => {
     { name: 'Alice', phone: '123', field: 'phone', code: 'CUSTOMER_PHONE_INVALID' },
   ])('rejects create normalization failure $code before persistence', async (example) => {
     await expect(
-      service.create(context, {
+      service.create(principal, context, {
         id: customerId,
         operationId,
         name: example.name,
@@ -217,7 +274,7 @@ describe('CustomerWriteService', () => {
     const overBudgetName = 'a'.repeat(700);
 
     await expect(
-      service.create(context, {
+      service.create(principal, context, {
         id: customerId,
         operationId,
         name: overBudgetName,
@@ -231,7 +288,7 @@ describe('CustomerWriteService', () => {
       },
     });
     await expect(
-      service.update(context, customerId, {
+      service.update(principal, context, customerId, {
         operationId,
         expectedVersion: '1',
         name: overBudgetName,
@@ -248,7 +305,7 @@ describe('CustomerWriteService', () => {
   });
 
   it('prepares only supplied update fields and parses expectedVersion losslessly', async () => {
-    await service.update(context, customerId, {
+    await service.update(principal, context, customerId, {
       operationId,
       expectedVersion: '9007199254740993',
       name: '  أحمــد   مُحَمَّد  ',
@@ -271,7 +328,7 @@ describe('CustomerWriteService', () => {
   });
 
   it('recomputes only the supplied phone canonical value', async () => {
-    await service.update(context, customerId, {
+    await service.update(principal, context, customerId, {
       operationId,
       expectedVersion: '1',
       phone: '٠٥٩٩ ١٢٣ ٤٥٦',
@@ -287,14 +344,14 @@ describe('CustomerWriteService', () => {
   });
 
   it('preserves exact string notes and distinguishes omitted from null', async () => {
-    await service.update(context, customerId, {
+    await service.update(principal, context, customerId, {
       operationId,
       expectedVersion: '1',
       notes: '  exact notes  ',
     });
     expect(repository.update.mock.calls[0]?.[1].notes).toBe('  exact notes  ');
 
-    await service.update(context, customerId, {
+    await service.update(principal, context, customerId, {
       operationId: '44500000-0000-4000-8000-000000000002',
       expectedVersion: '1',
       notes: null,
@@ -304,10 +361,10 @@ describe('CustomerWriteService', () => {
 
   it('rejects expectedVersion-only and oversized bigint patches before persistence', async () => {
     await expect(
-      service.update(context, customerId, { operationId, expectedVersion: '1' }),
+      service.update(principal, context, customerId, { operationId, expectedVersion: '1' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      service.update(context, customerId, {
+      service.update(principal, context, customerId, {
         operationId,
         expectedVersion: '9223372036854775808',
         notes: null,
@@ -323,7 +380,7 @@ describe('CustomerWriteService', () => {
 
   it('rejects invalid update normalization without rewriting unrelated fields', async () => {
     await expect(
-      service.update(context, customerId, {
+      service.update(principal, context, customerId, {
         operationId,
         expectedVersion: '1',
         phone: '+970000000000',
@@ -339,14 +396,14 @@ describe('CustomerWriteService', () => {
   });
 
   it('prepares archive and restore as distinct lifecycle commands without master data', async () => {
-    await service.archive(context, customerId, { operationId, expectedVersion: '1' });
+    await service.archive(principal, context, customerId, { operationId, expectedVersion: '1' });
     const archive = repository.changeLifecycle.mock.calls[0]?.[1];
 
     repository.changeLifecycle.mockResolvedValueOnce({
       ok: true,
       response: { ...response, status: 'active', version: '3' },
     });
-    await service.restore(context, customerId, { operationId, expectedVersion: '2' });
+    await service.restore(principal, context, customerId, { operationId, expectedVersion: '2' });
     const restore = repository.changeLifecycle.mock.calls[1]?.[1];
 
     expect(archive).toMatchObject({
@@ -375,7 +432,7 @@ describe('CustomerWriteService', () => {
 
   it('rejects an oversized lifecycle version before persistence', async () => {
     await expect(
-      service.archive(context, customerId, {
+      service.archive(principal, context, customerId, {
         operationId,
         expectedVersion: '9223372036854775808',
       }),
@@ -391,17 +448,17 @@ describe('CustomerWriteService', () => {
   it('maps lifecycle state and version failures through the established error contract', async () => {
     repository.changeLifecycle.mockResolvedValueOnce(rejected('CUSTOMER_ARCHIVED'));
     await expect(
-      service.archive(context, customerId, { operationId, expectedVersion: '1' }),
+      service.archive(principal, context, customerId, { operationId, expectedVersion: '1' }),
     ).rejects.toBeInstanceOf(ConflictException);
 
     repository.changeLifecycle.mockResolvedValueOnce(rejected('CONFLICT'));
     await expect(
-      service.restore(context, customerId, { operationId, expectedVersion: '1' }),
+      service.restore(principal, context, customerId, { operationId, expectedVersion: '1' }),
     ).rejects.toBeInstanceOf(ConflictException);
 
     repository.changeLifecycle.mockResolvedValueOnce(rejected('CUSTOMER_VERSION_CONFLICT'));
     await expect(
-      service.restore(context, customerId, { operationId, expectedVersion: '1' }),
+      service.restore(principal, context, customerId, { operationId, expectedVersion: '1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -416,7 +473,7 @@ describe('CustomerWriteService', () => {
     repository.update.mockResolvedValueOnce(rejected(code));
 
     await expect(
-      service.update(context, customerId, {
+      service.update(principal, context, customerId, {
         operationId,
         expectedVersion: '1',
         notes: null,
@@ -429,7 +486,7 @@ describe('CustomerWriteService', () => {
     repository.create.mockRejectedValueOnce(unexpected);
 
     await expect(
-      service.create(context, {
+      service.create(principal, context, {
         id: customerId,
         operationId,
         name: 'Alice',

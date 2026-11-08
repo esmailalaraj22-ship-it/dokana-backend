@@ -94,10 +94,10 @@ describe('DatabaseService tenant transactions', () => {
 
     await expect(service.withBusinessWriteTransaction(context, work)).resolves.toBe('written');
 
-    expect(execute).toHaveBeenCalledTimes(7);
+    expect(execute).toHaveBeenCalledTimes(9);
     expect(work).toHaveBeenCalledTimes(1);
     expect(work).toHaveBeenCalledWith(transaction);
-    const entitlementCallOrder = execute.mock.invocationCallOrder[6];
+    const entitlementCallOrder = execute.mock.invocationCallOrder[8];
     const workCallOrder = work.mock.invocationCallOrder[0];
     if (entitlementCallOrder === undefined || workCallOrder === undefined) {
       throw new Error('Expected the entitlement check and protected work to be invoked.');
@@ -137,6 +137,34 @@ describe('DatabaseService tenant transactions', () => {
     });
     expect(work).not.toHaveBeenCalled();
   });
+
+  it.each(['actor_revoked', 'expiry_after_actor_wait'])(
+    'rejects %s before business effects after initial entitlement admission',
+    async (reason) => {
+      queueTenantContext();
+      queueRecoveryAuthority();
+      execute.mockResolvedValueOnce({ rows: [{ writeEligible: true }] });
+      if (reason === 'actor_revoked') {
+        execute.mockRejectedValueOnce(
+          Object.assign(new Error('Internal authority detail'), { code: '42501' }),
+        );
+      } else {
+        execute.mockResolvedValueOnce({ rows: [] });
+        execute.mockResolvedValueOnce({ rows: [{ writeEligible: false }] });
+      }
+      const work = jest.fn();
+      await expect(
+        service.withBusinessWriteTransaction(context, work, 'owner_or_manager'),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: {
+          code: 'BUSINESS_WRITE_NOT_ALLOWED',
+          message: 'Business writes are not allowed.',
+        },
+      });
+      expect(work).not.toHaveBeenCalled();
+    },
+  );
 
   it('translates a PostgreSQL tenant-authorization rejection without exposing database details', async () => {
     queueTenantContext();
@@ -202,7 +230,7 @@ describe('DatabaseService tenant transactions', () => {
     ).resolves.toBe('applied');
 
     expect(database.transaction).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledTimes(7);
+    expect(execute).toHaveBeenCalledTimes(8);
     expect(work).toHaveBeenCalledWith(transaction);
   });
 
@@ -222,7 +250,7 @@ describe('DatabaseService tenant transactions', () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(savepointExecute).toHaveBeenCalledTimes(2);
+    expect(savepointExecute).toHaveBeenCalledTimes(3);
     expect(database.transaction).toHaveBeenCalledTimes(1);
   });
 

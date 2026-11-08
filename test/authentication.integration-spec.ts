@@ -14,6 +14,7 @@ import type { Response } from 'supertest';
 import { applyMigration, runMigrationCommand, verifyMigrationSession } from '../scripts/migrate';
 import { readCatalogFingerprint } from '../scripts/migrations/catalog-fingerprint';
 import { sha256 } from '../scripts/migrations/migration-files';
+import * as migrationFiles from '../scripts/migrations/migration-files';
 import { withDatabase } from '../scripts/recovery/recovery-target';
 import {
   createInventoryTestDatabase,
@@ -31,6 +32,18 @@ import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-t
 let environment = readLocalPostgresTestEnvironment();
 const describeWithAuthenticationDatabase = environment ? describe : describe.skip;
 const lockOrderMigration = '0037_auth_refresh_session_lock_order.sql';
+
+async function runHistoricalAuthMigration(command: 'apply' | 'verify', url: string) {
+  const files = await migrationFiles.readMigrationFiles();
+  const ceiling = jest
+    .spyOn(migrationFiles, 'readMigrationFiles')
+    .mockResolvedValue(files.filter((file) => file.filename <= lockOrderMigration));
+  try {
+    await runMigrationCommand(command, url);
+  } finally {
+    ceiling.mockRestore();
+  }
+}
 
 const fixture = {
   storeId: randomUUID(),
@@ -189,8 +202,8 @@ describeWithAuthenticationDatabase('authentication API with real PostgreSQL', ()
       (await database.admin.query('select * from platform.schema_migrations order by filename'))
         .rows,
     ).toEqual(history);
-    await runMigrationCommand('apply', environment.migrationUrl);
-    await runMigrationCommand('verify', environment.migrationUrl);
+    await runHistoricalAuthMigration('apply', environment.migrationUrl);
+    await runHistoricalAuthMigration('verify', environment.migrationUrl);
     catalogAfter = JSON.parse(
       (await readCatalogFingerprint(database.admin)).canonicalJson,
     ) as Record<string, unknown>;
@@ -199,11 +212,14 @@ describeWithAuthenticationDatabase('authentication API with real PostgreSQL', ()
     ).rows;
     expect(upgraded).toHaveLength(37);
     expect(upgraded.slice(0, 36)).toEqual(history);
-    await runMigrationCommand('apply', environment.migrationUrl);
+    await runHistoricalAuthMigration('apply', environment.migrationUrl);
     expect(
       (await database.admin.query('select * from platform.schema_migrations order by filename'))
         .rows,
     ).toEqual(upgraded);
+
+    // Keep the historical 0037 catalog proof bounded; exercise HTTP at the current ceiling.
+    await runMigrationCommand('apply', environment.migrationUrl);
 
     process.env.APP_ENV = 'test';
     process.env.LOG_LEVEL = 'silent';

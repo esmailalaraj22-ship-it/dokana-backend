@@ -25,7 +25,10 @@ describe('online entitlement write-path coverage', () => {
   it('keeps the shared business-write transaction on the atomic PostgreSQL authority', () => {
     const databaseService = source('src/database/database.service.ts');
     expect(databaseService).toContain('ledger.lock_effective_entitlement');
-    expect(databaseService).toContain('assertBusinessWriteAllowed(transaction, context.storeId)');
+    expect(databaseService).toContain(
+      'assertBusinessWriteAllowed(transaction, context.storeId, requiredAuthority)',
+    );
+    expect(databaseService).toContain('ledger.lock_mutation_actor_v1');
   });
 
   it.each(directAuthorityFiles)(

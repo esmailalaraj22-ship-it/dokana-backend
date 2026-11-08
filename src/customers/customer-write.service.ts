@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
+import type { AuthenticatedPrincipal } from '../auth/auth.types';
 import type { TenantTransactionContext } from '../database/database.types';
 import {
   assertCustomerNormalizedNameCursorRepresentable,
@@ -37,14 +39,21 @@ import type { UpdateCustomerDto } from './dto/update-customer.dto';
 const maximumPostgreSqlBigint = 9_223_372_036_854_775_807n;
 const customerLifecycleCommandVersion = 1;
 
+type CustomerWritePrincipal = Pick<
+  AuthenticatedPrincipal,
+  'membershipRole' | 'storeId' | 'userId' | 'deviceId'
+>;
+
 @Injectable()
 export class CustomerWriteService {
   constructor(private readonly repository: CustomerWriteRepository) {}
 
   async create(
+    principal: CustomerWritePrincipal,
     context: TenantTransactionContext,
     dto: CreateCustomerDto,
   ): Promise<CustomerMutationResponse> {
+    this.assertAuthorized(principal, context, false);
     let input: PreparedCustomerCreate;
     try {
       const customerId = canonicalizeCustomerId(dto.id);
@@ -82,10 +91,12 @@ export class CustomerWriteService {
   }
 
   async update(
+    principal: CustomerWritePrincipal,
     context: TenantTransactionContext,
     customerId: string,
     dto: UpdateCustomerDto,
   ): Promise<CustomerMutationResponse> {
+    this.assertAuthorized(principal, context, false);
     if (dto.name === undefined && dto.phone === undefined && dto.notes === undefined) {
       throw this.validationException('body', 'customerMutableField');
     }
@@ -140,27 +151,31 @@ export class CustomerWriteService {
   }
 
   archive(
+    principal: CustomerWritePrincipal,
     context: TenantTransactionContext,
     customerId: string,
     dto: CustomerLifecycleDto,
   ): Promise<CustomerMutationResponse> {
-    return this.changeLifecycle(context, customerId, dto, 'archive');
+    return this.changeLifecycle(principal, context, customerId, dto, 'archive');
   }
 
   restore(
+    principal: CustomerWritePrincipal,
     context: TenantTransactionContext,
     customerId: string,
     dto: CustomerLifecycleDto,
   ): Promise<CustomerMutationResponse> {
-    return this.changeLifecycle(context, customerId, dto, 'restore');
+    return this.changeLifecycle(principal, context, customerId, dto, 'restore');
   }
 
   private async changeLifecycle(
+    principal: CustomerWritePrincipal,
     context: TenantTransactionContext,
     customerId: string,
     dto: CustomerLifecycleDto,
     action: CustomerLifecycleAction,
   ): Promise<CustomerMutationResponse> {
+    this.assertAuthorized(principal, context, true);
     const expectedVersion = this.parseExpectedVersion(dto.expectedVersion);
     const canonicalCustomerId = canonicalizeCustomerId(customerId);
     const operationId = canonicalizeCustomerOperationId(dto.operationId);
@@ -179,6 +194,25 @@ export class CustomerWriteService {
     };
 
     return this.unwrap(await this.repository.changeLifecycle(context, input));
+  }
+
+  private assertAuthorized(
+    principal: CustomerWritePrincipal,
+    context: TenantTransactionContext,
+    ownerOnly: boolean,
+  ): void {
+    if (
+      (principal.membershipRole !== 'owner' &&
+        (ownerOnly || principal.membershipRole !== 'manager')) ||
+      principal.storeId !== context.storeId ||
+      principal.userId !== context.userId ||
+      principal.deviceId !== context.deviceId
+    ) {
+      throw new ForbiddenException({
+        code: 'CUSTOMER_WRITE_NOT_ALLOWED',
+        message: 'Customer writes are not allowed.',
+      });
+    }
   }
 
   private parseExpectedVersion(value: string): bigint {

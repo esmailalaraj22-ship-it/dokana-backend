@@ -1,2 +1,4 @@
 # Preserve the exact bytes used by the authorized 0037 migration checksum.
 0037_auth_refresh_session_lock_order.sql text eol=lf
+0038_entitlement_time_after_authority_locks.sql text eol=lf
+0039_mutation_actor_authority_linearization.sql text eol=lf

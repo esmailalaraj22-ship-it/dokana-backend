@@ -10,11 +10,11 @@ import { readMigrationFiles } from '../../scripts/migrations/migration-files';
 const migration0034 = '0034_retire_broken_recovery_session_wrapper.sql';
 
 describe('recovery migration compatibility', () => {
-  it('supports the repository ceiling, including 0036, without moving the 0033 capability floor', async () => {
+  it('supports the repository ceiling, including 0039, without moving the 0033 capability floor', async () => {
     const files = await readMigrationFiles();
     expect(REQUIRED_RECOVERY_MIGRATION).toBe('0033_platform_recovery_generation_fencing.sql');
     expect(
-      files.some((file) => file.filename === '0036_harden_default_function_privileges.sql'),
+      files.some((file) => file.filename === '0039_mutation_actor_authority_linearization.sql'),
     ).toBe(true);
     const filenames = verifyAppliedMigrationLedger(files, files);
     const source = migrationState(filenames, 'a');

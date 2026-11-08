@@ -61,6 +61,8 @@ describe('controlled migration runner', () => {
       '0035_release_baseline_provenance.sql',
       '0036_harden_default_function_privileges.sql',
       '0037_auth_refresh_session_lock_order.sql',
+      '0038_entitlement_time_after_authority_locks.sql',
+      '0039_mutation_actor_authority_linearization.sql',
     ]);
   });
 

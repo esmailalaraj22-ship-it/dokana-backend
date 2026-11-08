@@ -52,7 +52,7 @@ export class CustomersController {
     @Req() request: AuthenticatedRequest,
     @Body() body: CreateCustomerDto,
   ): Promise<CustomerMutationResponse> {
-    return this.customerWrites.create(request.tenantContext, body);
+    return this.customerWrites.create(request.principal, request.tenantContext, body);
   }
 
   @Patch(':customerId')
@@ -61,7 +61,12 @@ export class CustomersController {
     @Param() params: CustomerIdParamDto,
     @Body() body: UpdateCustomerDto,
   ): Promise<CustomerMutationResponse> {
-    return this.customerWrites.update(request.tenantContext, params.customerId, body);
+    return this.customerWrites.update(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
   }
 
   @Post(':customerId/archive')
@@ -71,7 +76,12 @@ export class CustomersController {
     @Param() params: CustomerIdParamDto,
     @Body() body: CustomerLifecycleDto,
   ): Promise<CustomerMutationResponse> {
-    return this.customerWrites.archive(request.tenantContext, params.customerId, body);
+    return this.customerWrites.archive(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
   }
 
   @Post(':customerId/restore')
@@ -81,6 +91,11 @@ export class CustomersController {
     @Param() params: CustomerIdParamDto,
     @Body() body: CustomerLifecycleDto,
   ): Promise<CustomerMutationResponse> {
-    return this.customerWrites.restore(request.tenantContext, params.customerId, body);
+    return this.customerWrites.restore(
+      request.principal,
+      request.tenantContext,
+      params.customerId,
+      body,
+    );
   }
 }

@@ -137,127 +137,135 @@ export class CustomerWriteRepository {
     context: TenantTransactionContext,
     input: PreparedCustomerCreate,
   ): Promise<CustomerMutationResult> {
-    return this.database.withBusinessWriteTransaction(context, async (transaction) => {
-      const operation: MutationOperation = {
-        customerId: input.customerId,
-        operationId: input.operationId,
-        requestHash: input.requestHash,
-        action: 'create',
-      };
-      const replay = await this.claimOrReplay(transaction, context, operation);
-      if (replay) {
-        return replay;
-      }
-
-      const rows = await transaction
-        .insert(customers)
-        .values({
-          id: input.customerId,
-          storeId: context.storeId,
-          name: input.name,
-          normalizedName: input.normalizedName,
-          phone: input.phone,
-          normalizedPhone: input.normalizedPhone,
-          notes: input.notes,
-          status: 'active',
-          archivedAt: null,
-          deviceId: context.deviceId,
+    return this.database.withBusinessWriteTransaction(
+      context,
+      async (transaction) => {
+        const operation: MutationOperation = {
+          customerId: input.customerId,
           operationId: input.operationId,
-        })
-        .onConflictDoNothing()
-        .returning(customerMutationSelection);
+          requestHash: input.requestHash,
+          action: 'create',
+        };
+        const replay = await this.claimOrReplay(transaction, context, operation);
+        if (replay) {
+          return replay;
+        }
 
-      const row = rows[0];
-      if (!row) {
-        const conflict = await this.classifyCreateConflict(transaction, context, input);
-        await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
-        return conflict;
-      }
+        const rows = await transaction
+          .insert(customers)
+          .values({
+            id: input.customerId,
+            storeId: context.storeId,
+            name: input.name,
+            normalizedName: input.normalizedName,
+            phone: input.phone,
+            normalizedPhone: input.normalizedPhone,
+            notes: input.notes,
+            status: 'active',
+            archivedAt: null,
+            deviceId: context.deviceId,
+            operationId: input.operationId,
+          })
+          .onConflictDoNothing()
+          .returning(customerMutationSelection);
 
-      const response = mapCustomerMutationResponse(row);
-      await this.applyOperation(transaction, context.storeId, input.operationId, 201, response);
-      return { ok: true, response };
-    });
+        const row = rows[0];
+        if (!row) {
+          const conflict = await this.classifyCreateConflict(transaction, context, input);
+          await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
+          return conflict;
+        }
+
+        const response = mapCustomerMutationResponse(row);
+        await this.applyOperation(transaction, context.storeId, input.operationId, 201, response);
+        return { ok: true, response };
+      },
+      'owner_or_manager',
+    );
   }
 
   update(
     context: TenantTransactionContext,
     input: PreparedCustomerUpdate,
   ): Promise<CustomerMutationResult> {
-    return this.database.withBusinessWriteTransaction(context, async (transaction) => {
-      const operation: MutationOperation = {
-        customerId: input.customerId,
-        operationId: input.operationId,
-        requestHash: input.requestHash,
-        action: 'update',
-        expectedVersion: input.expectedVersion,
-      };
-      const replay = await this.claimOrReplay(transaction, context, operation);
-      if (replay) {
-        return replay;
-      }
-
-      const updates: {
-        deviceId: string;
-        operationId: string;
-        name?: string;
-        normalizedName?: string;
-        phone?: string;
-        normalizedPhone?: string;
-        notes?: string | null;
-      } = {
-        deviceId: context.deviceId,
-        operationId: input.operationId,
-      };
-      if (input.name !== undefined && input.normalizedName !== undefined) {
-        updates.name = input.name;
-        updates.normalizedName = input.normalizedName;
-      }
-      if (input.phone !== undefined && input.normalizedPhone !== undefined) {
-        updates.phone = input.phone;
-        updates.normalizedPhone = input.normalizedPhone;
-      }
-      if (input.notes !== undefined) {
-        updates.notes = input.notes;
-      }
-
-      let rows: CustomerMutationRow[];
-      try {
-        rows = await transaction.transaction(async (savepoint) => {
-          const updated = await savepoint
-            .update(customers)
-            .set(updates)
-            .where(
-              and(
-                eq(customers.storeId, context.storeId),
-                eq(customers.id, input.customerId),
-                eq(customers.status, 'active'),
-                eq(customers.version, input.expectedVersion),
-              ),
-            )
-            .returning(customerMutationSelection);
-          return updated;
-        });
-      } catch (error) {
-        const conflict = this.classifyUpdateConstraint(error);
-        if (!conflict) {
-          throw error;
+    return this.database.withBusinessWriteTransaction(
+      context,
+      async (transaction) => {
+        const operation: MutationOperation = {
+          customerId: input.customerId,
+          operationId: input.operationId,
+          requestHash: input.requestHash,
+          action: 'update',
+          expectedVersion: input.expectedVersion,
+        };
+        const replay = await this.claimOrReplay(transaction, context, operation);
+        if (replay) {
+          return replay;
         }
-        await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
-        return conflict;
-      }
 
-      const row = rows[0];
-      if (!row) {
-        const conflict = await this.classifyZeroRowUpdate(transaction, context, input);
-        await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
-        return conflict;
-      }
+        const updates: {
+          deviceId: string;
+          operationId: string;
+          name?: string;
+          normalizedName?: string;
+          phone?: string;
+          normalizedPhone?: string;
+          notes?: string | null;
+        } = {
+          deviceId: context.deviceId,
+          operationId: input.operationId,
+        };
+        if (input.name !== undefined && input.normalizedName !== undefined) {
+          updates.name = input.name;
+          updates.normalizedName = input.normalizedName;
+        }
+        if (input.phone !== undefined && input.normalizedPhone !== undefined) {
+          updates.phone = input.phone;
+          updates.normalizedPhone = input.normalizedPhone;
+        }
+        if (input.notes !== undefined) {
+          updates.notes = input.notes;
+        }
 
-      const response = mapCustomerMutationResponse(row);
-      await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
-      return { ok: true, response };
-    });
+        let rows: CustomerMutationRow[];
+        try {
+          rows = await transaction.transaction(async (savepoint) => {
+            const updated = await savepoint
+              .update(customers)
+              .set(updates)
+              .where(
+                and(
+                  eq(customers.storeId, context.storeId),
+                  eq(customers.id, input.customerId),
+                  eq(customers.status, 'active'),
+                  eq(customers.version, input.expectedVersion),
+                ),
+              )
+              .returning(customerMutationSelection);
+            return updated;
+          });
+        } catch (error) {
+          const conflict = this.classifyUpdateConstraint(error);
+          if (!conflict) {
+            throw error;
+          }
+          await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
+          return conflict;
+        }
+
+        const row = rows[0];
+        if (!row) {
+          const conflict = await this.classifyZeroRowUpdate(transaction, context, input);
+          await this.rejectOperation(transaction, context.storeId, operation.operationId, conflict);
+          return conflict;
+        }
+
+        const response = mapCustomerMutationResponse(row);
+        await this.applyOperation(transaction, context.storeId, input.operationId, 200, response);
+        return { ok: true, response };
+      },
+      'owner_or_manager',
+    );
   }
 
   changeLifecycle(
