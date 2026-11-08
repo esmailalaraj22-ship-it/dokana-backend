@@ -2797,3 +2797,49 @@ This closure record is a documentation-only follow-up to that reviewed implement
 Unresolved authentication findings: zero. Stage 2B candidate findings: none identified in this
 bounded review. Ready for Stage 2B — Tenant / Subscription / Admin Authority; Stage 2B was not
 started. Production deployment and final artifact approval remain separate gates.
+
+### Stage 2B Independent Review Closure — 2026-11-08
+
+Stage 2B is PASS within Tenant / Subscription / Device / Platform Admin authority scope.
+Reviewed baseline: `fcbc36eb605e541f457e8317e72935c70bd6600a`; reviewed implementation:
+`68c5214e01856bd27956dfeb2f9bf93786e340c2` (`fix(authz): close stage 2b authority races`).
+
+- S2B-01 CLOSED through `0038_entitlement_time_after_authority_locks.sql`: entitlement
+  time is evaluated after authority lock admission. Applied 0038 bytes remain unchanged.
+- S2B-02 CLOSED through `0039_mutation_actor_authority_linearization.sql`: business
+  transactions lock the current Store-owned Device and actor's Store membership and enforce
+  the trusted operation requirement before effects. Online entitlement time is checked again
+  after these possible waits. Customer create/update permits owner or manager; archive/restore
+  permits owner only. Viewer/support remain read-only; every role retains permitted reads.
+- S2B-03 CLOSED through 0039: Store lifecycle locks the target Store before validating and
+  holding the active Platform Admin assignment. One bounded same-pattern search also proved
+  and closed S2B-04 (Subscription administrative mutation), S2B-05 (License issuance membership),
+  and S2B-06 (License revocation assignment), all Medium, using the same 0039 authority helper.
+  These changes preserve Subscription and Offline License rules, payloads and signing.
+- Owner-approved linearization: a committed revocation before authority acquisition rejects
+  the waiting mutation with zero effects; a mutation that acquires and validates authority first
+  may complete while revocation waits. Subsequent requests reject after revocation commits.
+  Membership uses `platform.store_memberships(store_id,user_id)`; Device uses
+  `ledger.devices(store_id,id)`; Admin uses `platform.platform_admin_assignments(user_id)`.
+  Row locks persist in the effects transaction. Online order is recovery fence, Store,
+  Subscription, Device, membership, effects; administrative Store admission precedes assignment.
+  Existing 0037 session/token order is unchanged. Tested opposing orders produced zero deadlocks.
+- Final focused verification: **48 unit tests and 38 PostgreSQL integration tests PASS**,
+  including 32 authority cases and six historical/current migration cases, with zero skips in
+  the complete selected suites. Seven revocation-wins cases, seven inverse-order cases and a
+  controlled post-admission rollback passed. Customer matrix/tenant isolation, entitlement
+  expiry/read-only, administrative firewall and normal-runtime database boundaries passed.
+- Disposable 0038-to-0039 verification proved atomic forced-failure rollback, retained history
+  and checksums, no-op repeat application, unchanged signatures/owners/ACLs/RLS/search paths,
+  and only four existing authority body changes plus one narrowly granted helper. Recovery's
+  0033 capability floor, current 0039 source and matching/mismatched manifests passed.
+- Local PostgreSQL: **39 applied / 0 pending**. Typecheck, lint, build, migration verification,
+  runtime-role validation and diff checks PASS. Test databases, fixtures and open test
+  transactions: zero. Migrations 0001–0038 were not edited; 0040 does not exist.
+- The unfinished Customer contract document was removed; this Roadmap is the only Markdown
+  delta. Dependencies, environment, accounting, inventory, Customer data semantics, sync
+  protocol, recovery and session/token semantics are unchanged. Broad suites, full offline,
+  accounting/inventory, recovery/DR and release packaging were not run.
+
+Unresolved Stage 2B findings and owner decisions: zero. Ready for Stage 3 under the approved
+master review strategy; Stage 3 was not started. Production and final artifact gates remain separate.
