@@ -1,14 +1,16 @@
-import { randomUUID } from 'node:crypto';
+﻿import { createHash, randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import { Logger } from 'nestjs-pino';
-import type { Pool, PoolClient } from 'pg';
+import { Logger, PinoLogger } from 'nestjs-pino';
+import type { Pool, PoolClient, QueryResult } from 'pg';
 import request from 'supertest';
+import { sql } from 'drizzle-orm';
 
 import { AppModule } from '../src/app.module';
+import { AuthenticationDatabaseService } from '../src/auth/auth-database.service';
 import type { AuthenticatedPrincipal } from '../src/auth/auth.types';
 import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
@@ -16,6 +18,16 @@ import { AppConfigService } from '../src/config/app-config.service';
 import type { TenantTransactionContext } from '../src/database/database.types';
 import { OfflineEntitlementHandoffService } from '../src/offline-licenses/offline-entitlement-handoff.service';
 import { OfflineLicenseService } from '../src/offline-licenses/offline-license.service';
+import { OfflineLicenseCryptoService } from '../src/offline-licenses/offline-license-crypto';
+import { DatabaseService } from '../src/database/database.service';
+import { DATABASE_POOL } from '../src/database/database.constants';
+import { OfflineOperationService } from '../src/sync/offline-operation.service';
+import { OfflineOperationRepository } from '../src/sync/offline-operation.repository';
+import { OfflineOperationRegistry } from '../src/sync/offline-operation.registry';
+import { CustomerWriteService } from '../src/customers/customer-write.service';
+import { MoneyTransferWriteService } from '../src/money-transfers/money-transfer-write.service';
+import { MoneyMovementPostingRepository } from '../src/money-movements/money-movement-posting.repository';
+import { PlatformAdminService } from '../src/platform-authority/platform-admin.service';
 import type {
   OfflineEntitlementSyncEnvelope,
   OfflineLicenseResponse,
@@ -114,7 +126,19 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
   let activePlanId: string;
   let ownsPlan = false;
   let poolsInitialized = false;
+  let orphanBaseline: { count: string; fingerprint: string | null } | undefined;
+  let removedFixtureTokens = 0;
   const subscriptionIds = new Map<string, string>();
+
+  async function orphanSnapshot() {
+    const result = await adminPool.query<{ count: string; fingerprint: string | null }>(`
+      select count(*)::text as count,
+        md5(string_agg(to_jsonb(r)::text, ',' order by r.id)) as fingerprint
+      from platform.refresh_tokens r
+      where not exists (select 1 from platform.auth_sessions s where s.id = r.session_id)
+    `);
+    return result.rows[0];
+  }
 
   function directContext(storeId: string, deviceId: string): TenantTransactionContext {
     return {
@@ -147,7 +171,7 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
     email: string,
     storeId: string,
     deviceId = randomUUID(),
-  ): Promise<{ token: string; deviceId: string }> {
+  ): Promise<{ token: string; deviceId: string; refreshToken: string }> {
     const response = await request(server)
       .post('/v1/auth/login')
       .send({
@@ -160,10 +184,14 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       })
       .expect(200);
     const body = bodyOf(response);
-    if (typeof body.accessToken !== 'string' || typeof body.deviceId !== 'string') {
+    if (
+      typeof body.accessToken !== 'string' ||
+      typeof body.deviceId !== 'string' ||
+      typeof body.refreshToken !== 'string'
+    ) {
       throw new Error('Expected authentication token and device identity.');
     }
-    return { token: body.accessToken, deviceId: body.deviceId };
+    return { token: body.accessToken, deviceId: body.deviceId, refreshToken: body.refreshToken };
   }
 
   async function seedSubscription(
@@ -198,6 +226,29 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
   }
 
   async function removeFixtures(): Promise<void> {
+    // This fixture connection suppresses triggers, including FK cascades. Remove
+    // only tokens belonging to our still-identifiable sessions before those sessions.
+    const removed = await fixturePool.query(
+      `delete from platform.refresh_tokens where session_id in
+         (select id from platform.auth_sessions where user_id = any($1::uuid[]))`,
+      [fixtureUserIds],
+    );
+    removedFixtureTokens += removed.rowCount ?? 0;
+    for (const table of [
+      'sync.offline_operation_recovery_events_v1',
+      'sync.offline_operation_provenance_v1',
+      'sync.store_change_events_v1',
+      'sync.store_change_watermarks_v1',
+      'ledger.money_transfers',
+      'ledger.money_movements',
+      'ledger.money_accounts',
+      'ledger.accounting_periods',
+      'ledger.app_settings',
+    ]) {
+      await fixturePool.query(`delete from ${table} where store_id = any($1::uuid[])`, [
+        fixtureStoreIds,
+      ]);
+    }
     await fixturePool.query(`delete from platform.auth_sessions where user_id = any($1::uuid[])`, [
       fixtureUserIds,
     ]);
@@ -223,6 +274,9 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       [fixtureStoreIds],
     );
     await fixturePool.query(`delete from ledger.devices where store_id = any($1::uuid[])`, [
+      fixtureStoreIds,
+    ]);
+    await fixturePool.query(`delete from ledger.customers where store_id = any($1::uuid[])`, [
       fixtureStoreIds,
     ]);
     await fixturePool.query(
@@ -263,6 +317,7 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
     );
     runtimePool = createTestPool(environment.runtimeUrl, 'dokana-s18-6-runtime', 3);
     poolsInitialized = true;
+    orphanBaseline = await orphanSnapshot();
     await removeFixtures();
 
     const plans = await adminPool.query<{ id: string }>(
@@ -398,11 +453,176 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
   });
 
   afterAll(async () => {
-    if (poolsInitialized) await removeFixtures();
-    if (app) await app.close();
-    if (poolsInitialized)
-      await Promise.all([adminPool.end(), fixturePool.end(), runtimePool.end()]);
+    try {
+      if (poolsInitialized) {
+        await removeFixtures();
+        const after = await orphanSnapshot();
+        expect(after).toEqual(orphanBaseline);
+        console.info('Stage 3A fixture residue', {
+          orphanBefore: orphanBaseline?.count,
+          orphanAfter: after?.count,
+          removedFixtureTokens,
+          newOrphans: 0,
+          preExistingOrphansUnchanged: true,
+        });
+      }
+    } finally {
+      if (app) await app.close();
+      if (poolsInitialized)
+        await Promise.all([adminPool.end(), fixturePool.end(), runtimePool.end()]);
+    }
   });
+
+  it.each(['issue', 'refresh'] as const)(
+    'Stage 3A Auth %s preserves committed state when the release listener fails',
+    async (path) => {
+      if (!app || !environment) throw new Error('Approved application fixture is required.');
+      const logger = await app.resolve(PinoLogger);
+      const authPool = createTestPool(environment.authUrl, 'dokana-stage3a-auth-cleanup', 1);
+      const auth = new AuthenticationDatabaseService(authPool, logger);
+      const input = {
+        userId: fixtures.users.owner,
+        storeId: fixtures.stores.happy,
+        deviceId: randomUUID(),
+        deviceName: 'Stage 3A Auth cleanup',
+        devicePlatform: 'android' as const,
+        sessionId: randomUUID(),
+        accessTokenJti: randomUUID(),
+        refreshTokenId: randomUUID(),
+        refreshTokenHash: createHash('sha256').update(randomUUID()).digest('hex'),
+        refreshFamilyId: randomUUID(),
+        sessionExpiresAt: new Date(Date.now() + 2 * 86_400_000),
+        refreshExpiresAt: new Date(Date.now() + 86_400_000),
+      };
+      const rotation = {
+        currentTokenHash: input.refreshTokenHash,
+        newTokenId: randomUUID(),
+        newTokenHash: createHash('sha256').update(randomUUID()).digest('hex'),
+        newAccessTokenJti: randomUUID(),
+        refreshTtlSeconds: 3600,
+      };
+      let leased: PoolClient | undefined;
+      let committed = false;
+      let oldPid: number | undefined;
+      let acquisition: jest.SpyInstance | undefined;
+      let querySpy: jest.SpyInstance | undefined;
+      try {
+        if (path === 'refresh') {
+          expect(await auth.issueSession(input)).toMatchObject({ sessionId: input.sessionId });
+        }
+        const connect = authPool.connect.bind(authPool);
+        acquisition = jest.spyOn(authPool, 'connect').mockImplementationOnce(async () => {
+          leased = await connect();
+          leased.on('error', () => undefined);
+          oldPid = (await leased.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]
+            ?.pid;
+          const query = leased.query.bind(leased);
+          querySpy = jest.spyOn(leased, 'query').mockImplementation((async (...args: unknown[]) => {
+            const result = await (Reflect.apply(query, leased, args) as Promise<QueryResult>);
+            if (args[0] === 'commit') {
+              committed = true;
+              authPool.once('release', () => {
+                throw new Error('Stage 3A Auth post-COMMIT release failure');
+              });
+            }
+            return result;
+          }) as PoolClient['query']);
+          return leased;
+        });
+        let response: unknown;
+        let failure: unknown;
+        try {
+          response =
+            path === 'issue'
+              ? await auth.issueSession(input)
+              : await auth.rotateRefreshToken(rotation, async (row) => {
+                  expect(row.outcome).toBe('rotated');
+                  return { sessionId: row.sessionId };
+                });
+        } catch (error) {
+          failure = error;
+        }
+        acquisition.mockRestore();
+        querySpy?.mockRestore();
+        expect(committed).toBe(true);
+        const sessions = await adminPool.query(
+          `select id, access_token_jti, revoked_at from platform.auth_sessions
+           where user_id=$1 and device_id=$2`,
+          [input.userId, input.deviceId],
+        );
+        expect(sessions.rows).toEqual([
+          {
+            id: input.sessionId,
+            access_token_jti: path === 'issue' ? input.accessTokenJti : rotation.newAccessTokenJti,
+            revoked_at: null,
+          },
+        ]);
+        const tokens = await adminPool.query(
+          `select id, session_id, family_id, used_at is not null as used,
+             revoked_at, replaced_by_id from platform.refresh_tokens
+           where family_id=$1 order by issued_at, id`,
+          [input.refreshFamilyId],
+        );
+        expect(tokens.rows).toHaveLength(path === 'issue' ? 1 : 2);
+        expect(tokens.rows).toEqual(
+          expect.arrayContaining([
+            {
+              id: input.refreshTokenId,
+              session_id: input.sessionId,
+              family_id: input.refreshFamilyId,
+              used: path === 'refresh',
+              revoked_at: null,
+              replaced_by_id: path === 'refresh' ? rotation.newTokenId : null,
+            },
+          ]),
+        );
+        if (path === 'refresh')
+          expect(tokens.rows).toEqual(
+            expect.arrayContaining([
+              {
+                id: rotation.newTokenId,
+                session_id: input.sessionId,
+                family_id: input.refreshFamilyId,
+                used: false,
+                revoked_at: null,
+                replaced_by_id: null,
+              },
+            ]),
+          );
+        expect(failure).toBeUndefined();
+        expect(response).toMatchObject({ sessionId: input.sessionId });
+        expect(authPool.totalCount).toBe(0);
+        expect(authPool.waitingCount).toBe(0);
+        const next = await authPool.connect();
+        try {
+          const state = await next.query<{ pid: number; store: string | null }>(
+            "select pg_backend_pid() as pid, nullif(current_setting('app.store_id', true), '') as store",
+          );
+          expect(state.rows[0]?.pid).not.toBe(oldPid);
+          expect(state.rows[0]?.store).toBeNull();
+          await next.query('begin');
+          await next.query('select 1');
+          await next.query('commit');
+        } finally {
+          next.release();
+        }
+        expect(authPool.totalCount).toBe(1);
+        expect(authPool.idleCount).toBe(1);
+      } finally {
+        acquisition?.mockRestore();
+        querySpy?.mockRestore();
+        if (leased) {
+          try {
+            leased.release(true);
+          } catch {
+            /* Already consumed release guard. */
+          }
+          leased.emit('error', new Error('Stage 3A Auth fixture cleanup'));
+        }
+        await authPool.end();
+      }
+    },
+  );
 
   it('preserves forced RLS and grants only narrow runtime function execution', async () => {
     const functions = await adminPool.query<{
@@ -477,6 +697,601 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       runtimePool.query(`select * from platform.license_issuances`),
       '42501',
     );
+  });
+
+  it.each(['verify', 'verificationKey'] as const)(
+    'Stage 3A rolls back issuance when response %s fails',
+    async (boundary) => {
+      if (!app) throw new Error('Application is not initialized.');
+      const session = await login('s18-6-owner@example.test', fixtures.stores.happy);
+      const operationId = randomUUID();
+      const crypto = app.get(OfflineLicenseCryptoService);
+      const failure = jest.spyOn(crypto, boundary).mockImplementationOnce(() => {
+        throw new Error('Stage 3A injected response preparation failure');
+      });
+      try {
+        const response = await request(server)
+          .post('/v1/licenses/verify')
+          .set('Authorization', `Bearer ${session.token}`)
+          .send({ operationId })
+          .expect(500);
+        expect(JSON.stringify(response.body)).not.toContain('injected');
+        expect(
+          (
+            await adminPool.query(
+              'select id from platform.license_issuances where store_id=$1 and device_id=$2',
+              [fixtures.stores.happy, session.deviceId],
+            )
+          ).rowCount,
+        ).toBe(0);
+        expect(
+          (
+            await adminPool.query(
+              'select operation_id from sync.processed_operations where store_id=$1 and operation_id=$2',
+              [fixtures.stores.happy, operationId],
+            )
+          ).rowCount,
+        ).toBe(0);
+      } finally {
+        failure.mockRestore();
+      }
+    },
+  );
+
+  it.each(['push', 'recover'] as const)(
+    'Stage 3A C03 preserves %s completion failure and rolls back every associated effect',
+    async (path) => {
+      if (!app) throw new Error('Application is not initialized.');
+      const session = await login('s18-6-owner@example.test', fixtures.stores.happy);
+      const context = directContext(fixtures.stores.happy, session.deviceId);
+      const database = app.get(DatabaseService);
+      const authority = await database.withTenantTransaction(context, (tx) =>
+        database.capturePlatformRecoveryAuthority(tx),
+      );
+      context.recoveryGenerationId = authority.recoveryGenerationId;
+      const actor = principal(context);
+      const license = await licenses.issue(actor, context, { operationId: randomUUID() });
+      const payload = license.license.payload;
+      const operationId = randomUUID();
+      const customerId = randomUUID();
+      const recordedAt = new Date().toISOString();
+      const operation = {
+        protocolVersion: 1,
+        operationId,
+        operationType: 'customers.create.v1',
+        storeId: context.storeId,
+        deviceId: context.deviceId,
+        recoveryGenerationId: context.recoveryGenerationId,
+        aggregateId: customerId,
+        payload: {
+          name: `Stage 3A offline atomicity ${path}`,
+          phone: path === 'push' ? '0599000077' : '0599000078',
+        },
+        clientRecordedAt: recordedAt,
+        offlineLicenseId: payload.licenseId,
+        signedLicense: license.license,
+        signingKeyId: payload.signingKeyId,
+        subscriptionId: payload.subscriptionId,
+        subscriptionVersion: payload.subscriptionVersion,
+        trustedTimeEvidence: {
+          version: 1,
+          trustedServerTime: new Date(payload.issuedAt).toISOString(),
+          observedDeviceTime: recordedAt,
+          clockState: path === 'recover' ? 'clock_rollback_suspected' : 'trusted',
+          knownStoreStatus: 'active',
+          knownStoreStatusAt: new Date(payload.issuedAt).toISOString(),
+        },
+        localSequence: '1',
+        dependsOnOperationIds: [],
+      };
+      const offline = app.get(OfflineOperationService);
+      if (path === 'recover') {
+        expect(
+          (await offline.push({ operations: [operation] }, actor, context)).results[0]?.status,
+        ).toBe('QUARANTINED');
+      }
+      const snapshot = async () => {
+        const tables = [
+          'ledger.customers',
+          'sync.processed_operations',
+          'sync.offline_operation_provenance_v1',
+          'sync.offline_operation_recovery_events_v1',
+          'audit.central_audit_logs',
+          'sync.change_events',
+          'sync.store_change_events_v1',
+        ];
+        const counts: Record<string, number> = {};
+        for (const table of tables) {
+          counts[table] =
+            (
+              await adminPool.query<{ count: number }>(
+                `select count(*)::integer as count from ${table} where store_id=$1`,
+                [context.storeId],
+              )
+            ).rows[0]?.count ?? -1;
+        }
+        const provenance = (
+          await adminPool.query(
+            'select to_jsonb(p) as value from sync.offline_operation_provenance_v1 p where store_id=$1 and operation_id=$2',
+            [context.storeId, operationId],
+          )
+        ).rows;
+        return { counts, provenance };
+      };
+      const before = await snapshot();
+      const repository = app.get(OfflineOperationRepository);
+      const registry = app.get(OfflineOperationRegistry);
+      const dispatch = jest.spyOn(registry, 'dispatch');
+      const method = path === 'push' ? 'finish' : 'finishRecovery';
+      const primary = new Error('Stage 3A completion failed after successful dispatch');
+      const completion = jest
+        .spyOn(repository, method)
+        .mockImplementationOnce(
+          async (
+            ...args:
+              | Parameters<OfflineOperationRepository['finish']>
+              | Parameters<OfflineOperationRepository['finishRecovery']>
+          ) => {
+            const [tx] = args;
+            // Assert actual domain effects exist on the same transaction before failure.
+            const { sql } = await import('drizzle-orm');
+            const rows = await tx.execute(
+              sql`select id from ledger.customers where id=${customerId}::uuid`,
+            );
+            expect(rows.rowCount).toBe(1);
+            throw primary;
+          },
+        );
+      let surfaced: unknown;
+      let outerResult: unknown;
+      try {
+        try {
+          if (path === 'push')
+            outerResult = await offline.push({ operations: [operation] }, actor, context);
+          else outerResult = await offline.recover(operationId, { operation }, actor, context);
+        } catch (error) {
+          surfaced = error;
+        }
+        expect({
+          dispatches: dispatch.mock.calls.length,
+          sqlstate: postgresErrorCode(surfaced),
+          result: outerResult,
+        }).toEqual({ dispatches: 1, sqlstate: undefined, result: undefined });
+        expect(completion).toHaveBeenCalledTimes(1);
+        expect(await snapshot()).toEqual(before);
+        const pool = app.get<Pool>(DATABASE_POOL);
+        expect(pool.totalCount - pool.idleCount).toBe(0);
+        expect(pool.waitingCount).toBe(0);
+        expect(
+          (await pool.query("select nullif(current_setting('app.store_id', true), '') as store"))
+            .rows,
+        ).toEqual([{ store: null }]);
+        expect({
+          originalPreserved: surfaced === primary,
+          sqlstate: postgresErrorCode(surfaced),
+        }).toEqual({ originalPreserved: true, sqlstate: undefined });
+      } finally {
+        dispatch.mockRestore();
+        completion.mockRestore();
+      }
+      const success =
+        path === 'push'
+          ? (await offline.push({ operations: [operation] }, actor, context)).results[0]
+          : await offline.recover(operationId, { operation }, actor, context);
+      expect(success?.status).toBe('APPLIED');
+      const after = await snapshot();
+      expect(after.counts['ledger.customers']).toBe((before.counts['ledger.customers'] ?? -1) + 1);
+      expect(after.counts['sync.processed_operations']).toBe(
+        (before.counts['sync.processed_operations'] ?? -1) + 1,
+      );
+      expect(after.counts['audit.central_audit_logs']).toBeGreaterThan(
+        before.counts['audit.central_audit_logs'] ?? -1,
+      );
+      expect(after.counts['sync.store_change_events_v1']).toBe(
+        (before.counts['sync.store_change_events_v1'] ?? -1) + 1,
+      );
+      expect((await offline.status(operationId, undefined, context)).status).toBe('APPLIED');
+    },
+  );
+
+  it('Stage 3A C06 preserves an earlier envelope commit when the later envelope fails', async () => {
+    if (!app) throw new Error('Application is not initialized.');
+    const session = await login('s18-6-owner@example.test', fixtures.stores.happy);
+    const syncResponse = bodyOf(
+      await request(server)
+        .post('/v1/sync/auth/token')
+        .send({ refreshToken: session.refreshToken })
+        .expect(200),
+    );
+    if (
+      typeof syncResponse.syncToken !== 'string' ||
+      typeof syncResponse.recoveryGenerationId !== 'string'
+    )
+      throw new Error('Sync authentication fixture unavailable.');
+    const context = {
+      ...directContext(fixtures.stores.happy, session.deviceId),
+      recoveryGenerationId: syncResponse.recoveryGenerationId,
+    };
+    const license = await licenses.issue(principal(context), context, {
+      operationId: randomUUID(),
+    });
+    const payload = license.license.payload;
+    const recordedAt = new Date().toISOString();
+    const operations = [1, 2].map((sequence) => ({
+      protocolVersion: 1,
+      operationId: randomUUID(),
+      operationType: 'customers.create.v1',
+      storeId: context.storeId,
+      deviceId: context.deviceId,
+      recoveryGenerationId: context.recoveryGenerationId,
+      aggregateId: randomUUID(),
+      payload: { name: `C06 envelope ${String(sequence)}`, phone: `059900008${String(sequence)}` },
+      clientRecordedAt: recordedAt,
+      offlineLicenseId: payload.licenseId,
+      signedLicense: license.license,
+      signingKeyId: payload.signingKeyId,
+      subscriptionId: payload.subscriptionId,
+      subscriptionVersion: payload.subscriptionVersion,
+      trustedTimeEvidence: {
+        version: 1,
+        trustedServerTime: new Date(payload.issuedAt).toISOString(),
+        observedDeviceTime: recordedAt,
+        clockState: 'trusted',
+        knownStoreStatus: 'active',
+        knownStoreStatusAt: new Date(payload.issuedAt).toISOString(),
+      },
+      localSequence: String(sequence),
+      dependsOnOperationIds: [],
+    }));
+    const first = operations[0];
+    const second = operations[1];
+    if (!first || !second) throw new Error('Batch fixture unavailable.');
+    const repository = app.get(OfflineOperationRepository);
+    const finish = repository.finish.bind(repository);
+    const completion = jest.spyOn(repository, 'finish').mockImplementation(async (...args) => {
+      if (args[2] === second.operationId) throw new Error('C06 later envelope completion failed');
+      return finish(...args);
+    });
+    try {
+      const response = await request(server)
+        .post('/v1/sync/push')
+        .set('authorization', `Bearer ${syncResponse.syncToken}`)
+        .send({ operations })
+        .expect(500);
+      expect(bodyOf(response)).toMatchObject({
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred.',
+      });
+      for (const [item, expected] of [
+        [first, 1],
+        [second, 0],
+      ] as const) {
+        expect(
+          (
+            await adminPool.query('select id from ledger.customers where store_id=$1 and id=$2', [
+              context.storeId,
+              item.aggregateId,
+            ])
+          ).rowCount,
+        ).toBe(expected);
+        expect(
+          (
+            await adminPool.query(
+              "select operation_id from sync.processed_operations where store_id=$1 and operation_id=$2 and status='applied'",
+              [context.storeId, item.operationId],
+            )
+          ).rowCount,
+        ).toBe(expected);
+        expect(
+          (
+            await adminPool.query(
+              "select operation_id from sync.offline_operation_provenance_v1 where store_id=$1 and operation_id=$2 and disposition='applied'",
+              [context.storeId, item.operationId],
+            )
+          ).rowCount,
+        ).toBe(expected);
+        expect(
+          (
+            await adminPool.query(
+              'select operation_id from sync.store_change_events_v1 where store_id=$1 and operation_id=$2',
+              [context.storeId, item.operationId],
+            )
+          ).rowCount,
+        ).toBe(expected);
+      }
+      expect(completion).toHaveBeenCalledTimes(2);
+      const pool = app.get<Pool>(DATABASE_POOL);
+      expect(pool.totalCount - pool.idleCount).toBe(0);
+      expect(pool.waitingCount).toBe(0);
+    } finally {
+      completion.mockRestore();
+    }
+    // One bounded replay observes the existing commit boundary. Protocol and
+    // canonical replay correctness remain Stage 3B/Stage 5 work.
+    const replay = bodyOf(
+      await request(server)
+        .post('/v1/sync/push')
+        .set('authorization', `Bearer ${syncResponse.syncToken}`)
+        .send({ operations })
+        .expect(200),
+    );
+    expect(replay.results).toEqual([
+      expect.objectContaining({ operationId: first.operationId, status: 'EXACT_REPLAY' }),
+      expect.objectContaining({ operationId: second.operationId, status: 'APPLIED' }),
+    ]);
+    for (const item of operations) {
+      expect(
+        (
+          await adminPool.query('select id from ledger.customers where store_id=$1 and id=$2', [
+            context.storeId,
+            item.aggregateId,
+          ])
+        ).rowCount,
+      ).toBe(1);
+    }
+  });
+
+  async function stage3aWriteContext(admin = false): Promise<TenantTransactionContext> {
+    if (!app) throw new Error('Application is not initialized.');
+    const session = await login(
+      admin ? 's18-6-admin@example.test' : 's18-6-owner@example.test',
+      admin ? fixtures.stores.auth : fixtures.stores.happy,
+    );
+    const context = {
+      ...directContext(
+        admin ? fixtures.stores.adminTarget : fixtures.stores.happy,
+        session.deviceId,
+      ),
+      userId: admin ? fixtures.users.admin : fixtures.users.owner,
+    };
+    const database = app.get(DatabaseService);
+    context.recoveryGenerationId = (
+      await database.withTenantTransaction(context, (tx) =>
+        database.capturePlatformRecoveryAuthority(tx),
+      )
+    ).recoveryGenerationId;
+    return context;
+  }
+
+  async function stage3aEffectCounts(storeId: string): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const table of [
+      'ledger.customers',
+      'ledger.money_movements',
+      'ledger.money_transfers',
+      'ledger.accounting_periods',
+      'sync.processed_operations',
+      'audit.central_audit_logs',
+      'sync.change_events',
+      'sync.store_change_events_v1',
+      'platform.admin_actions',
+    ]) {
+      counts[table] =
+        (
+          await adminPool.query<{ count: number }>(
+            `select count(*)::integer as count from ${table} where store_id=$1`,
+            [storeId],
+          )
+        ).rows[0]?.count ?? -1;
+    }
+    return counts;
+  }
+
+  it.each(['customer', 'platform-admin'] as const)(
+    'Stage 3A atomicity rolls back completed %s work before COMMIT',
+    async (kind) => {
+      if (!app) throw new Error('Application is not initialized.');
+      const context = await stage3aWriteContext(kind === 'platform-admin');
+      const before = await stage3aEffectCounts(context.storeId);
+      const storeBefore = (
+        await adminPool.query<{ status: string; version: string }>(
+          'select status, version::text from ledger.stores where id=$1',
+          [context.storeId],
+        )
+      ).rows;
+      const database = app.get(DatabaseService);
+      const original = database.withTenantTransaction.bind(database);
+      const failure = new Error('Stage 3A injected failure before COMMIT');
+      const operationId = randomUUID();
+      const customerId = randomUUID();
+      let reached = false;
+      const boundary = jest
+        .spyOn(database, 'withTenantTransaction')
+        .mockImplementation((scope, work) =>
+          original(scope, async (tx) => {
+            await work(tx);
+            reached = true;
+            if (kind === 'customer') {
+              expect(
+                (
+                  await tx.execute(
+                    sql`select id from ledger.customers where id=${customerId}::uuid`,
+                  )
+                ).rowCount,
+              ).toBe(1);
+              expect(
+                (
+                  await tx.execute(
+                    sql`select operation_id from sync.processed_operations where operation_id=${operationId}::uuid and status='applied'`,
+                  )
+                ).rowCount,
+              ).toBe(1);
+            } else {
+              expect(
+                (
+                  await tx.execute(
+                    sql`select status from ledger.stores where id=${context.storeId}::uuid`,
+                  )
+                ).rows[0]?.status,
+              ).toBe('suspended');
+            }
+            throw failure;
+          }),
+        );
+      try {
+        const pending =
+          kind === 'customer'
+            ? app.get(CustomerWriteService).create(principal(context), context, {
+                id: customerId,
+                operationId,
+                name: 'Stage 3A ordinary rollback',
+                phone: '0599000091',
+              })
+            : app
+                .get(PlatformAdminService)
+                .mutateStoreLifecycle(context, context.storeId, 'suspend', {
+                  operationId,
+                  expectedVersion: String(storeBefore[0]?.version),
+                  reason: 'Stage 3A rollback proof',
+                });
+        await expect(pending).rejects.toBe(failure);
+        expect(reached).toBe(true);
+        expect(await stage3aEffectCounts(context.storeId)).toEqual(before);
+        expect(
+          (
+            await adminPool.query('select status, version::text from ledger.stores where id=$1', [
+              context.storeId,
+            ])
+          ).rows,
+        ).toEqual(storeBefore);
+      } finally {
+        boundary.mockRestore();
+      }
+    },
+  );
+
+  it.each(['domain', 'infrastructure'] as const)(
+    'Stage 3A atomicity distinguishes Money Transfer %s rejection',
+    async (kind) => {
+      if (!app) throw new Error('Application is not initialized.');
+      const context = await stage3aWriteContext();
+      await fixturePool.query(
+        'insert into ledger.app_settings(store_id) values($1) on conflict do nothing',
+        [context.storeId],
+      );
+      const source = randomUUID();
+      const destination = randomUUID();
+      for (const id of [source, destination])
+        await fixturePool.query(
+          `insert into ledger.money_accounts(id, store_id, name, normalized_name, account_type, availability, status, operation_id)
+      values($1,$2,$3,$3,'transfer','available','active',$4)`,
+          [id, context.storeId, `C3A ${id}`, randomUUID()],
+        );
+      const before = await stage3aEffectCounts(context.storeId);
+      const balancesBefore = (
+        await adminPool.query(
+          'select account_id, balance_minor::text from ledger.v_money_account_balances where store_id=$1 order by account_id',
+          [context.storeId],
+        )
+      ).rows;
+      const operationId = randomUUID();
+      const movements = app.get(MoneyMovementPostingRepository);
+      const insert = movements.insertMovementWithinTransaction.bind(movements);
+      const failure = new Error('Stage 3A second movement infrastructure failure');
+      let stagedSource = false;
+      const injection = jest
+        .spyOn(movements, 'insertMovementWithinTransaction')
+        .mockImplementation(async (...args) => {
+          if (kind === 'infrastructure' && args[2].discriminator === 'transfer-destination')
+            throw failure;
+          const result = await insert(...args);
+          stagedSource = true;
+          return result;
+        });
+      try {
+        const pending = app.get(MoneyTransferWriteService).create(principal(context), context, {
+          operationId,
+          sourceAccountId: source,
+          destinationAccountId: kind === 'domain' ? source : destination,
+          amountMinor: '100',
+          occurredAt: new Date().toISOString(),
+        });
+        if (kind === 'domain')
+          await expect(pending).rejects.toMatchObject({
+            response: { code: 'MONEY_TRANSFER_SAME_ACCOUNT' },
+          });
+        else {
+          await expect(pending).rejects.toBe(failure);
+          expect(stagedSource).toBe(true);
+        }
+        const after = await stage3aEffectCounts(context.storeId);
+        expect(after).toEqual({
+          ...before,
+          'sync.processed_operations':
+            (before['sync.processed_operations'] ?? -1) + (kind === 'domain' ? 1 : 0),
+        });
+        expect(
+          (
+            await adminPool.query(
+              'select status from sync.processed_operations where store_id=$1 and operation_id=$2',
+              [context.storeId, operationId],
+            )
+          ).rows,
+        ).toEqual(kind === 'domain' ? [{ status: 'rejected' }] : []);
+        expect(
+          (
+            await adminPool.query(
+              'select account_id, balance_minor::text from ledger.v_money_account_balances where store_id=$1 order by account_id',
+              [context.storeId],
+            )
+          ).rows,
+        ).toEqual(balancesBefore);
+      } finally {
+        injection.mockRestore();
+      }
+    },
+  );
+
+  it('Stage 3A atomicity rolls back business, operation and audit when mandatory change publication fails', async () => {
+    if (!app) throw new Error('Application is not initialized.');
+    const context = await stage3aWriteContext();
+    const customers = app.get(CustomerWriteService);
+    await customers.create(principal(context), context, {
+      id: randomUUID(),
+      operationId: randomUUID(),
+      name: 'Stage 3A watermark seed',
+      phone: '0599000092',
+    });
+    const before = await stage3aEffectCounts(context.storeId);
+    const blocker = await adminPool.connect();
+    const database = app.get(DatabaseService);
+    const original = database.withTenantTransaction.bind(database);
+    let completedBody = false;
+    const boundary = jest
+      .spyOn(database, 'withTenantTransaction')
+      .mockImplementation((scope, work) =>
+        original(scope, async (tx) => {
+          await tx.execute(sql`set local lock_timeout='30ms'`);
+          const result = await work(tx);
+          completedBody = true;
+          await tx.execute(sql`set constraints all immediate`);
+          return result;
+        }),
+      );
+    try {
+      await blocker.query('begin');
+      expect(
+        (
+          await blocker.query(
+            'select store_id from sync.store_change_watermarks_v1 where store_id=$1 for update',
+            [context.storeId],
+          )
+        ).rowCount,
+      ).toBe(1);
+      const pending = customers.create(principal(context), context, {
+        id: randomUUID(),
+        operationId: randomUUID(),
+        name: 'Stage 3A change failure',
+        phone: '0599000093',
+      });
+      await expect(pending).rejects.toMatchObject({ cause: { code: '55P03' } });
+      expect(completedBody).toBe(true);
+      expect(await stage3aEffectCounts(context.storeId)).toEqual(before);
+    } finally {
+      boundary.mockRestore();
+      await blocker.query('rollback');
+      blocker.release();
+    }
   });
 
   it('issues a 7-day Store/device-bound License and exactly replays it', async () => {

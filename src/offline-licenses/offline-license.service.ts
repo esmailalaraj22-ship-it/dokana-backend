@@ -53,14 +53,19 @@ export class OfflineLicenseService {
     const input = this.prepare(context, operationId);
 
     try {
-      const record = await this.database.withTenantTransaction(context, async (transaction) => {
+      return await this.database.withTenantTransaction(context, async (transaction) => {
         await this.database.assertPlatformWriteAuthority(transaction);
         const prepared = await this.repository.prepare(transaction, context, input);
-        if (!prepared.requiresSignature) return prepared;
+        if (!prepared.requiresSignature) return this.mapResponse(operationId, prepared);
         const signed = this.crypto.sign(prepared.signedPayload);
-        return this.repository.complete(transaction, context, input, signed.signature);
+        const record = await this.repository.complete(
+          transaction,
+          context,
+          input,
+          signed.signature,
+        );
+        return this.mapResponse(operationId, record);
       });
-      return this.mapResponse(operationId, record);
     } catch (error) {
       this.translateDatabaseError(error);
     }

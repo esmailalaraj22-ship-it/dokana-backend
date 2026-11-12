@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 import type { SyncAuthenticatedPrincipal } from '../auth/auth.types';
 import type { DatabaseService } from '../database/database.service';
@@ -215,6 +217,84 @@ describe('OfflineOperationService', () => {
     );
     expect(transaction.execute).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['push', 'recover'] as const)(
+    'C03 keeps the savepoint alive through %s completion and preserves completion failure',
+    async (path) => {
+      const events: string[] = [];
+      transaction.execute = jest.fn((query: SQL) => {
+        events.push(new PgDialect().sqlToQuery(query).sql);
+        return Promise.resolve({ rows: [] });
+      }) as unknown as DatabaseTransaction['execute'];
+      registry.dispatch.mockImplementation(async () => {
+        events.push('dispatch');
+        return { id: 'result-id', version: '1' };
+      });
+      const completion = path === 'push' ? repository.finish : repository.finishRecovery;
+      const primary = new Error('completion failed');
+      completion.mockImplementationOnce(async () => {
+        events.push('finish');
+        throw primary;
+      });
+      const original = operation('60');
+      const request =
+        path === 'push'
+          ? service.push({ operations: [original] }, principal, context)
+          : service.recover(
+              String(original.operationId),
+              { operation: original },
+              principal,
+              context,
+            );
+      await expect(request).rejects.toBe(primary);
+      expect(events).toEqual([
+        `savepoint ${path === 'push' ? 's19_offline_domain' : 's19_offline_recovery_domain'}`,
+        'dispatch',
+        'finish',
+      ]);
+      expect(completion).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['push', 'recover'] as const)(
+    'C03 releases %s savepoint exactly once after successful completion',
+    async (path) => {
+      const events: string[] = [];
+      transaction.execute = jest.fn((query: SQL) => {
+        events.push(new PgDialect().sqlToQuery(query).sql);
+        return Promise.resolve({ rows: [] });
+      }) as unknown as DatabaseTransaction['execute'];
+      registry.dispatch.mockImplementation(async () => {
+        events.push('dispatch');
+        return { id: 'result-id' };
+      });
+      const completion = path === 'push' ? repository.finish : repository.finishRecovery;
+      completion.mockImplementationOnce(async () => {
+        events.push('finish');
+        return {
+          disposition: 'applied',
+          canonicalRequestHash: 'a'.repeat(64),
+          responseBody: { id: 'result-id' },
+        };
+      });
+      const original = operation('61');
+      if (path === 'push') await service.push({ operations: [original] }, principal, context);
+      else
+        await service.recover(
+          String(original.operationId),
+          { operation: original },
+          principal,
+          context,
+        );
+      const name = path === 'push' ? 's19_offline_domain' : 's19_offline_recovery_domain';
+      expect(events).toEqual([
+        `savepoint ${name}`,
+        'dispatch',
+        'finish',
+        `release savepoint ${name}`,
+      ]);
+    },
+  );
 
   it.each([
     ['exact_replay', 'EXACT_REPLAY'],

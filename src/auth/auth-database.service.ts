@@ -8,6 +8,7 @@ import { PinoLogger } from 'nestjs-pino';
 import type { Pool, PoolClient, QueryConfig } from 'pg';
 
 import type { DatabaseReadiness } from '../database/database.types';
+import { releasePostgresClient } from '../database/postgresql-client-lifecycle';
 import { AUTH_DATABASE_POOL } from './auth.constants';
 import type {
   AuthenticatedPrincipal,
@@ -155,7 +156,7 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
   async issueSession(input: SessionIssueInput): Promise<AuthenticatedPrincipal | undefined> {
     const client = await this.pool.connect();
     let transactionStarted = false;
-    let releaseError: Error | undefined;
+    let discardClient = true;
 
     try {
       await client.query('begin');
@@ -205,13 +206,13 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
 
       await client.query('commit');
       transactionStarted = false;
+      discardClient = false;
       return principal;
     } catch (error) {
       if (transactionStarted) {
         try {
           await client.query('rollback');
         } catch {
-          releaseError = new Error('Authentication transaction rollback failed.');
           this.logger.error({
             event: 'authentication_transaction_rollback_failed',
             clientDiscarded: true,
@@ -220,7 +221,7 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
       }
       throw error;
     } finally {
-      client.release(releaseError);
+      releasePostgresClient(client, discardClient);
     }
   }
 
@@ -414,14 +415,10 @@ export class AuthenticationDatabaseService implements OnApplicationBootstrap, On
           });
         }
       }
-      try {
-        client.release(true);
-      } catch {
-        // Preserve the primary failure if cleanup also fails.
-      }
+      releasePostgresClient(client, true);
       throw error;
     }
-    client.release();
+    releasePostgresClient(client, false);
     return response;
   }
 

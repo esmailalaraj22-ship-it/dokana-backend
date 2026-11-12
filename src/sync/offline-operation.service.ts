@@ -178,18 +178,9 @@ export class OfflineOperationService {
         }
 
         await transaction.execute(sql.raw('savepoint s19_offline_recovery_domain'));
+        let response: SyncJsonObject;
         try {
-          const response = await this.registry.dispatch(envelope, principal, context);
-          await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
-          const completed = await this.repository.finishRecovery(
-            transaction,
-            context.storeId,
-            envelope.operationId,
-            context.requestId,
-            'applied',
-            response,
-          );
-          return this.result(envelope.operationId, 'APPLIED', null, completed.responseBody);
+          response = await this.registry.dispatch(envelope, principal, context);
         } catch (error) {
           await transaction.execute(sql.raw('rollback to savepoint s19_offline_recovery_domain'));
           await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
@@ -205,6 +196,18 @@ export class OfflineOperationService {
           );
           return this.result(envelope.operationId, failure.status, failure.response.code);
         }
+        // Completion is infrastructure work, not a domain rejection. Any failure
+        // here must reach the outer rollback while this savepoint is still alive.
+        const completed = await this.repository.finishRecovery(
+          transaction,
+          context.storeId,
+          envelope.operationId,
+          context.requestId,
+          'applied',
+          response,
+        );
+        await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
+        return this.result(envelope.operationId, 'APPLIED', null, completed.responseBody);
       },
     );
   }
@@ -243,22 +246,9 @@ export class OfflineOperationService {
         }
 
         await transaction.execute(sql.raw('savepoint s19_offline_domain'));
+        let response: SyncJsonObject;
         try {
-          const response = await this.registry.dispatch(envelope, principal, context);
-          await transaction.execute(sql.raw('release savepoint s19_offline_domain'));
-          const completed = await this.repository.finish(
-            transaction,
-            context.storeId,
-            envelope.operationId,
-            'applied',
-            response,
-          );
-          return this.result(
-            envelope.operationId,
-            beginning.processedOperationPreexisted ? 'EXACT_REPLAY' : 'APPLIED',
-            null,
-            completed.responseBody,
-          );
+          response = await this.registry.dispatch(envelope, principal, context);
         } catch (error) {
           await transaction.execute(sql.raw('rollback to savepoint s19_offline_domain'));
           await transaction.execute(sql.raw('release savepoint s19_offline_domain'));
@@ -273,6 +263,20 @@ export class OfflineOperationService {
           );
           return this.result(envelope.operationId, failure.status, failure.response.code);
         }
+        const completed = await this.repository.finish(
+          transaction,
+          context.storeId,
+          envelope.operationId,
+          'applied',
+          response,
+        );
+        await transaction.execute(sql.raw('release savepoint s19_offline_domain'));
+        return this.result(
+          envelope.operationId,
+          beginning.processedOperationPreexisted ? 'EXACT_REPLAY' : 'APPLIED',
+          null,
+          completed.responseBody,
+        );
       },
     );
   }

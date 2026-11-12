@@ -184,6 +184,32 @@ describe('AuthenticationDatabaseService refresh commit boundary', () => {
     expect(events).toEqual(['begin', 'rotate', 'prepare', 'commit']);
   });
 
+  it('preserves committed refresh response when release fails and discards the client', async () => {
+    const { service, release, events } = harness('rotated');
+    release.mockImplementationOnce(() => {
+      throw new Error('release failed');
+    });
+    await expect(service.rotateRefreshToken(input, async () => 'prepared')).resolves.toBe(
+      'prepared',
+    );
+    expect(events).toEqual(['begin', 'rotate', 'commit']);
+    expect(release.mock.calls).toEqual([[], [true]]);
+  });
+
+  it('preserves refresh COMMIT failure when rollback also fails', async () => {
+    const { service, query, release } = harness('rotated');
+    const original = query.getMockImplementation();
+    const primary = new Error('COMMIT failed');
+    query.mockImplementation(async (statement) => {
+      if (statement === 'commit') throw primary;
+      if (statement === 'rollback') throw new Error('rollback failed');
+      if (!original) throw new Error('Missing query implementation');
+      return original(statement);
+    });
+    await expect(service.rotateRefreshToken(input, async () => 'prepared')).rejects.toBe(primary);
+    expect(release).toHaveBeenCalledWith(true);
+  });
+
   it('preserves signing failure when rollback and release also fail', async () => {
     const { service, query, release, events } = harness('rotated');
     const original = query.getMockImplementation();
@@ -203,7 +229,7 @@ describe('AuthenticationDatabaseService refresh commit boundary', () => {
     ).rejects.toBe(primary);
     expect(events).not.toContain('commit');
     expect(release).toHaveBeenCalledWith(true);
-    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it('discards an acquired client when BEGIN fails and preserves that error', async () => {
@@ -266,7 +292,50 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
   beforeEach(() => {
     jest.clearAllMocks();
+    query.mockReset();
+    release.mockReset();
     connect.mockResolvedValue(client);
+  });
+
+  it('preserves committed issuance when release fails and discards the client', async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...principal, deviceStatus: 'active' }] })
+      .mockResolvedValueOnce({ rows: [principal] })
+      .mockResolvedValueOnce({ rows: [] });
+    release.mockImplementationOnce(() => {
+      throw new Error('release failed');
+    });
+    await expect(service.issueSession(input)).resolves.toEqual(principal);
+    expect(query).toHaveBeenLastCalledWith('commit');
+    expect(release.mock.calls).toEqual([[], [true]]);
+  });
+
+  it('discards after BEGIN failure without masking it with a release failure', async () => {
+    const primary = new Error('BEGIN failed');
+    query.mockRejectedValueOnce(primary);
+    release.mockImplementationOnce(() => {
+      throw new Error('release failed');
+    });
+    await expect(service.issueSession(input)).rejects.toBe(primary);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls).toEqual([[true], [true]]);
+  });
+
+  it('preserves issuance COMMIT failure when rollback and release also fail', async () => {
+    const primary = new Error('COMMIT failed');
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ ...principal, deviceStatus: 'active' }] })
+      .mockResolvedValueOnce({ rows: [principal] })
+      .mockRejectedValueOnce(primary)
+      .mockRejectedValueOnce(new Error('rollback failed'));
+    release.mockImplementationOnce(() => {
+      throw new Error('release failed');
+    });
+    await expect(service.issueSession(input)).rejects.toBe(primary);
+    expect(query).toHaveBeenLastCalledWith('rollback');
+    expect(release).toHaveBeenCalledWith(true);
   });
 
   it('issues and recovery-validates on one connection before committing', async () => {
@@ -320,7 +389,7 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
     expect(query).toHaveBeenLastCalledWith('rollback');
     expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
-    expect(release).toHaveBeenCalledWith(undefined);
+    expect(release).toHaveBeenCalledWith(true);
   });
 
   it('rolls back malformed issuance results before recovery validation', async () => {
@@ -335,7 +404,7 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
     expect(query).toHaveBeenLastCalledWith('rollback');
     expect(query.mock.calls.some(([statement]) => statement === 'commit')).toBe(false);
-    expect(release).toHaveBeenCalledWith(undefined);
+    expect(release).toHaveBeenCalledWith(true);
   });
 
   it('discards the uncertain client while preserving the original error when rollback fails', async () => {
@@ -352,10 +421,7 @@ describe('AuthenticationDatabaseService recovery-aware session issuance', () => 
 
     expect(query).toHaveBeenLastCalledWith('rollback');
     expect(release).toHaveBeenCalledTimes(1);
-    expect(release).toHaveBeenCalledWith(expect.any(Error));
-    const releasedWith = release.mock.calls[0]?.[0];
-    if (!(releasedWith instanceof Error)) throw new Error('Expected a client release error.');
-    expect(releasedWith.message).toBe('Authentication transaction rollback failed.');
+    expect(release).toHaveBeenCalledWith(true);
     expect(logger.error).toHaveBeenCalledWith({
       event: 'authentication_transaction_rollback_failed',
       clientDiscarded: true,
