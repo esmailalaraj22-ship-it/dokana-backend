@@ -2843,3 +2843,69 @@ Reviewed baseline: `fcbc36eb605e541f457e8317e72935c70bd6600a`; reviewed implemen
 
 Unresolved Stage 2B findings and owner decisions: zero. Ready for Stage 3 under the approved
 master review strategy; Stage 3 was not started. Production and final artifact gates remain separate.
+
+### Stage 3A Independent Transaction Review Closure — 2026-11-13
+
+Stage 3A is PASS within transaction lifecycle and representative atomicity scope. Reviewed baseline:
+`699e2d58ad3be9399589cdff9a88fe9289cc9043`; reviewed implementation HEAD:
+`ad1a7835e2168e6c276320cfb7a7e424cf0e7854` (`fix(db): harden transaction lifecycle correctness`).
+This Roadmap-only closure follows the implementation commit.
+
+- Architecture reconnaissance identified the shared Drizzle/PoolClient owner, transaction-local
+  tenant context, explicit savepoints, offline AsyncLocalStorage reuse, per-envelope commits and
+  the two manual Auth transaction paths. Ordinary nested wrappers outside offline scope use
+  independent connections; no unintended nested write wrapper was found in the bounded callers.
+- C01 CLOSED: primary callback, COMMIT and savepoint failures survive rollback/cleanup errors.
+  C02 CLOSED: confirmed COMMIT remains successful despite release failure; response preparation
+  that can fail happens before commit in Offline License issuance.
+  C03 CLOSED: offline push/recover completion retains its savepoint until completion succeeds.
+  C04 CLOSED: explicit nesting and offline reuse preserve the intended transaction/context fate.
+  C05 CLOSED: statement/lock timeouts and connection loss preserve error truth and pool capacity.
+  C06 CLOSED: a later failed envelope does not erase an earlier envelope's committed effects.
+- F01 CLOSED: protect primary errors recursively and abort the outer transaction after failed
+  savepoint cleanup even when its caller catches the inner error. F02 CLOSED: protect committed
+  results and evict half-released clients, including throwing pg-pool release listeners.
+  F03 CLOSED: Offline License verification/response mapping now precedes COMMIT.
+  F04 CLOSED: offline completion failures reach outer rollback without targeting a released
+  savepoint. F05 (Medium) CLOSED: real PostgreSQL reproduced false failure after committed Auth
+  issuance/refresh. Both manual paths now use the same small release helper; failed issuance
+  discards its client, including BEGIN failure. Auth was not moved into the Drizzle wrapper.
+- Auth proofs assert session/JTI, old/new refresh-token and family state, no duplicate state,
+  successful surfaced result, eviction, a different next backend and recovered pool capacity.
+  Unit cases cover normal, BEGIN, COMMIT, rollback, preparation and release failures. Token,
+  claims, duration, rotation/reuse, device, recovery-generation and API semantics are unchanged.
+- Representative Customer, Platform Admin, Money Transfer and offline operations prove rollback
+  against authoritative PostgreSQL business state, processed operations, audit and change events.
+  A real ordered-change publication lock timeout rolls back already-staged business/audit effects.
+  Intentional domain rejection commits its rejection record without financial effects.
+  Partial effects, duplicate effects, leaked contexts/connections, broken reuse, capacity loss and
+  unresolved premature callback completion: zero in the selected checks. The final async review
+  was limited to changed transaction-critical paths; no repository-wide audit was performed.
+- Consolidated focused regression: **82 unit tests / 7 files and 37 PostgreSQL integration tests
+  / 5 files PASS**. Integration selection: 24 lifecycle/nesting/timeout cases, 12 `Stage 3A`
+  cases in `offline-license.integration-spec.ts`, and its normal issuance case. Four HTTP
+  scenarios assert durable state; Auth cleanup injection uses the real service and PostgreSQL.
+  Seven unrelated cases in the mixed integration file were deliberately excluded. After lint
+  corrections, the three affected release/fixture-cleanup cases passed again. `typecheck`,
+  `lint`, `build`, `db:migrate:verify`, `db:check`, and `git diff --check` PASS.
+- Refresh-token orphan definition: no `platform.auth_sessions.id` matches `session_id`; the
+  actual FK is validated and specifies ON DELETE CASCADE. The pre-existing **6,548** rows remain
+  UNATTRIBUTED: zero proven current-fixture, other-fixture or legitimate ownership assignments
+  from bounded inspection. Counts and complete-row fingerprints remained unchanged across tests.
+  Teardown explicitly deletes tokens of the three exact fixture users' identifiable sessions
+  before deleting those sessions, because the fixture connection suppresses FK cascades.
+  New orphans: **0**. Safely removed current-run fixture tokens: **20 in this resume**, including
+  **14 in the consolidated regression**; pre-existing orphan rows deleted: **0**.
+  PRE-EXISTING UNATTRIBUTED REFRESH-TOKEN RESIDUE — NOT DELETED WITHOUT PROVEN OWNERSHIP.
+- Local PostgreSQL remains **39 applied / 0 pending**. Database/schema/function/RLS/trigger,
+  migration, dependency, environment and API deltas: **0**; migration 0040: **NONE**. Temporary
+  databases created by this stage, remaining fixture users/stores, test connections and open
+  test transactions: **0**. No applied migration or reference package was changed.
+- Deferred to Stage 3B: **AMBIGUOUS COMMIT RECONCILIATION** and **OFFLINE BATCH RETRY / REPLAY**.
+  The acknowledgment-loss proof uses a real commit with a controlled driver-boundary fault,
+  not packet-level network chaos. It preserves uncertainty and adds no automatic retry policy.
+  Full unit/integration, accounting/inventory, offline/sync, recovery/DR, clean-install and release
+  campaigns were not run. Production readiness and external release approval remain separate.
+
+Unresolved Critical/High transaction findings: zero within this review. Ready for Stage 3B under
+the approved master sequence; Stage 3B was not started.
