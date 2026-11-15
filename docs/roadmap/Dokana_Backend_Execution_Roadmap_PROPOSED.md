@@ -2990,3 +2990,66 @@ integration, full accounting/inventory, synchronization architecture, recovery/D
 `06_runtime_tests.sql`, clean-install and release campaigns were not rerun. This is a bounded
 Stage 3B review, not production approval or a separate external Fable sign-off. Ready for Stage 4
 under the approved sequence, subject to the owner's progression gate; **do not start it here**.
+
+### Stage 4A Independent Master Data / Store Settings Closure — 2026-11-15
+
+Stage 4A is **PASS** within the approved foundational runtime-verification scope. Starting
+checkpoint: `main`, HEAD/origin `495d595688a376e6b0c0f09fae23250bd72a0ead`, clean, 0/0,
+PostgreSQL **39 applied / 0 pending**. Stage 4A.1 mapping was reused; closed foundation
+reviews were not reopened. **Stage 4B was not started.**
+
+- **S4A2-01 PASS:** real HTTP catalog edits preserve complete PostgreSQL historical rows:
+  quantities, conversions, prices/amounts, cost states, Product/Unit IDs, effect identities,
+  original processed-operation results and existing audit/change rows. Known positive,
+  known zero, unknown/null and pending costs remain distinct after price changes to zero
+  and null. An explicitly prepared legacy `estimated` compatibility fixture is also preserved;
+  current Sale posting does not emit that state. Structural Product/Unit changes are rejected
+  before claiming, with unchanged masters and historical evidence.
+- **S4A2-02 PASS:** referenced Customer, Supplier, Product, Unit and Money Account archive/
+  restore preserves UUIDs and history. Default master lists exclude archived records; detail
+  reads retain history, including archived Units. Customer/Supplier phones, Product SKU,
+  Unit name and Money Account name remain reserved. Base-unit lifecycle rules, no-cascade
+  Product archive and system Cash protection hold. Independently seeded receivable/payable
+  and credit dimensions reject archival through their exact financial error codes; eligible
+  zero states archive successfully. Archive creates no settlement, balance or inventory effect.
+  Runtime connections with normal triggers reject foreign-Store Customer/Supplier/Account
+  references, foreign Product/Unit references and same-Store wrong-Product Units. HTTP DELETE
+  is unavailable for masters; direct runtime DELETE fails for all five master tables.
+- **S4A2-03 PASS:** allowed settings edits leave historical occurredAt, business/posting dates,
+  period IDs, amounts, quantities and costs unchanged. A narrow credit-policy example accepts
+  the original operation, blocks a new operation after changing policy, and preserves the
+  original replay. Timezone, business-day mode and cutoff mutations are rejected. A stale
+  Product update leaves the master and historical facts unchanged.
+- Evidence is full-row PostgreSQL JSON text across 18 business tables plus operation, audit
+  and both change-feed tables, preserving bigint precision. Production workflows use the
+  existing isolated HTTP fixture and runtime role. Administrative preparation is limited to
+  fixtures (including independent financial dimensions and legacy estimated cost); it is
+  not evidence that current posting produces those compatibility states. All preservation,
+  lifecycle and rejection checks exercise actual production code/database behavior.
+- **Confirmed findings: Critical 0 / High 0 / Medium 0 / Low 0. Production fixes: NONE.**
+  One initial test expected an FK error where the inventory BEFORE trigger correctly rejects
+  invalid lineage first; the proof now asserts its exact `23514` message. Two test-only lint
+  typing issues were corrected. No production constraint, trigger or assertion was weakened.
+- Final focused command: `npm.cmd run test:integration -- --runTestsByPath
+  test/sale-posting.integration-spec.ts --testNamePattern=S4A2`.
+  Result: **4 PASS / 1 file / 14 intentionally unselected / 31.478 seconds / exit 0**.
+  `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`,
+  `npm.cmd run db:migrate:verify`, `npm.cmd run db:check`, and `git diff --check`: **PASS**.
+  The final typing-only lint correction passed typecheck/lint and does not change runtime
+  assertions. Focused unit tests were not run; this task's proof is PostgreSQL/HTTP integration.
+  Full unit/integration, accounting/inventory, sync, recovery/DR, baseline runtime and release
+  suites were not run. This is bounded Stage 4A approval, not production or external Fable sign-off.
+- Database/schema/migration, production, dependency, environment and API deltas: **0**.
+  Migration ceiling remains **0039; 0040+ NONE**. Changes are limited to the existing Sale
+  integration test file (reusing its disposable database/application setup) and this Roadmap.
+  Cleanup inspection: temporary databases **0**, idle transactions **0**, other test connections
+  **0**, development Stores/Users/Devices **0**, attributable Stage 4A residue **0**. Known
+  historical counts remain 540 central audit rows, 772 legacy change rows and 6,548 refresh
+  tokens; none was deleted to obtain this result.
+
+Later candidates, **NOT INVESTIGATED**: **4B** costing resolution/projection agreement and
+negative-stock precedence; **4C** payable/payment accounting and historical Supplier display;
+**4D** receivable/credit-policy precedence and historical Customer display; **4E** period,
+correction-date and DST boundaries; **4F** opening balances and historical account presentation.
+No database-change candidate or new backend-owner decision was established. **Stage 4A PASS;
+ready for Stage 4B under the owner's progression gate. Do not start Stage 4B here.**
