@@ -156,7 +156,7 @@ export class ExpensePaymentRepository {
     command: ExpensePaymentCommand,
     postingDate: string,
   ): Promise<ExpensePaymentPostingResult> {
-    const paymentId = deriveMoneyFactId(command.operationId, 'expense-payment');
+    const paymentId = deriveMoneyFactId(context.storeId, command.operationId, 'expense-payment');
     return this.database.withTenantTransaction(context, async (transaction) => {
       const replay = await this.beginMutation(transaction, context, command, paymentId);
       if (replay) return replay;
@@ -179,7 +179,7 @@ export class ExpensePaymentRepository {
     command: ExpensePaymentCommand,
     postingDate: string,
   ): Promise<ExpensePaymentPostingResponse> {
-    const paymentId = deriveMoneyFactId(command.operationId, 'expense-payment');
+    const paymentId = deriveMoneyFactId(context.storeId, command.operationId, 'expense-payment');
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
     const expense = await this.lockExpense(transaction, context.storeId, command.expenseId);
     const before = await this.readSettlement(transaction, context.storeId, command.expenseId);
@@ -237,8 +237,12 @@ export class ExpensePaymentRepository {
         transaction,
         context,
         {
-          id: deriveMoneyFactId(command.operationId, 'expense-payment-owner'),
-          operationId: deriveMoneyFactOperationId(command.operationId, 'expense-payment-owner'),
+          id: deriveMoneyFactId(context.storeId, command.operationId, 'expense-payment-owner'),
+          operationId: deriveMoneyFactOperationId(
+            context.storeId,
+            command.operationId,
+            'expense-payment-owner',
+          ),
           entryType: 'owner_paid_expense',
           ownerLiabilityDeltaMinor: command.amountMinor,
           equityDeltaMinor: 0n,

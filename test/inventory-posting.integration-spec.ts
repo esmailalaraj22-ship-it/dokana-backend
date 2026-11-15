@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 import type { Server } from 'node:http';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -300,13 +301,24 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
       expect(await facts(p.productId)).toEqual({ entries: 1, movements: 1, balances: 1 });
     }
   });
-  it('serializes duplicate operation IDs into one accepted fact and exact response', async () => {
+  it('Stage 3B B01 Inventory serializes duplicate operation IDs into one accepted fact and exact response', async () => {
     const p = await product(),
       body = input(p);
     const results = await Promise.all([post('increase', body), post('increase', body)]);
     expect(results.map((r) => r.status)).toEqual([201, 201]);
     expect(results[0].body).toEqual(results[1].body);
     expect(await facts(p.productId)).toEqual({ entries: 1, movements: 1, balances: 1 });
+    const posted = results[0].body as InventoryPostingResponse;
+    expect(
+      (
+        await db().admin.query(
+          `select id, quantity_delta_milli::text as quantity,
+      cost_status as cost from ledger.inventory_movements where store_id=$1 and product_id=$2`,
+          [principal.storeId, p.productId],
+        )
+      ).rows,
+    ).toEqual([{ id: posted.movementId, quantity: '1000', cost: 'unknown' }]);
+    expect(posted.stock.baseQuantityMilli).toBe('1000');
   });
   it.each([
     ['count', 10, 1, '10000'],
@@ -517,16 +529,26 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
       stock: { baseQuantityMilli: '9007199254740993', cost: { valueMinor: '9007199254740993' } },
     });
   });
-  it('rejects changed payload/cost presence/command type and persists conflict without duplicate stock', async () => {
+  it('Stage 3B B03 rejects changed payload/cost presence/command type and persists conflict without duplicate stock', async () => {
     const p = await product(),
       body = input(p);
     await post('increase', body).expect(201);
+    const tables = [
+      'ledger.manual_inventory_entries',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    const before = await captureReplayEvidence(db().admin, principal.storeId, tables);
     for (const change of [
       { totalPurchaseCostMinor: '0' },
       { selectedQuantityMilli: '2000' },
       { reason: 'different' },
-    ])
+    ]) {
       await post('increase', { ...body, ...change }).expect(409);
+      const after = await captureReplayEvidence(db().admin, principal.storeId, tables);
+      for (const table of [...tables, 'sync.processed_operations'])
+        expect(after[table]).toEqual(before[table]);
+    }
     await post('opening', body).expect(409);
     expect(await facts(p.productId)).toEqual({ entries: 1, movements: 1, balances: 1 });
     expect(
@@ -538,7 +560,7 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
       ).rows[0],
     ).toEqual({ count: 4 });
   });
-  it('replays completed success despite later unit/product/tracking/read_only changes; blocks new writes', async () => {
+  it('Stage 3B B01 Inventory replays completed success despite later unit/product/tracking/read_only changes; blocks new writes', async () => {
     const p = await product(),
       body = input(p);
     const a = await post('increase', body).expect(201);
@@ -554,8 +576,18 @@ describe('S11.4 manual inventory posting on isolated real PostgreSQL', () => {
       principal.storeId,
     ]);
     try {
+      const tables = [
+        'ledger.manual_inventory_entries',
+        'ledger.inventory_movements',
+        'ledger.stock_balances',
+      ];
+      const beforeReplay = await captureReplayEvidence(db().admin, principal.storeId, tables);
       const b = await post('increase', body).expect(201);
       expect(b.body).toEqual(a.body);
+      expect(b.body).toMatchObject({ costStatus: 'unknown', stock: { baseQuantityMilli: '1000' } });
+      expect(await captureReplayEvidence(db().admin, principal.storeId, tables)).toEqual(
+        beforeReplay,
+      );
       await post('increase', input(p)).expect(403);
     } finally {
       await db().admin.query(`update ledger.stores set status='active' where id=$1`, [

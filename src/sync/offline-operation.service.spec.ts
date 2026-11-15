@@ -391,6 +391,48 @@ describe('OfflineOperationService', () => {
     },
   );
 
+  it.each(['push', 'recover'] as const)(
+    'Stage 3B B05 returns the stored domain rejection on first %s and replay',
+    async (path) => {
+      const original = operation('62');
+      const code = 'DOMAIN_REJECTED';
+      const responseBody = { code, message: 'Offline operation was rejected.' };
+      registry.dispatch.mockRejectedValueOnce(new BadRequestException({ code }));
+      const finish = path === 'push' ? repository.finish : repository.finishRecovery;
+      const begin = path === 'push' ? repository.begin : repository.beginRecovery;
+      finish.mockResolvedValueOnce({
+        disposition: 'rejected',
+        canonicalRequestHash: null,
+        responseBody,
+      });
+      const run = async () =>
+        path === 'push'
+          ? (await service.push({ operations: [original] }, principal, context)).results[0]
+          : await service.recover(
+              String(original.operationId),
+              { operation: original },
+              principal,
+              context,
+            );
+      const first = await run();
+      expect(first).toEqual({
+        operationId: original.operationId,
+        status: 'REJECTED',
+        code,
+        response: responseBody,
+      });
+      begin.mockResolvedValueOnce({
+        disposition: 'rejected',
+        reasonCode: code,
+        responseBody,
+        processedOperationPreexisted: false,
+      });
+      expect(await run()).toEqual(first);
+      expect(registry.dispatch).toHaveBeenCalledTimes(1);
+      expect(finish).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('orders valid items by local sequence while preserving result positions and item isolation', async () => {
     const third = operation('3');
     const first = operation('1');

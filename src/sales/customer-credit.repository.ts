@@ -195,8 +195,12 @@ export class CustomerCreditRepository {
     context: TenantTransactionContext,
     spec: CustomerReturnLedgerEffectInsert,
   ): Promise<CustomerReturnLedgerEffect> {
-    const id = deriveMoneyFactId(spec.commandOperationId, spec.discriminator);
-    const operationId = deriveMoneyFactOperationId(spec.commandOperationId, spec.discriminator);
+    const id = deriveMoneyFactId(context.storeId, spec.commandOperationId, spec.discriminator);
+    const operationId = deriveMoneyFactOperationId(
+      context.storeId,
+      spec.commandOperationId,
+      spec.discriminator,
+    );
     const rows = await transaction
       .insert(customerLedgerEntries)
       .values({
@@ -273,8 +277,12 @@ export class CustomerCreditRepository {
         throw new CustomerReturnCreditDependencyError('INTEGRITY_CONFLICT');
       }
       const discriminator = `sale-return-ledger-reversal:${effect.id}`;
-      const id = deriveMoneyFactId(input.commandOperationId, discriminator);
-      const operationId = deriveMoneyFactOperationId(input.commandOperationId, discriminator);
+      const id = deriveMoneyFactId(context.storeId, input.commandOperationId, discriminator);
+      const operationId = deriveMoneyFactOperationId(
+        context.storeId,
+        input.commandOperationId,
+        discriminator,
+      );
       await transaction.insert(customerLedgerEntries).values({
         id,
         storeId: context.storeId,
@@ -388,7 +396,7 @@ export class CustomerCreditRepository {
     if (!command.moneyAccountId) throw new Error('Customer Credit refund account is missing.');
     await this.lockMoneyAccount(transaction, context.storeId, command.moneyAccountId);
     const discriminator = 'customer-credit-refund-ledger';
-    const id = deriveMoneyFactId(command.operationId, discriminator);
+    const id = deriveMoneyFactId(context.storeId, command.operationId, discriminator);
     return this.insertLedgerEffect(transaction, context, command, posting, {
       id,
       discriminator,
@@ -442,7 +450,7 @@ export class CustomerCreditRepository {
       const discriminator = `${command.action}:${target.targetType}:${target.targetId}`;
       effects.push(
         await this.insertLedgerEffect(transaction, context, command, posting, {
-          id: deriveMoneyFactId(command.operationId, discriminator),
+          id: deriveMoneyFactId(context.storeId, command.operationId, discriminator),
           discriminator,
           entryType: command.action === 'apply_customer_credit' ? 'credit_used' : 'settlement',
           receivableDeltaMinor: -target.amountMinor,
@@ -479,7 +487,11 @@ export class CustomerCreditRepository {
       transactionGroupId: string;
     },
   ): Promise<CustomerFinancialLedgerEffect> {
-    const operationId = deriveMoneyFactOperationId(command.operationId, spec.discriminator);
+    const operationId = deriveMoneyFactOperationId(
+      context.storeId,
+      command.operationId,
+      spec.discriminator,
+    );
     const rows = await transaction
       .insert(customerLedgerEntries)
       .values({

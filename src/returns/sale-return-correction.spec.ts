@@ -175,15 +175,17 @@ describe('S17.5 immutable Sale Return correction contracts', () => {
   });
 
   it('accepts only internally consistent stored cancellation responses', () => {
-    expect(parseStoredSaleReturnCorrectionResponse(cancelResponse())).toEqual(cancelResponse());
+    expect(parseStoredSaleReturnCorrectionResponse(storeId, cancelResponse())).toEqual(
+      cancelResponse(),
+    );
     expect(() =>
-      parseStoredSaleReturnCorrectionResponse({
+      parseStoredSaleReturnCorrectionResponse(storeId, {
         ...cancelResponse(),
         outcome: { ...cancelResponse().outcome, activeReturnId: randomUUID() },
       }),
     ).toThrow('Stored Sale Return correction response is inconsistent.');
     expect(() =>
-      parseStoredSaleReturnCorrectionResponse({
+      parseStoredSaleReturnCorrectionResponse(storeId, {
         ...cancelResponse(),
         transactionGroupId: randomUUID(),
       }),

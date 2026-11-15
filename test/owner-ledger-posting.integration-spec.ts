@@ -275,6 +275,15 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     await adminPool.query('delete from platform.users where id = any($1::uuid[])', [
       Object.values(fixture.users),
     ]);
+    for (const table of [
+      'platform.store_memberships',
+      'sync.store_change_events_v1',
+      'sync.store_change_watermarks_v1',
+    ]) {
+      await adminPool.query('delete from ' + table + ' where store_id = any($1::uuid[])', [
+        storeIds,
+      ]);
+    }
     await adminPool.query('delete from ledger.stores where id = any($1::uuid[])', [storeIds]);
   }
 
@@ -338,6 +347,11 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
         `S10.3 ${key} store`,
         key === 'readOnly' ? 'read_only' : 'active',
       ]);
+      await adminPool.query(
+        `insert into platform.store_memberships(id,store_id,user_id,role,status)
+         values($1,$2,$3,'owner','active')`,
+        [randomUUID(), fixture.stores[key], fixture.users[key]],
+      );
       await adminPool.query(
         `insert into ledger.devices (
            id, store_id, device_name, platform, installation_id, device_prefix, status
@@ -427,7 +441,10 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
       idleTransactions: number;
     }>(
       `select
-        ((select count(*) from ledger.owner_ledger_entries where store_id = any($1::uuid[]))
+        ((select count(*) from platform.store_memberships where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_events_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_watermarks_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from ledger.owner_ledger_entries where store_id = any($1::uuid[]))
           + (select count(*) from ledger.money_movements where store_id = any($1::uuid[]))
           + (select count(*) from ledger.money_accounts where store_id = any($1::uuid[]))
           + (select count(*) from ledger.accounting_periods where store_id = any($1::uuid[]))
@@ -597,8 +614,12 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     );
     expect(positive.movements).toEqual([
       expect.objectContaining({
-        id: deriveMoneyFactId(positiveRequest.operationId, 'opening'),
-        operationId: deriveMoneyFactOperationId(positiveRequest.operationId, 'opening'),
+        id: deriveMoneyFactId(fixture.stores.active, positiveRequest.operationId, 'opening'),
+        operationId: deriveMoneyFactOperationId(
+          fixture.stores.active,
+          positiveRequest.operationId,
+          'opening',
+        ),
         movementType: 'opening_balance',
         amountDeltaMinor: '125000',
         transactionGroupId: positiveRequest.operationId,
@@ -699,8 +720,12 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
       amountDeltaMinor: '300',
     });
     expect(contribution.ownerEntries[0]).toMatchObject({
-      id: deriveMoneyFactId(contributionRequest.operationId, 'owner-entry'),
-      operationId: deriveMoneyFactOperationId(contributionRequest.operationId, 'owner-entry'),
+      id: deriveMoneyFactId(fixture.stores.active, contributionRequest.operationId, 'owner-entry'),
+      operationId: deriveMoneyFactOperationId(
+        fixture.stores.active,
+        contributionRequest.operationId,
+        'owner-entry',
+      ),
       entryType: 'capital_contribution',
       ownerLiabilityDeltaMinor: '0',
       equityDeltaMinor: '300',
@@ -724,10 +749,26 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     );
     expect(linkedContribution.rows).toEqual([
       {
-        moneyId: deriveMoneyFactId(contributionRequest.operationId, 'owner-money'),
-        ownerId: deriveMoneyFactId(contributionRequest.operationId, 'owner-entry'),
-        moneyReferenceId: deriveMoneyFactId(contributionRequest.operationId, 'owner-entry'),
-        ownerReferenceId: deriveMoneyFactId(contributionRequest.operationId, 'owner-money'),
+        moneyId: deriveMoneyFactId(
+          fixture.stores.active,
+          contributionRequest.operationId,
+          'owner-money',
+        ),
+        ownerId: deriveMoneyFactId(
+          fixture.stores.active,
+          contributionRequest.operationId,
+          'owner-entry',
+        ),
+        moneyReferenceId: deriveMoneyFactId(
+          fixture.stores.active,
+          contributionRequest.operationId,
+          'owner-entry',
+        ),
+        ownerReferenceId: deriveMoneyFactId(
+          fixture.stores.active,
+          contributionRequest.operationId,
+          'owner-money',
+        ),
       },
     ]);
     const commandClaims = await adminPool.query<{ count: number }>(
@@ -739,8 +780,16 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
         fixture.stores.active,
         [
           contributionRequest.operationId,
-          deriveMoneyFactOperationId(contributionRequest.operationId, 'owner-money'),
-          deriveMoneyFactOperationId(contributionRequest.operationId, 'owner-entry'),
+          deriveMoneyFactOperationId(
+            fixture.stores.active,
+            contributionRequest.operationId,
+            'owner-money',
+          ),
+          deriveMoneyFactOperationId(
+            fixture.stores.active,
+            contributionRequest.operationId,
+            'owner-entry',
+          ),
         ],
       ],
     );
@@ -864,7 +913,7 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
     ).toBe(20n);
   });
 
-  it('returns the original stored snapshot on exact replay after later state changes', async () => {
+  it('Stage 3B B02 returns the original stored snapshot on exact replay after later state changes', async () => {
     const rollbackPrincipal = principal('rollback');
     const operation = ownerRequest(fixture.accounts.rollback, '25');
     const original = await writes.postContribution(
@@ -926,7 +975,11 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
 
   it('rolls back the Money Movement, command claim, and response if Owner fact insertion fails', async () => {
     const operationId = randomUUID();
-    const collidingOwnerOperationId = deriveMoneyFactOperationId(operationId, 'owner-entry');
+    const collidingOwnerOperationId = deriveMoneyFactOperationId(
+      fixture.stores.rollback,
+      operationId,
+      'owner-entry',
+    );
     const seededId = randomUUID();
     await adminPool.query(
       `insert into ledger.owner_ledger_entries (
@@ -953,7 +1006,7 @@ describe('Opening Balance and Owner Ledger with real PostgreSQL', () => {
         ownerRequest(fixture.accounts.rollback, '7', { operationId }),
       ),
     ).rejects.toBeDefined();
-    const movementId = deriveMoneyFactId(operationId, 'owner-money');
+    const movementId = deriveMoneyFactId(fixture.stores.rollback, operationId, 'owner-money');
     const movement = await adminPool.query<{ count: number }>(
       'select count(*)::integer as count from ledger.money_movements where id = $1',
       [movementId],

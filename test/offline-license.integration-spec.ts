@@ -33,6 +33,7 @@ import type {
   OfflineLicenseResponse,
 } from '../src/offline-licenses/offline-license.types';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 const environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
@@ -1294,7 +1295,7 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
     }
   });
 
-  it('issues a 7-day Store/device-bound License and exactly replays it', async () => {
+  it('Stage 3B B06 replays a historical signed License after Subscription extension without reissuing', async () => {
     const session = await login('s18-6-owner@example.test', fixtures.stores.happy);
     const operationId = randomUUID();
     const first = await request(server)
@@ -1329,6 +1330,24 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
         Date.parse(firstBody.license.payload.issuedAt),
     ).toBe(168 * 60 * 60 * 1_000);
 
+    const admin = await login('s18-6-admin@example.test', fixtures.stores.auth);
+    await request(server)
+      .post(`/v1/admin/stores/${fixtures.stores.happy}/subscriptions/extend`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ operationId: randomUUID(), reason: 'Stage 3B later entitlement extension' })
+      .expect(200);
+    const current = await adminPool.query<{ expiresAt: Date }>(
+      'select expires_at as "expiresAt" from platform.subscriptions where id=$1',
+      [subscriptionIds.get(fixtures.stores.happy)],
+    );
+    expect(current.rows[0]?.expiresAt.getTime()).toBeGreaterThan(
+      Date.parse(firstBody.subscriptionValidUntil),
+    );
+    const evidence = await captureReplayEvidence(adminPool, fixtures.stores.happy, [
+      'platform.license_issuances',
+      'platform.subscriptions',
+      'platform.admin_actions',
+    ]);
     const replay = await request(server)
       .post('/v1/licenses/verify')
       .set('Authorization', `Bearer ${session.token}`)
@@ -1338,6 +1357,14 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
     expect(replayBody.replayed).toBe(true);
     expect(replayBody.license).toEqual(firstBody.license);
     expect(replayBody.serverTime).toBe(firstBody.serverTime);
+    expect(replayBody).toEqual({ ...firstBody, replayed: true });
+    expect(
+      await captureReplayEvidence(adminPool, fixtures.stores.happy, [
+        'platform.license_issuances',
+        'platform.subscriptions',
+        'platform.admin_actions',
+      ]),
+    ).toEqual(evidence);
   });
 
   it('caps validity at Subscription end and rejects ineligible central states and devices', async () => {
@@ -1372,15 +1399,19 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
     }
   });
 
-  it('provides deterministic conflict and one issuance under concurrent duplicate requests', async () => {
+  it('Stage 3B B06 preserves License identity conflict and one concurrent issuance', async () => {
     const firstSession = await login('s18-6-owner@example.test', fixtures.stores.happy);
     const secondSession = await login('s18-6-owner@example.test', fixtures.stores.happy);
     const conflictOperation = randomUUID();
-    await request(server)
+    const accepted = await request(server)
       .post('/v1/licenses/verify')
       .set('Authorization', `Bearer ${firstSession.token}`)
       .send({ operationId: conflictOperation })
       .expect(200);
+    const evidence = await captureReplayEvidence(adminPool, fixtures.stores.happy, [
+      'platform.license_issuances',
+      'platform.admin_actions',
+    ]);
     await request(server)
       .post('/v1/licenses/verify')
       .set('Authorization', `Bearer ${secondSession.token}`)
@@ -1389,6 +1420,15 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       .expect(({ body }) => {
         expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' });
       });
+    expect(
+      await captureReplayEvidence(adminPool, fixtures.stores.happy, [
+        'platform.license_issuances',
+        'platform.admin_actions',
+      ]),
+    ).toEqual(evidence);
+    expect((bodyOf(accepted) as unknown as OfflineLicenseResponse).license.payload.deviceId).toBe(
+      firstSession.deviceId,
+    );
 
     const duplicateOperation = randomUUID();
     const responses = await Promise.all(
@@ -1412,6 +1452,14 @@ describeWithPostgres('S18.6 signed Offline License authority', () => {
       [fixtures.stores.happy, duplicateOperation],
     );
     expect(count.rows[0]?.count).toBe(1);
+    expect(
+      (
+        await adminPool.query(
+          `select count(*)::int as count from platform.license_issuances l join sync.processed_operations p on p.store_id=l.store_id and p.aggregate_id=l.id where p.store_id=$1 and p.operation_id=$2`,
+          [fixtures.stores.happy, duplicateOperation],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
   });
 
   it('supports narrow Platform Admin reads, idempotent revocation, and immutable audit', async () => {

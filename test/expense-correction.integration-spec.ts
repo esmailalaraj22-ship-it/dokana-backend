@@ -565,7 +565,7 @@ describe('S16.4 immutable Expense corrections on isolated PostgreSQL', () => {
     }
   });
 
-  it('executes all approved recognition-mode transitions through one linear active leaf', async () => {
+  it('Stage 3B B02 executes all approved recognition-mode transitions through one linear active leaf', async () => {
     const cashBefore = await balance(accountIds.cash);
     const bankBefore = await balance(accountIds.bank);
     const ownerBefore = await ownerLiability();
@@ -642,7 +642,7 @@ describe('S16.4 immutable Expense corrections on isolated PostgreSQL', () => {
     expect(await ownerLiability()).toBe((BigInt(ownerBefore) + 220n).toString());
   });
 
-  it('preserves one recognition through full settlement and payment-correction lifecycles', async () => {
+  it('Stage 3B B02 preserves one recognition through full settlement and payment-correction lifecycles', async () => {
     const expense = await recognize('DUE', { amountMinor: '500' });
     const expenseCountBefore = await db().admin.query<{ count: number }>(
       `select count(*)::integer as count from ledger.expenses where store_id=$1`,

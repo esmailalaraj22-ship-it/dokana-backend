@@ -80,7 +80,7 @@ function responseBody(response: Response): Record<string, unknown> {
 }
 
 function supplierReturnBody(response: Response): SupplierReturnPostingResponse {
-  const body = parseStoredSupplierFinancialPostingResponse(response.body as unknown);
+  const body = parseStoredSupplierFinancialPostingResponse(owner.storeId, response.body as unknown);
   if (body.family !== 'supplier_return') {
     throw new Error('Expected a Supplier Return response body.');
   }
@@ -792,7 +792,7 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     expect(readOnlyWrite.body).toMatchObject({ code: 'BUSINESS_WRITE_NOT_ALLOWED' });
   });
 
-  it('cancels and replaces Supplier Returns immutably while preserving original replay and rollback', async () => {
+  it('Stage 3B B02 cancels and replaces Supplier Returns immutably while preserving original replay and rollback', async () => {
     const supplierId = await createSupplier();
     const accountId = await createAccount();
     const invoice = await postInvoice(supplierId, '1000');
@@ -971,7 +971,7 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     expect(await invoiceOutstanding(target.response.invoice.id)).toBe('300');
   });
 
-  it('reverses a Refund through its historical archived account and replaces through a current account', async () => {
+  it('Stage 3B B02 reverses a Refund through its historical archived account and replaces through a current account', async () => {
     const source = await createCredit('400');
     const historicalAccount = await createAccount();
     const currentAccount = await createAccount();

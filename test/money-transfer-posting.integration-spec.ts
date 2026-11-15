@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import type { INestApplication } from '@nestjs/common';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
+
+import { HttpException, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { sql } from 'drizzle-orm';
 import { Logger, PARAMS_PROVIDER_TOKEN } from 'nestjs-pino';
@@ -18,9 +20,14 @@ import {
   deriveMoneyFactId,
   deriveMoneyFactOperationId,
 } from '../src/money-movements/money-movement-identity';
-import { postgresqlErrorCode } from '../src/money-movements/money-movement-database-error';
+import {
+  postgresqlConstraint,
+  postgresqlErrorCode,
+} from '../src/money-movements/money-movement-database-error';
+import { MoneyMovementPostingRepository } from '../src/money-movements/money-movement-posting.repository';
 import { MoneyTransferPostingRepository } from '../src/money-transfers/money-transfer-posting.repository';
 import { MoneyTransferWriteService } from '../src/money-transfers/money-transfer-write.service';
+import { OwnerLedgerWriteService } from '../src/owner-ledger/owner-ledger-write.service';
 import type { MoneyTransferMutationResponse } from '../src/money-transfers/money-transfer.types';
 import {
   createTestPool,
@@ -224,7 +231,7 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
     const result = await adminPool.query<{ count: number }>(
       `select count(*)::integer as count from ledger.money_transfers
        where store_id = $1 and ($2::uuid is null or id = $2::uuid)`,
-      [storeId, operationId ? deriveMoneyFactId(operationId, 'transfer-header') : null],
+      [storeId, operationId ? deriveMoneyFactId(storeId, operationId, 'transfer-header') : null],
     );
     return result.rows[0]?.count ?? 0;
   }
@@ -299,6 +306,18 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
     await adminPool.query('delete from ledger.devices where store_id = any($1::uuid[])', [
       storeIds,
     ]);
+    await adminPool.query(
+      'delete from platform.store_memberships where store_id = any($1::uuid[])',
+      [storeIds],
+    );
+    await adminPool.query(
+      'delete from sync.store_change_events_v1 where store_id = any($1::uuid[])',
+      [storeIds],
+    );
+    await adminPool.query(
+      'delete from sync.store_change_watermarks_v1 where store_id = any($1::uuid[])',
+      [storeIds],
+    );
     await adminPool.query('delete from ledger.stores where id = any($1::uuid[])', [storeIds]);
     await adminPool.query('delete from platform.users where id = any($1::uuid[])', [userIds]);
   }
@@ -364,6 +383,12 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
         `S10.4 ${key} store`,
         key === 'readOnly' ? 'read_only' : 'active',
       ]);
+      // Migration 0039 requires a real active membership for service-level writes.
+      await adminPool.query(
+        `insert into platform.store_memberships(id,store_id,user_id,role,status)
+        values($1,$2,$3,'owner','active')`,
+        [randomUUID(), fixture.stores[key], fixture.users[key]],
+      );
       await adminPool.query(
         `insert into ledger.devices (
            id, store_id, device_name, platform, installation_id, device_prefix, status
@@ -471,7 +496,10 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
       idleTransactions: number;
     }>(
       `select
-        ((select count(*) from ledger.money_transfers where store_id = any($1::uuid[]))
+        ((select count(*) from platform.store_memberships where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_events_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_watermarks_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from ledger.money_transfers where store_id = any($1::uuid[]))
           + (select count(*) from ledger.money_movements where store_id = any($1::uuid[]))
           + (select count(*) from ledger.owner_ledger_entries where store_id = any($1::uuid[]))
           + (select count(*) from ledger.document_sequences where store_id = any($1::uuid[]))
@@ -560,25 +588,41 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
     ]);
   });
 
-  it('posts one immutable header and an exact equal/opposite pair with no owner effect', async () => {
+  it('Stage 3B B01 Money Transfer posts one immutable header and an exact equal/opposite pair with no owner effect', async () => {
     const request = transferRequest(
       fixture.accounts.activeSource,
       fixture.accounts.activeDestination,
       '100',
     );
     basicTransfer = await writes.create(principal('active'), context('active'), request);
+    const tables = [
+      'ledger.money_transfers',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+    ];
+    const beforeReplay = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+    expect(await writes.create(principal('active'), context('active'), request)).toEqual(
+      basicTransfer,
+    );
+    expect(await captureReplayEvidence(adminPool, fixture.stores.active, tables)).toEqual(
+      beforeReplay,
+    );
 
     expect(basicTransfer).toMatchObject({
       operationId: request.operationId,
       postingDate: '2026-01-15',
       accountingPeriodId: januaryPeriods.active,
       transfer: {
-        id: deriveMoneyFactId(request.operationId, 'transfer-header'),
+        id: deriveMoneyFactId(fixture.stores.active, request.operationId, 'transfer-header'),
         sourceAccountId: fixture.accounts.activeSource,
         destinationAccountId: fixture.accounts.activeDestination,
         amountMinor: '100',
         status: 'posted',
-        operationId: deriveMoneyFactOperationId(request.operationId, 'transfer-header'),
+        operationId: deriveMoneyFactOperationId(
+          fixture.stores.active,
+          request.operationId,
+          'transfer-header',
+        ),
         version: '1',
       },
     });
@@ -591,7 +635,7 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
     const rows = await movements(fixture.stores.active, request.operationId);
     expect(rows).toEqual([
       expect.objectContaining({
-        id: deriveMoneyFactId(request.operationId, 'transfer-source'),
+        id: deriveMoneyFactId(fixture.stores.active, request.operationId, 'transfer-source'),
         accountId: fixture.accounts.activeSource,
         accountingPeriodId: januaryPeriods.active,
         movementType: 'internal_transfer',
@@ -601,10 +645,14 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
         transactionGroupId: request.operationId,
         transferGroupId: basicTransfer.transfer.id,
         counterAccountId: fixture.accounts.activeDestination,
-        operationId: deriveMoneyFactOperationId(request.operationId, 'transfer-source'),
+        operationId: deriveMoneyFactOperationId(
+          fixture.stores.active,
+          request.operationId,
+          'transfer-source',
+        ),
       }),
       expect.objectContaining({
-        id: deriveMoneyFactId(request.operationId, 'transfer-destination'),
+        id: deriveMoneyFactId(fixture.stores.active, request.operationId, 'transfer-destination'),
         accountId: fixture.accounts.activeDestination,
         accountingPeriodId: januaryPeriods.active,
         movementType: 'internal_transfer',
@@ -614,7 +662,11 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
         transactionGroupId: request.operationId,
         transferGroupId: basicTransfer.transfer.id,
         counterAccountId: fixture.accounts.activeSource,
-        operationId: deriveMoneyFactOperationId(request.operationId, 'transfer-destination'),
+        operationId: deriveMoneyFactOperationId(
+          fixture.stores.active,
+          request.operationId,
+          'transfer-destination',
+        ),
       }),
     ]);
     expect(rows[0]?.occurredAt.toISOString()).toBe('2026-01-15T10:00:00.000Z');
@@ -634,14 +686,243 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
         fixture.stores.active,
         [
           request.operationId,
-          deriveMoneyFactOperationId(request.operationId, 'transfer-header'),
-          deriveMoneyFactOperationId(request.operationId, 'transfer-source'),
-          deriveMoneyFactOperationId(request.operationId, 'transfer-destination'),
+          deriveMoneyFactOperationId(fixture.stores.active, request.operationId, 'transfer-header'),
+          deriveMoneyFactOperationId(fixture.stores.active, request.operationId, 'transfer-source'),
+          deriveMoneyFactOperationId(
+            fixture.stores.active,
+            request.operationId,
+            'transfer-destination',
+          ),
         ],
       ],
     );
     expect(claims.rows).toEqual([{ count: 1 }]);
   });
+
+  it.each(['active', 'tenantB'] as const)(
+    'Stage 3B B02 allows independent Stores to reuse a command UUID when %s commits first',
+    async (firstStore) => {
+      if (!app) throw new Error('Transfer application is unavailable');
+      const secondStore = firstStore === 'active' ? 'tenantB' : 'active';
+      const operationId = randomUUID();
+      const command = (key: 'active' | 'tenantB', id = operationId) =>
+        transferRequest(
+          key === 'active' ? fixture.accounts.activeSource : fixture.accounts.tenantBSource,
+          key === 'active'
+            ? fixture.accounts.activeDestination
+            : fixture.accounts.tenantBDestination,
+          key === 'active' ? '17' : '29',
+          { operationId: id },
+        );
+      const tables = [
+        'ledger.money_transfers',
+        'ledger.money_movements',
+        'ledger.owner_ledger_entries',
+      ];
+      const first = await writes.create(
+        principal(firstStore),
+        context(firstStore),
+        command(firstStore),
+      );
+      const firstEvidence = await captureReplayEvidence(
+        adminPool,
+        fixture.stores[firstStore],
+        tables,
+      );
+      const secondBefore = await captureReplayEvidence(
+        adminPool,
+        fixture.stores[secondStore],
+        tables,
+      );
+      const movementRepository = app.get(MoneyMovementPostingRepository);
+      const insert = movementRepository.insertMovementWithinTransaction.bind(movementRepository);
+      const databaseFailures: { code?: string; constraint?: string }[] = [];
+      const observation = jest
+        .spyOn(movementRepository, 'insertMovementWithinTransaction')
+        .mockImplementation(async (...args) => {
+          try {
+            return await insert(...args);
+          } catch (error) {
+            databaseFailures.push({
+              code: postgresqlErrorCode(error),
+              constraint: postgresqlConstraint(error),
+            });
+            throw error;
+          }
+        });
+      let failure: HttpException | undefined;
+      let second: MoneyTransferMutationResponse | undefined;
+      try {
+        second = await writes.create(
+          principal(secondStore),
+          context(secondStore),
+          command(secondStore),
+        );
+      } catch (error) {
+        if (!(error instanceof HttpException)) throw error;
+        failure = error;
+      } finally {
+        observation.mockRestore();
+      }
+      expect(await captureReplayEvidence(adminPool, fixture.stores[firstStore], tables)).toEqual(
+        firstEvidence,
+      );
+      expect(
+        await writes.create(principal(firstStore), context(firstStore), command(firstStore)),
+      ).toEqual(first);
+      if (failure) {
+        const secondAfter = await captureReplayEvidence(
+          adminPool,
+          fixture.stores[secondStore],
+          tables,
+        );
+        for (const table of tables) expect(secondAfter[table]).toEqual(secondBefore[table]);
+        expect(await transferCount(fixture.stores[secondStore], operationId)).toBe(0);
+        expect(await movementCount(fixture.stores[secondStore], operationId)).toBe(0);
+        await expect(
+          writes.create(principal(secondStore), context(secondStore), command(secondStore)),
+        ).rejects.toMatchObject({ response: failure.getResponse() });
+        expect(await captureReplayEvidence(adminPool, fixture.stores[secondStore], tables)).toEqual(
+          secondAfter,
+        );
+      }
+      // The same second Store/accounts/actor work with a fresh UUID; the refusal
+      // is caused by shared identity, not tenant admission or resource eligibility.
+      const independentId = randomUUID();
+      await writes.create(
+        principal(secondStore),
+        context(secondStore),
+        command(secondStore, independentId),
+      );
+      expect(await transferCount(fixture.stores[secondStore], independentId)).toBe(1);
+      expect(await movementCount(fixture.stores[secondStore], independentId)).toBe(2);
+      expect({
+        secondStatus: failure?.getStatus() ?? 201,
+        secondResponse: failure?.getResponse() ?? null,
+        databaseFailures,
+        firstOperation: await processedOperation(fixture.stores[firstStore], operationId),
+        secondOperation: await processedOperation(fixture.stores[secondStore], operationId),
+      }).toEqual({
+        secondStatus: 201,
+        secondResponse: null,
+        databaseFailures: [],
+        firstOperation: { status: 'applied', errorCode: null },
+        secondOperation: { status: 'applied', errorCode: null },
+      });
+      if (!second) throw new Error('Second Store transfer did not apply.');
+      expect(second.transfer.id).not.toBe(first.transfer.id);
+      expect(new Set([...first.movements, ...second.movements].map((row) => row.id)).size).toBe(4);
+      for (const key of [firstStore, secondStore] as const) {
+        expect(await transferCount(fixture.stores[key], operationId)).toBe(1);
+        const facts = await movements(fixture.stores[key], operationId);
+        expect(facts).toHaveLength(2);
+        expect(facts.map((row) => row.amountDeltaMinor).sort()).toEqual(
+          key === 'active' ? ['-17', '17'] : ['-29', '29'],
+        );
+      }
+      const secondEvidence = await captureReplayEvidence(
+        adminPool,
+        fixture.stores[secondStore],
+        tables,
+      );
+      expect(
+        await writes.create(principal(secondStore), context(secondStore), command(secondStore)),
+      ).toEqual(second);
+      expect(await captureReplayEvidence(adminPool, fixture.stores[secondStore], tables)).toEqual(
+        secondEvidence,
+      );
+    },
+  );
+
+  it('Stage 3B B02 binds replay to the original device and permits an authorized same-Store actor', async () => {
+    const request = transferRequest(
+      fixture.accounts.activeSource,
+      fixture.accounts.activeDestination,
+      '13',
+    );
+    const secondDevice = randomUUID();
+    await adminPool.query(
+      `insert into ledger.devices(id,store_id,device_name,platform,installation_id,device_prefix,status)
+       values($1,$2,'Stage 3B second device','android',$3,'b3','active')`,
+      [secondDevice, fixture.stores.active, randomUUID()],
+    );
+    await adminPool.query(
+      `insert into platform.store_memberships(id,store_id,user_id,role,status)
+       values($1,$2,$3,'owner','active')`,
+      [randomUUID(), fixture.stores.active, fixture.users.tenantB],
+    );
+    const first = await writes.create(principal('active'), context('active'), request);
+    const tables = [
+      'ledger.money_transfers',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+    ];
+    const before = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+    await expect(
+      writes.create(
+        { ...principal('active'), deviceId: secondDevice },
+        { ...context('active'), deviceId: secondDevice },
+        request,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'OPERATION_ID_CONFLICT' } });
+    // The contract binds Store/device/intent, not user identity. Both users have active membership.
+    expect(
+      await writes.create(
+        { ...principal('active'), userId: fixture.users.tenantB },
+        { ...context('active'), userId: fixture.users.tenantB },
+        request,
+      ),
+    ).toEqual(first);
+    const after = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+    for (const table of [...tables, 'sync.processed_operations'])
+      expect(after[table]).toEqual(before[table]);
+    expect(await movementCount(fixture.stores.active, request.operationId)).toBe(2);
+    expect(await transferCount(fixture.stores.active, request.operationId)).toBe(1);
+  });
+
+  it.each(['transfer', 'contribution'] as const)(
+    'Stage 3B B02 rejects cross-family reuse when %s claims the UUID first',
+    async (firstFamily) => {
+      if (!app) throw new Error('Transfer application is unavailable');
+      const ownerWrites = app.get(OwnerLedgerWriteService);
+      const request = transferRequest(
+        fixture.accounts.activeSource,
+        fixture.accounts.activeDestination,
+        '11',
+      );
+      const contribution = {
+        operationId: request.operationId,
+        moneyAccountId: fixture.accounts.activeSource,
+        amountMinor: '11',
+        occurredAt: request.occurredAt,
+      };
+      const transfer = () => writes.create(principal('active'), context('active'), request);
+      const owner = () =>
+        ownerWrites.postContribution(principal('active'), context('active'), contribution);
+      const accepted = firstFamily === 'transfer' ? transfer : owner;
+      const rejected = firstFamily === 'transfer' ? owner : transfer;
+      const first = await accepted();
+      const tables = [
+        'ledger.money_transfers',
+        'ledger.money_movements',
+        'ledger.owner_ledger_entries',
+      ];
+      const before = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+      await expect(rejected()).rejects.toMatchObject({
+        response: { code: 'OPERATION_ID_CONFLICT' },
+      });
+      expect(await accepted()).toEqual(first);
+      const after = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+      for (const table of [...tables, 'sync.processed_operations'])
+        expect(after[table]).toEqual(before[table]);
+      expect(await movementCount(fixture.stores.active, request.operationId)).toBe(
+        firstFamily === 'transfer' ? 2 : 1,
+      );
+      expect(await transferCount(fixture.stores.active, request.operationId)).toBe(
+        firstFamily === 'transfer' ? 1 : 0,
+      );
+    },
+  );
 
   it('stores and exactly replays same-account rejection without financial facts', async () => {
     const request = transferRequest(
@@ -696,13 +977,15 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
     expect(await movementCount(fixture.stores.active, request.operationId)).toBe(0);
   });
 
-  it('replays the stored historical response and conflicts on changed transfer direction or intent', async () => {
+  it('Stage 3B B03 replays the stored historical response and conflicts on changed transfer direction or intent', async () => {
     const request = transferRequest(
       fixture.accounts.activeSource,
       fixture.accounts.activeDestination,
       '25',
     );
     const original = await writes.create(principal('active'), context('active'), request);
+    const tables = ['ledger.money_transfers', 'ledger.money_movements'];
+    const originalFacts = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
     const before = {
       transfers: await transferCount(fixture.stores.active),
       movements: await movementCount(fixture.stores.active),
@@ -725,6 +1008,9 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
       await expect(
         writes.create(principal('active'), context('active'), changed),
       ).rejects.toMatchObject({ response: { code: 'OPERATION_ID_CONFLICT' } });
+      const after = await captureReplayEvidence(adminPool, fixture.stores.active, tables);
+      for (const table of [...tables, 'sync.processed_operations'])
+        expect(after[table]).toEqual(originalFacts[table]);
     }
 
     await writes.create(
@@ -882,7 +1168,11 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
         randomUUID(),
         new Date('2026-01-01T10:00:00.000Z'),
         fixture.devices.rollback,
-        deriveMoneyFactOperationId(request.operationId, 'transfer-destination'),
+        deriveMoneyFactOperationId(
+          fixture.stores.rollback,
+          request.operationId,
+          'transfer-destination',
+        ),
       ],
     );
     try {
@@ -891,7 +1181,11 @@ describe('Internal Money Account Transfers with real PostgreSQL', () => {
       ).rejects.toMatchObject({
         response: { code: 'MONEY_TRANSFER_FACT_IDENTITY_CONFLICT' },
       });
-      const sourceId = deriveMoneyFactId(request.operationId, 'transfer-source');
+      const sourceId = deriveMoneyFactId(
+        fixture.stores.rollback,
+        request.operationId,
+        'transfer-source',
+      );
       const source = await adminPool.query<{ count: number }>(
         'select count(*)::integer as count from ledger.money_movements where id = $1',
         [sourceId],

@@ -275,7 +275,7 @@ export class CustomerPaymentPostingRepository {
     for (const tender of command.tenders) {
       const tenderPartition = partitionByAccount.get(tender.moneyAccountId);
       if (!tenderPartition) throw new Error('Customer Payment partition is missing.');
-      const id = this.paymentId(command.operationId, tender.moneyAccountId);
+      const id = this.paymentId(context.storeId, command.operationId, tender.moneyAccountId);
       paymentIds.set(tender.moneyAccountId, id);
       await transaction.insert(customerPayments).values({
         id,
@@ -293,6 +293,7 @@ export class CustomerPaymentPostingRepository {
         status: 'draft',
         deviceId: context.deviceId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           this.paymentDiscriminator(tender.moneyAccountId),
         ),
@@ -344,6 +345,7 @@ export class CustomerPaymentPostingRepository {
         throw new Error('Customer overpayment refund state is inconsistent.');
       }
       const refundLedgerId = deriveMoneyFactId(
+        context.storeId,
         command.operationId,
         'customer-excess-refund-ledger',
       );
@@ -363,6 +365,7 @@ export class CustomerPaymentPostingRepository {
         reason: 'Immediate Customer overpayment refund',
         deviceId: context.deviceId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           'customer-excess-refund-ledger',
         ),
@@ -415,6 +418,7 @@ export class CustomerPaymentPostingRepository {
       payments.push({
         id: paymentId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           this.paymentDiscriminator(tender.moneyAccountId),
         ),
@@ -469,8 +473,13 @@ export class CustomerPaymentPostingRepository {
         item.targetId,
       );
       const ledgerDiscriminator = `customer-collection-ledger:${discriminator}`;
-      const ledgerEntryId = deriveMoneyFactId(command.operationId, ledgerDiscriminator);
+      const ledgerEntryId = deriveMoneyFactId(
+        context.storeId,
+        command.operationId,
+        ledgerDiscriminator,
+      );
       const ledgerOperationId = deriveMoneyFactOperationId(
+        context.storeId,
         command.operationId,
         ledgerDiscriminator,
       );
@@ -496,7 +505,7 @@ export class CustomerPaymentPostingRepository {
       const rows = await transaction
         .insert(customerPaymentAllocations)
         .values({
-          id: deriveMoneyFactId(command.operationId, discriminator),
+          id: deriveMoneyFactId(context.storeId, command.operationId, discriminator),
           storeId: context.storeId,
           customerPaymentId: paymentId,
           saleId: item.targetType === 'sale_receivable' ? item.targetId : null,
@@ -543,7 +552,7 @@ export class CustomerPaymentPostingRepository {
       if (!paymentId) throw new Error('Customer Credit payment parent is missing.');
       const discriminator = `customer-credit-created:${partition.moneyAccountId}`;
       await transaction.insert(customerLedgerEntries).values({
-        id: deriveMoneyFactId(command.operationId, discriminator),
+        id: deriveMoneyFactId(context.storeId, command.operationId, discriminator),
         storeId: context.storeId,
         customerId: command.customerId,
         accountingPeriodId: posting.accountingPeriodId,
@@ -560,7 +569,11 @@ export class CustomerPaymentPostingRepository {
             ? 'Customer advance'
             : 'Customer overpayment retained as credit',
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          command.operationId,
+          discriminator,
+        ),
       });
     }
   }
@@ -614,8 +627,8 @@ export class CustomerPaymentPostingRepository {
     return `customer-payment:${moneyAccountId}`;
   }
 
-  private paymentId(operationId: string, moneyAccountId: string): string {
-    return deriveMoneyFactId(operationId, this.paymentDiscriminator(moneyAccountId));
+  private paymentId(storeId: string, operationId: string, moneyAccountId: string): string {
+    return deriveMoneyFactId(storeId, operationId, this.paymentDiscriminator(moneyAccountId));
   }
 
   private allocationDiscriminator(

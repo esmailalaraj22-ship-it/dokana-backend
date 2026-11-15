@@ -191,6 +191,7 @@ function expectedFactRoles(
 }
 
 function validateFactIdentity(
+  storeId: string,
   operationId: string,
   accountingPeriodId: string,
   movements: CorrectionPostedMoneyMovement[],
@@ -205,8 +206,8 @@ function validateFactIdentity(
     const role = movementRoles[index];
     if (
       !role ||
-      movement.id !== deriveMoneyFactId(operationId, role) ||
-      movement.operationId !== deriveMoneyFactOperationId(operationId, role) ||
+      movement.id !== deriveMoneyFactId(storeId, operationId, role) ||
+      movement.operationId !== deriveMoneyFactOperationId(storeId, operationId, role) ||
       movement.transactionGroupId !== operationId ||
       movement.accountingPeriodId !== accountingPeriodId ||
       (role.startsWith('reversal:')
@@ -220,8 +221,8 @@ function validateFactIdentity(
     const role = ownerRoles[index];
     if (
       !role ||
-      entry.id !== deriveMoneyFactId(operationId, role) ||
-      entry.operationId !== deriveMoneyFactOperationId(operationId, role) ||
+      entry.id !== deriveMoneyFactId(storeId, operationId, role) ||
+      entry.operationId !== deriveMoneyFactOperationId(storeId, operationId, role) ||
       entry.transactionGroupId !== operationId ||
       (role.startsWith('reversal:') ? entry.reversalOfId === null : entry.reversalOfId !== null)
     ) {
@@ -231,6 +232,7 @@ function validateFactIdentity(
 }
 
 function validateTransferReplacement(
+  storeId: string,
   operationId: string,
   domain: AccountingCorrectionDomain,
   kind: AccountingCorrectionKind,
@@ -249,9 +251,9 @@ function validateTransferReplacement(
   if (
     !source ||
     !destination ||
-    transfer.id !== deriveMoneyFactId(operationId, 'replacement:transfer-header') ||
+    transfer.id !== deriveMoneyFactId(storeId, operationId, 'replacement:transfer-header') ||
     transfer.operationId !==
-      deriveMoneyFactOperationId(operationId, 'replacement:transfer-header') ||
+      deriveMoneyFactOperationId(storeId, operationId, 'replacement:transfer-header') ||
     transfer.sourceMovementId !== source.id ||
     transfer.destinationMovementId !== destination.id ||
     transfer.sourceAccountId !== source.accountId ||
@@ -267,6 +269,7 @@ function validateTransferReplacement(
 }
 
 export function parseStoredAccountingCorrectionResponse(
+  storeId: string,
   value: unknown,
 ): AccountingCorrectionMutationResponse {
   if (
@@ -295,6 +298,7 @@ export function parseStoredAccountingCorrectionResponse(
   const ownerEntries = value.ownerEntries.map(parseOwnerEntry);
   const roles = expectedFactRoles(domain, correctionKind);
   validateFactIdentity(
+    storeId,
     value.operationId,
     value.accountingPeriodId,
     movements,
@@ -303,6 +307,7 @@ export function parseStoredAccountingCorrectionResponse(
     roles.ownerRoles,
   );
   const replacementTransfer = validateTransferReplacement(
+    storeId,
     value.operationId,
     domain,
     correctionKind,

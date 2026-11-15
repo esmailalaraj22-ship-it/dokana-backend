@@ -25,6 +25,7 @@ import {
   upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 const migrationFilename = '0015_sale_customer_credit_tender.sql';
 const recognitionAt = '2026-09-15T10:00:00Z';
@@ -523,13 +524,21 @@ describe('S16.3 due Expense Payments on isolated PostgreSQL', () => {
     }
   });
 
-  it('exact-replays, rejects changed reuse, and commits one concurrent same operation', async () => {
+  it('Stage 3B B01 Expense Payment exact-replays, rejects changed reuse, and commits one concurrent same operation', async () => {
     const expense = await recognizeDue({ amountMinor: '400' });
     const operationId = randomUUID();
     const body = paymentBody({ operationId, amountMinor: '100' });
     const first = await postPayment(expense.expense.id, body).expect(201);
+    const tables = [
+      'ledger.expenses',
+      'ledger.expense_payments',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, ownerA.storeId, tables);
     const replay = await postPayment(expense.expense.id, body).expect(201);
     expect(replay.body).toEqual(first.body);
+    expect(await captureReplayEvidence(db().admin, ownerA.storeId, tables)).toEqual(beforeReplay);
     const changedAmount = await postPayment(expense.expense.id, {
       ...body,
       amountMinor: '101',
@@ -549,6 +558,16 @@ describe('S16.3 due Expense Payments on isolated PostgreSQL', () => {
     ]);
     expect(responses.map((response) => response.status)).toEqual([201, 201]);
     expect(responses[0].body).toEqual(responses[1].body);
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as count,
+      sum(amount_delta_minor)::text as amount from ledger.money_movements
+      where store_id=$1 and transaction_group_id=$2`,
+          [ownerA.storeId, concurrentBody.operationId],
+        )
+      ).rows,
+    ).toEqual([{ count: 1, amount: '-100' }]);
     expect(await expenseState(concurrentExpense.expense.id)).toMatchObject({
       settled: '100',
       outstanding: '100',
@@ -678,7 +697,7 @@ describe('S16.3 due Expense Payments on isolated PostgreSQL', () => {
       applyOperation: (...arguments_: unknown[]) => Promise<void>;
     }>(ExpensePaymentRepository);
     const operationId = randomUUID();
-    const paymentId = deriveMoneyFactId(operationId, 'expense-payment');
+    const paymentId = deriveMoneyFactId(ownerA.storeId, operationId, 'expense-payment');
     const completion = jest
       .spyOn(repository, 'applyOperation')
       .mockRejectedValueOnce(new Error('S16.3 completion fault'));

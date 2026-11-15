@@ -267,7 +267,11 @@ export class SaleCorrectionRepository {
       context.storeId,
       command.targetOperationId,
     );
-    const descriptor = this.resolveTarget(targetOperation, command.targetOperationId);
+    const descriptor = this.resolveTarget(
+      context.storeId,
+      targetOperation,
+      command.targetOperationId,
+    );
     await this.assertTargetIsActive(transaction, context.storeId, command.targetOperationId);
     await this.lockCorrectionCustomersBeforeSale(transaction, context.storeId, descriptor, command);
     const target = await this.loadAndValidateTarget(
@@ -367,6 +371,7 @@ export class SaleCorrectionRepository {
   }
 
   private resolveTarget(
+    storeId: string,
     row: ProcessedOperationRow | undefined,
     targetOperationId: string,
   ): TargetDescriptor {
@@ -375,7 +380,7 @@ export class SaleCorrectionRepository {
     if (row.responseCode !== 201) reject('SALE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     if (row.action === 'sales.post' && row.aggregateType === 'sales') {
       const response = this.parsePostingTarget(row.responseBody);
-      const expectedSaleId = deriveMoneyFactId(targetOperationId, 'sale');
+      const expectedSaleId = deriveMoneyFactId(storeId, targetOperationId, 'sale');
       if (
         row.aggregateId !== expectedSaleId ||
         response.operationId !== targetOperationId ||
@@ -505,7 +510,7 @@ export class SaleCorrectionRepository {
             );
 
     this.validateSaleFacts(sale, items, payments, customerCreditApplications);
-    this.validateMoneyFacts(sale, payments, moneyFacts);
+    this.validateMoneyFacts(storeId, sale, payments, moneyFacts);
     this.validateInventoryFacts(sale, items, inventoryFacts);
     const receivable = this.validateReceivableFacts(sale, customerEntries);
     const customerCredit = this.validateCustomerCreditFacts(
@@ -573,6 +578,7 @@ export class SaleCorrectionRepository {
   }
 
   private validateMoneyFacts(
+    storeId: string,
     sale: SaleRow,
     payments: SalePaymentRow[],
     movements: MoneyMovementRow[],
@@ -589,6 +595,7 @@ export class SaleCorrectionRepository {
         movement.referenceId !== payment.id ||
         movement.operationId !==
           deriveMoneyFactOperationId(
+            storeId,
             sale.operationId,
             `sale-payment-money:${payment.moneyAccountId}`,
           ) ||
@@ -954,7 +961,7 @@ export class SaleCorrectionRepository {
     const receivable = target.receivable;
     if (!receivable) return;
     await transaction.insert(customerLedgerEntries).values({
-      id: deriveMoneyFactId(command.operationId, 'sale-receivable-reversal'),
+      id: deriveMoneyFactId(context.storeId, command.operationId, 'sale-receivable-reversal'),
       storeId: context.storeId,
       customerId: receivable.customerId,
       accountingPeriodId: posting.accountingPeriodId,
@@ -969,7 +976,11 @@ export class SaleCorrectionRepository {
       reversalOfId: receivable.id,
       reason: `Sale ${command.kind}`,
       deviceId: context.deviceId,
-      operationId: deriveMoneyFactOperationId(command.operationId, 'sale-receivable-reversal'),
+      operationId: deriveMoneyFactOperationId(
+        context.storeId,
+        command.operationId,
+        'sale-receivable-reversal',
+      ),
     });
   }
 
@@ -984,7 +995,7 @@ export class SaleCorrectionRepository {
     if (!effect) return;
     const discriminator = `sale-customer-credit-reversal:${effect.id}`;
     await transaction.insert(customerLedgerEntries).values({
-      id: deriveMoneyFactId(command.operationId, discriminator),
+      id: deriveMoneyFactId(context.storeId, command.operationId, discriminator),
       storeId: context.storeId,
       customerId: effect.customerId,
       accountingPeriodId: posting.accountingPeriodId,
@@ -999,7 +1010,7 @@ export class SaleCorrectionRepository {
       reversalOfId: effect.id,
       reason: `Sale ${command.kind}`,
       deviceId: context.deviceId,
-      operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
+      operationId: deriveMoneyFactOperationId(context.storeId, command.operationId, discriminator),
     });
   }
 
@@ -1047,7 +1058,11 @@ export class SaleCorrectionRepository {
         reject('SALE_CORRECTION_INVENTORY_STATE_CONFLICT');
       }
       await transaction.insert(inventoryMovements).values({
-        id: deriveMoneyFactId(command.operationId, `sale-inventory-reversal:${movement.id}`),
+        id: deriveMoneyFactId(
+          context.storeId,
+          command.operationId,
+          `sale-inventory-reversal:${movement.id}`,
+        ),
         storeId: context.storeId,
         productId: movement.productId,
         productUnitId: movement.productUnitId,
@@ -1070,6 +1085,7 @@ export class SaleCorrectionRepository {
         reason: `Sale ${command.kind}`,
         deviceId: context.deviceId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           `sale-inventory-reversal:${movement.id}`,
         ),

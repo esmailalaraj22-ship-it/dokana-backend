@@ -106,6 +106,7 @@ function parseTransfer(value: unknown): PostedMoneyTransfer {
 }
 
 export function parseStoredMoneyTransferMutationResponse(
+  storeId: string,
   value: unknown,
 ): MoneyTransferMutationResponse {
   if (
@@ -125,17 +126,23 @@ export function parseStoredMoneyTransferMutationResponse(
   const transfer = parseTransfer(value.transfer);
   const source = parseMovement(value.movements[0]);
   const destination = parseMovement(value.movements[1]);
-  const expectedHeaderId = deriveMoneyFactId(value.operationId, 'transfer-header');
-  const expectedSourceId = deriveMoneyFactId(value.operationId, 'transfer-source');
-  const expectedDestinationId = deriveMoneyFactId(value.operationId, 'transfer-destination');
+  const expectedHeaderId = deriveMoneyFactId(storeId, value.operationId, 'transfer-header');
+  const expectedSourceId = deriveMoneyFactId(storeId, value.operationId, 'transfer-source');
+  const expectedDestinationId = deriveMoneyFactId(
+    storeId,
+    value.operationId,
+    'transfer-destination',
+  );
 
   if (
     transfer.id !== expectedHeaderId ||
-    transfer.operationId !== deriveMoneyFactOperationId(value.operationId, 'transfer-header') ||
+    transfer.operationId !==
+      deriveMoneyFactOperationId(storeId, value.operationId, 'transfer-header') ||
     transfer.sourceMovementId !== expectedSourceId ||
     transfer.destinationMovementId !== expectedDestinationId ||
     source.id !== expectedSourceId ||
-    source.operationId !== deriveMoneyFactOperationId(value.operationId, 'transfer-source') ||
+    source.operationId !==
+      deriveMoneyFactOperationId(storeId, value.operationId, 'transfer-source') ||
     source.accountId !== transfer.sourceAccountId ||
     source.accountingPeriodId !== value.accountingPeriodId ||
     source.movementType !== 'internal_transfer' ||
@@ -144,7 +151,7 @@ export function parseStoredMoneyTransferMutationResponse(
     source.occurredAt !== transfer.transferAt ||
     destination.id !== expectedDestinationId ||
     destination.operationId !==
-      deriveMoneyFactOperationId(value.operationId, 'transfer-destination') ||
+      deriveMoneyFactOperationId(storeId, value.operationId, 'transfer-destination') ||
     destination.accountId !== transfer.destinationAccountId ||
     destination.accountingPeriodId !== value.accountingPeriodId ||
     destination.movementType !== 'internal_transfer' ||

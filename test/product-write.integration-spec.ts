@@ -7,6 +7,7 @@ import { Logger, PARAMS_PROVIDER_TOKEN } from 'nestjs-pino';
 import type { Pool, PoolClient } from 'pg';
 import request from 'supertest';
 import type { Response } from 'supertest';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 import { PasswordService } from '../src/auth/password.service';
 import { configureApplication } from '../src/bootstrap';
@@ -153,6 +154,14 @@ describe('Product write API with real PostgreSQL', () => {
     await adminPool.query(`delete from ledger.products where store_id = any($1::uuid[])`, [
       storeIdList,
     ]);
+    await adminPool.query(
+      'delete from sync.store_change_events_v1 where store_id = any($1::uuid[])',
+      [storeIdList],
+    );
+    await adminPool.query(
+      'delete from sync.store_change_watermarks_v1 where store_id = any($1::uuid[])',
+      [storeIdList],
+    );
     await adminPool.query(
       `delete from platform.refresh_tokens where session_id in (
          select id from platform.auth_sessions where user_id = any($1::uuid[])
@@ -951,7 +960,7 @@ describe('Product write API with real PostgreSQL', () => {
     expect(version.rows[0]?.v).toBe('2');
   });
 
-  it('replays a completed operation after the resource later changes', async () => {
+  it('Stage 3B B04 preserves historical replay and rejects stale or changed-version writes with one race winner', async () => {
     const productId = randomUUID();
     await post(access.a, '/v1/products')
       .send(createBody({ id: productId, sku: 'REPLAY-VER' }))
@@ -963,22 +972,89 @@ describe('Product write API with real PostgreSQL', () => {
       await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200),
     );
     expect(original.version).toBe('2');
+    expect(
+      body(await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200)),
+    ).toEqual(original);
 
     await patch(access.a, `/v1/products/${productId}`)
       .send({ operationId: randomUUID(), expectedVersion: '2', lowStockThresholdMilli: '9' })
       .expect(200);
+
+    const tables = [
+      'ledger.products',
+      'ledger.product_units',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    const before = await captureReplayEvidence(adminPool, fixture.stores.a, tables);
 
     const replay = body(
       await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200),
     );
     expect(replay).toEqual(original);
     expect(replay.version).toBe('2');
+    expect(await captureReplayEvidence(adminPool, fixture.stores.a, tables)).toEqual(before);
+
+    for (const changed of [
+      { ...originalRequest, isPinned: false },
+      { ...originalRequest, expectedVersion: '3' },
+    ]) {
+      expect(
+        body(await patch(access.a, `/v1/products/${productId}`).send(changed).expect(409)).code,
+      ).toBe('OPERATION_ID_CONFLICT');
+    }
+    expect(
+      body(
+        await patch(access.a, `/v1/products/${productId}`)
+          .send({ ...originalRequest, operationId: randomUUID(), isPinned: false })
+          .expect(409),
+      ).code,
+    ).toBe('PRODUCT_VERSION_CONFLICT');
+    const rejected = await captureReplayEvidence(adminPool, fixture.stores.a, tables);
+    for (const table of tables) expect(rejected[table]).toEqual(before[table]);
 
     const version = await adminPool.query<{ v: string }>(
       `select version::text as v from ledger.products where id = $1`,
       [productId],
     );
     expect(version.rows[0]?.v).toBe('3');
+    const changesBefore = await count('sync.change_events', 'entity_id', productId);
+    const auditsBefore = await count('audit.central_audit_logs', 'entity_id', productId);
+    const updates = [
+      { operationId: randomUUID(), expectedVersion: '3', lowStockThresholdMilli: '10' },
+      { operationId: randomUUID(), expectedVersion: '3', lowStockThresholdMilli: '11' },
+    ];
+    const results = await runBehindOperationBarrier(() =>
+      Promise.all(
+        updates.map((update) =>
+          patch(access.a, `/v1/products/${productId}`)
+            .send(update)
+            .then((response) => response),
+        ),
+      ),
+    );
+    expect(results.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const winner = results.find(({ status }) => status === 200);
+    const loser = results.find(({ status }) => status === 409);
+    if (!winner || !loser) throw new Error('Version race did not return both results.');
+    expect(body(loser).code).toBe('PRODUCT_VERSION_CONFLICT');
+    const current = await adminPool.query(
+      'select version::text as version, low_stock_threshold_milli::text as threshold from ledger.products where store_id=$1 and id=$2',
+      [fixture.stores.a, productId],
+    );
+    expect(current.rows).toEqual([
+      { version: '4', threshold: body(winner).lowStockThresholdMilli },
+    ]);
+    expect(await count('sync.change_events', 'entity_id', productId)).toBe(changesBefore + 1);
+    expect(await count('audit.central_audit_logs', 'entity_id', productId)).toBe(auditsBefore + 1);
+    const afterRace = await captureReplayEvidence(adminPool, fixture.stores.a, tables);
+    for (const table of tables.filter((table) => table !== 'ledger.products'))
+      expect(afterRace[table]).toEqual(before[table]);
+    expect(
+      body(await patch(access.a, `/v1/products/${productId}`).send(originalRequest).expect(200)),
+    ).toEqual(original);
+    expect(await captureReplayEvidence(adminPool, fixture.stores.a, tables)).toEqual(afterRace);
   });
 
   it('rejects Rule-A conversion Unit create when no active base structure exists', async () => {

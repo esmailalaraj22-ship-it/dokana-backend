@@ -742,11 +742,15 @@ export class CustomerFinancialCorrectionRepository {
     const effects: CustomerFinancialLedgerReversal[] = [];
     for (const original of target.ledger) {
       const discriminator = `customer-financial-ledger-reversal:${original.id}`;
-      const operationId = deriveMoneyFactOperationId(command.operationId, discriminator);
+      const operationId = deriveMoneyFactOperationId(
+        context.storeId,
+        command.operationId,
+        discriminator,
+      );
       const rows = await transaction
         .insert(customerLedgerEntries)
         .values({
-          id: deriveMoneyFactId(command.operationId, discriminator),
+          id: deriveMoneyFactId(context.storeId, command.operationId, discriminator),
           storeId: context.storeId,
           customerId: original.customerId,
           accountingPeriodId: posting.accountingPeriodId,
@@ -898,7 +902,11 @@ export class CustomerFinancialCorrectionRepository {
     descriptor: TargetDescriptor,
     replacement: CustomerCollectionPostingResponse | CustomerFinancialResponse | null,
   ): Promise<void> {
-    const auditId = deriveMoneyFactId(command.operationId, 'customer-financial-correction-audit');
+    const auditId = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      'customer-financial-correction-audit',
+    );
     await transaction.execute(sql`
       insert into ledger.audit_logs(
         id,store_id,device_id,actor_type,action,entity_type,entity_id,

@@ -138,7 +138,7 @@ export class MoneyMovementPostingRepository {
     const rows = await transaction
       .insert(moneyMovements)
       .values({
-        id: deriveMoneyFactId(spec.commandOperationId, spec.discriminator),
+        id: deriveMoneyFactId(context.storeId, spec.commandOperationId, spec.discriminator),
         storeId: context.storeId,
         accountId: spec.accountId,
         accountingPeriodId: spec.accountingPeriodId,
@@ -155,7 +155,11 @@ export class MoneyMovementPostingRepository {
         occurredAt: spec.occurredAt,
         reversalOfId: spec.reversalOfId ?? null,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(spec.commandOperationId, spec.discriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          spec.commandOperationId,
+          spec.discriminator,
+        ),
       })
       .returning({
         id: moneyMovements.id,

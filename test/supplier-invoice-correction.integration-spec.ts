@@ -529,7 +529,7 @@ describe('S12.4 Supplier Invoice lifecycle corrections on isolated PostgreSQL', 
     });
   });
 
-  it('maps Edit Invoice to a linear replacement chain and keeps unrelated liability intact', async () => {
+  it('Stage 3B B02 maps Edit Invoice to a linear replacement chain and keeps unrelated liability intact', async () => {
     const sourceOperationId = randomUUID();
     const unrelatedOperationId = randomUUID();
     const source = (

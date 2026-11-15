@@ -27,6 +27,7 @@ import {
   upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 const migrationFilename = '0011_supplier_opening_payable_allocations.sql';
 const septemberInstant = '2026-09-15T10:00:00Z';
@@ -466,7 +467,7 @@ describe('S13.3 Supplier Payment posting on isolated PostgreSQL', () => {
     expect(audit.rows[0]?.audits).toBeGreaterThanOrEqual(6);
   });
 
-  it('posts explicit multi-Invoice allocations and canonicalizes replay order', async () => {
+  it('Stage 3B B01 Supplier Payment posts explicit multi-Invoice allocations; Stage 3B B03 canonical replay and conflicts', async () => {
     const invoiceA = await postInvoice(supplierIds.multi, '300');
     const invoiceB = await postInvoice(supplierIds.multi, '500');
     const operationId = randomUUID();
@@ -488,6 +489,16 @@ describe('S13.3 Supplier Payment posting on isolated PostgreSQL', () => {
       allocations,
     });
     const first = await postPayment(ownerA, supplierIds.multi, firstBody).expect(201);
+    const tables = [
+      'ledger.supplier_payments',
+      'ledger.supplier_payment_allocations',
+      'ledger.supplier_ledger_entries',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+      'ledger.purchase_invoices',
+      'ledger.expenses',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, ownerA.storeId, tables);
     const replay = await postPayment(
       ownerA,
       supplierIds.multi,
@@ -498,6 +509,19 @@ describe('S13.3 Supplier Payment posting on isolated PostgreSQL', () => {
       }),
     ).expect(201);
     expect(replay.body).toEqual(first.body);
+    expect(await captureReplayEvidence(db().admin, ownerA.storeId, tables)).toEqual(beforeReplay);
+    expect(
+      (
+        await db().admin.query(
+          `select
+      (select count(*)::int from ledger.money_movements where store_id=$1 and transaction_group_id=$2) as movements,
+      (select sum(amount_delta_minor)::text from ledger.money_movements where store_id=$1 and transaction_group_id=$2) as money,
+      (select count(*)::int from ledger.supplier_ledger_entries where store_id=$1 and transaction_group_id=$2) as ledger,
+      (select sum(payable_delta_minor)::text from ledger.supplier_ledger_entries where store_id=$1 and transaction_group_id=$2) as payable`,
+          [ownerA.storeId, operationId],
+        )
+      ).rows,
+    ).toEqual([{ movements: 1, money: '-600', ledger: 1, payable: '-600' }]);
     expect((first.body as SupplierPaymentPostingResponse).allocations).toHaveLength(2);
     const replayFacts = await db().admin.query<{ payments: number; allocations: number }>(
       `select
@@ -537,6 +561,17 @@ describe('S13.3 Supplier Payment posting on isolated PostgreSQL', () => {
     )
       .expect(409)
       .expect(({ body }) => expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' }));
+    for (const [supplierId, changedBody] of [
+      [supplierIds.opening, firstBody],
+      [supplierIds.multi, { ...firstBody, moneyAccountId: accountIds.held }],
+    ] as const) {
+      await postPayment(ownerA, supplierId, changedBody)
+        .expect(409)
+        .expect(({ body }) => expect(body).toMatchObject({ code: 'OPERATION_ID_CONFLICT' }));
+    }
+    const afterConflicts = await captureReplayEvidence(db().admin, ownerA.storeId, tables);
+    for (const table of [...tables, 'sync.processed_operations'])
+      expect(afterConflicts[table]).toEqual(beforeReplay[table]);
   });
 
   it('settles Invoice and Opening Payable targets without fabricating an Invoice', async () => {
@@ -909,7 +944,7 @@ describe('S13.3 Supplier Payment posting on isolated PostgreSQL', () => {
         randomUUID(),
         deriveTransactionGroupId(randomUUID()),
         septemberInstant,
-        deriveMoneyFactOperationId(operationId, 'supplier-payment-money'),
+        deriveMoneyFactOperationId(ownerA.storeId, operationId, 'supplier-payment-money'),
       ],
     );
     const before = await facts();

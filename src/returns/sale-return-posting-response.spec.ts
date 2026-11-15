@@ -4,13 +4,15 @@ import { deriveMoneyFactId } from '../money-movements/money-movement-identity';
 import { parseStoredSaleReturnPostingResponse } from './sale-return-posting-response';
 import type { SaleReturnPostingResponse } from './sale-return-posting.types';
 
+const storeId = randomUUID();
+
 function response(): SaleReturnPostingResponse {
   const operationId = randomUUID();
   return {
     operationId,
     transactionGroupId: operationId,
     return: {
-      id: deriveMoneyFactId(operationId, 'sale-return'),
+      id: deriveMoneyFactId(storeId, operationId, 'sale-return'),
       displayNumber: `SR-${operationId}`,
       saleId: randomUUID(),
       saleDisplayNumber: 'SALE-1',
@@ -41,26 +43,29 @@ function response(): SaleReturnPostingResponse {
 describe('S17.3 stored Sale Return response', () => {
   it('accepts an exact canonical applied response', () => {
     const stored = response();
-    expect(parseStoredSaleReturnPostingResponse(stored)).toEqual(stored);
+    expect(parseStoredSaleReturnPostingResponse(storeId, stored)).toEqual(stored);
   });
 
   it('rejects tampered root and transaction identities', () => {
     const stored = response();
     expect(() =>
-      parseStoredSaleReturnPostingResponse({
+      parseStoredSaleReturnPostingResponse(storeId, {
         ...stored,
         return: { ...stored.return, id: randomUUID() },
       }),
     ).toThrow('Stored Sale Return response identity is invalid.');
     expect(() =>
-      parseStoredSaleReturnPostingResponse({ ...stored, transactionGroupId: randomUUID() }),
+      parseStoredSaleReturnPostingResponse(storeId, {
+        ...stored,
+        transactionGroupId: randomUUID(),
+      }),
     ).toThrow('Stored Sale Return response identity is invalid.');
   });
 
   it('rejects stored totals that do not reconcile', () => {
     const stored = response();
     expect(() =>
-      parseStoredSaleReturnPostingResponse({
+      parseStoredSaleReturnPostingResponse(storeId, {
         ...stored,
         return: { ...stored.return, totalMinor: '1' },
       }),

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 import type { Server } from 'node:http';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -442,12 +443,20 @@ describe('S16.2 Expense recognition foundation on isolated PostgreSQL', () => {
     });
   });
 
-  it('exact-replays, rejects changed reuse, and serializes concurrent identical submission', async () => {
+  it('Stage 3B B01 Expense Recognition exact-replays, rejects changed reuse, and serializes concurrent identical submission', async () => {
     const operationId = randomUUID();
     const body = expenseBody({ operationId });
     const first = await postExpense(body).expect(201);
+    const tables = [
+      'ledger.expenses',
+      'ledger.expense_payments',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, ownerA.storeId, tables);
     const replay = await postExpense(body).expect(201);
     expect(replay.body).toEqual(first.body);
+    expect(await captureReplayEvidence(db().admin, ownerA.storeId, tables)).toEqual(beforeReplay);
     const conflict = await postExpense({ ...body, amountMinor: '501' }).expect(409);
     expect(responseBody(conflict).code).toBe('OPERATION_ID_CONFLICT');
 

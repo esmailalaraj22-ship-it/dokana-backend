@@ -79,11 +79,14 @@ const schema = z
   .strict();
 
 export function parseStoredSaleReturnCorrectionResponse(
+  storeId: string,
   value: unknown,
 ): SaleReturnCorrectionResponse {
   const parsed = schema.parse(value);
   const replacement =
-    parsed.replacement === null ? null : parseStoredSaleReturnPostingResponse(parsed.replacement);
+    parsed.replacement === null
+      ? null
+      : parseStoredSaleReturnPostingResponse(storeId, parsed.replacement);
   if (
     parsed.transactionGroupId !== parsed.operationId ||
     parsed.targetReturnId !== parsed.outcome.targetReturnId ||
@@ -105,8 +108,8 @@ export function parseStoredSaleReturnCorrectionResponse(
   for (const effect of parsed.reversal.customerLedgerEffects) {
     const discriminator = `sale-return-ledger-reversal:${effect.reversalOfId}`;
     if (
-      effect.id !== deriveMoneyFactId(parsed.operationId, discriminator) ||
-      effect.operationId !== deriveMoneyFactOperationId(parsed.operationId, discriminator)
+      effect.id !== deriveMoneyFactId(storeId, parsed.operationId, discriminator) ||
+      effect.operationId !== deriveMoneyFactOperationId(storeId, parsed.operationId, discriminator)
     ) {
       throw new Error('Stored Sale Return ledger reversal identity is invalid.');
     }
@@ -114,8 +117,9 @@ export function parseStoredSaleReturnCorrectionResponse(
   for (const movement of parsed.reversal.moneyMovements) {
     const discriminator = `sale-return-money-reversal:${movement.reversalOfId}`;
     if (
-      movement.id !== deriveMoneyFactId(parsed.operationId, discriminator) ||
-      movement.operationId !== deriveMoneyFactOperationId(parsed.operationId, discriminator) ||
+      movement.id !== deriveMoneyFactId(storeId, parsed.operationId, discriminator) ||
+      movement.operationId !==
+        deriveMoneyFactOperationId(storeId, parsed.operationId, discriminator) ||
       movement.transactionGroupId !== parsed.operationId
     ) {
       throw new Error('Stored Sale Return Money reversal identity is invalid.');
@@ -124,8 +128,9 @@ export function parseStoredSaleReturnCorrectionResponse(
   for (const movement of parsed.reversal.inventoryMovements) {
     const discriminator = `sale-return-inventory-reversal:${movement.reversalOfId}`;
     if (
-      movement.id !== deriveMoneyFactId(parsed.operationId, discriminator) ||
-      movement.operationId !== deriveMoneyFactOperationId(parsed.operationId, discriminator)
+      movement.id !== deriveMoneyFactId(storeId, parsed.operationId, discriminator) ||
+      movement.operationId !==
+        deriveMoneyFactOperationId(storeId, parsed.operationId, discriminator)
     ) {
       throw new Error('Stored Sale Return inventory reversal identity is invalid.');
     }

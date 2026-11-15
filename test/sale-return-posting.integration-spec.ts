@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 import type { Server } from 'node:http';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -425,13 +426,25 @@ describe('S17.3 atomic Customer Sale Return posting on isolated PostgreSQL', () 
     }
   });
 
-  it('refunds an anonymous paid Sale with one exact negative Money Movement and no debt effect', async () => {
+  it('Stage 3B B01 Sale Return refunds an anonymous paid Sale with one exact negative Money Movement and no debt effect', async () => {
     const accountId = await createAccount();
     const sale = await postManualSale({ accountId });
     const body = returnRequest(sale, {
       residualSettlement: { choice: 'REFUND', moneyAccountId: accountId },
     });
     const result = await postReturn(sale.sale.id, body).expect(201);
+    const tables = [
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+      'ledger.sale_return_settlements',
+      'ledger.customer_ledger_entries',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    expect((await postReturn(sale.sale.id, body).expect(201)).body).toEqual(result.body);
+    expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeReplay);
     const posted = result.body as SaleReturnPostingResponse;
     expect(posted).toMatchObject({
       operationId: body.operationId,
@@ -588,7 +601,7 @@ describe('S17.3 atomic Customer Sale Return posting on isolated PostgreSQL', () 
     expect(await customerBalances(paidCustomer)).toEqual({ receivable: '0', credit: '200' });
   });
 
-  it('restocks saleable tracked quantity at historical known/unknown cost and never restocks damage', async () => {
+  it('Stage 3B B01 Sale Return restocks saleable tracked quantity at historical known/unknown cost and never restocks damage', async () => {
     const accountId = await createAccount();
     const known = await createProduct();
     await seedInventory(known, '200');
@@ -609,6 +622,20 @@ describe('S17.3 atomic Customer Sale Return posting on isolated PostgreSQL', () 
       residualSettlement: { choice: 'REFUND', moneyAccountId: accountId },
     });
     const knownReturn = await postReturn(knownSale.sale.id, knownBody).expect(201);
+    const tables = [
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+      'ledger.sale_return_settlements',
+      'ledger.customer_ledger_entries',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    expect((await postReturn(knownSale.sale.id, knownBody).expect(201)).body).toEqual(
+      knownReturn.body,
+    );
+    expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeReplay);
     expect(knownReturn.body).toMatchObject({
       lines: [
         {

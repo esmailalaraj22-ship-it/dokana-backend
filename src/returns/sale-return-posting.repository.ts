@@ -162,7 +162,7 @@ export class SaleReturnPostingRepository {
     command: SaleReturnCommand,
     postingDate: string,
   ): Promise<SaleReturnPostingResult> {
-    const returnId = deriveMoneyFactId(command.operationId, 'sale-return');
+    const returnId = deriveMoneyFactId(context.storeId, command.operationId, 'sale-return');
     return this.database.withBusinessWriteTransaction(context, async (transaction) => {
       const prior = await this.beginMutation(transaction, context, command, returnId);
       if (prior) return prior;
@@ -193,7 +193,7 @@ export class SaleReturnPostingRepository {
       context,
       command,
       posting.postingDate,
-      deriveMoneyFactId(command.operationId, 'sale-return'),
+      deriveMoneyFactId(context.storeId, command.operationId, 'sale-return'),
       posting,
       true,
     );
@@ -250,7 +250,11 @@ export class SaleReturnPostingRepository {
     const returnItemIds = new Map(
       plan.lines.map((line) => [
         line.saleItemId,
-        deriveMoneyFactId(command.operationId, `sale-return-item:${line.saleItemId}`),
+        deriveMoneyFactId(
+          context.storeId,
+          command.operationId,
+          `sale-return-item:${line.saleItemId}`,
+        ),
       ]),
     );
     const restocks = await this.inventory.insertCustomerReturnRestocksWithinTransaction(
@@ -328,6 +332,7 @@ export class SaleReturnPostingRepository {
     }
 
     return this.response(
+      context.storeId,
       command,
       plan,
       posting,
@@ -449,7 +454,11 @@ export class SaleReturnPostingRepository {
         },
       );
       const kind = 'money_refund';
-      const id = deriveMoneyFactId(command.operationId, `sale-return-settlement:${kind}`);
+      const id = deriveMoneyFactId(
+        context.storeId,
+        command.operationId,
+        `sale-return-settlement:${kind}`,
+      );
       await transaction.insert(saleReturnSettlements).values({
         id,
         storeId: context.storeId,
@@ -512,7 +521,7 @@ export class SaleReturnPostingRepository {
     amountMinor: bigint,
     ledger: CustomerReturnLedgerEffect,
   ): Promise<PostedSaleReturnSettlement> {
-    const id = deriveMoneyFactId(operationId, `sale-return-settlement:${kind}`);
+    const id = deriveMoneyFactId(storeId, operationId, `sale-return-settlement:${kind}`);
     await transaction.insert(saleReturnSettlements).values({
       id,
       storeId,
@@ -533,6 +542,7 @@ export class SaleReturnPostingRepository {
   }
 
   private response(
+    storeId: string,
     command: SaleReturnCommand,
     plan: SaleReturnPlan,
     posting: AccountingPeriodPostingContext,
@@ -560,7 +570,11 @@ export class SaleReturnPostingRepository {
       lines: plan.lines.map((line) => {
         const inventory = restocks.get(line.saleItemId);
         return {
-          id: deriveMoneyFactId(command.operationId, `sale-return-item:${line.saleItemId}`),
+          id: deriveMoneyFactId(
+            storeId,
+            command.operationId,
+            `sale-return-item:${line.saleItemId}`,
+          ),
           saleItemId: line.saleItemId,
           productId: line.productId,
           productUnitId: line.productUnitId,
@@ -673,7 +687,10 @@ export class SaleReturnPostingRepository {
     if (row.status === 'applied') {
       if (row.responseCode !== 201)
         throw new Error('Stored Sale Return response status is invalid.');
-      return { ok: true, response: parseStoredSaleReturnPostingResponse(row.responseBody) };
+      return {
+        ok: true,
+        response: parseStoredSaleReturnPostingResponse(context.storeId, row.responseBody),
+      };
     }
     if (row.status === 'rejected') {
       const code = row.errorCode;

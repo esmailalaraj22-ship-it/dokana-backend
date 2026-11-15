@@ -299,7 +299,7 @@ export class InventoryCorrectionRepository {
       const unit = baseUnits.get(movement.productId);
       if (!unit) reject('INVENTORY_UNIT_UNAVAILABLE');
       const discriminator = `inventory_correction:reversal:${movement.id}`;
-      const movementId = deriveMoneyFactId(command.operationId, discriminator);
+      const movementId = deriveMoneyFactId(context.storeId, command.operationId, discriminator);
       const delta = -movement.quantityDeltaMilli;
       const selectedQuantity = delta < 0n ? -delta : delta;
       const averageAfter =
@@ -328,7 +328,11 @@ export class InventoryCorrectionRepository {
         reversalOfId: movement.id,
         reason: 'Inventory operation correction reversal',
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(command.operationId, discriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          command.operationId,
+          discriminator,
+        ),
         productUnitId: unit.id,
         selectedQuantityMilli: selectedQuantity,
         factorNum: 1,

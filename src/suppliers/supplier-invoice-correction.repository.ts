@@ -227,7 +227,7 @@ export class SupplierInvoiceCorrectionRepository {
       context.storeId,
       command.targetOperationId,
     );
-    const target = this.resolveTarget(targetOperation, command);
+    const target = this.resolveTarget(context.storeId, targetOperation, command);
     await this.assertTargetIsActive(transaction, context.storeId, command.targetOperationId);
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
 
@@ -382,6 +382,7 @@ export class SupplierInvoiceCorrectionRepository {
   }
 
   private resolveTarget(
+    storeId: string,
     row: ProcessedOperationRow | undefined,
     command: SupplierFinancialCorrectionCommand,
   ): TargetDescriptor {
@@ -391,7 +392,7 @@ export class SupplierInvoiceCorrectionRepository {
 
     if (command.family === 'invoice') {
       if (row.action === 'supplier_invoices.post' && row.aggregateType === 'purchase_invoices') {
-        const expected = deriveMoneyFactId(command.targetOperationId, 'supplier-invoice');
+        const expected = deriveMoneyFactId(storeId, command.targetOperationId, 'supplier-invoice');
         if (row.aggregateId !== expected) reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
         return { family: 'invoice', aggregateId: expected, correctionOfId: null };
       }
@@ -423,7 +424,11 @@ export class SupplierInvoiceCorrectionRepository {
       row.action === 'supplier_payables.opening' &&
       row.aggregateType === 'supplier_ledger_entries'
     ) {
-      const expected = deriveMoneyFactId(command.targetOperationId, 'supplier-opening-payable');
+      const expected = deriveMoneyFactId(
+        storeId,
+        command.targetOperationId,
+        'supplier-opening-payable',
+      );
       if (row.aggregateId !== expected) reject('SUPPLIER_CORRECTION_TARGET_INTEGRITY_CONFLICT');
       return { family: 'opening_payable', aggregateId: expected, correctionOfId: null };
     }
@@ -488,7 +493,7 @@ export class SupplierInvoiceCorrectionRepository {
       row.invoiceOperationId !== targetOperationId ||
       row.correctionOfId !== expectedCorrectionOfId ||
       row.payableOperationId !==
-        deriveMoneyFactOperationId(targetOperationId, 'supplier-invoice-payable') ||
+        deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier-invoice-payable') ||
       row.totalMinor !== row.payableDeltaMinor ||
       BigInt(row.payableDeltaMinor) <= 0n ||
       row.creditDeltaMinor !== '0' ||
@@ -554,7 +559,7 @@ export class SupplierInvoiceCorrectionRepository {
     if (!row) reject('SUPPLIER_CORRECTION_TARGET_NOT_FOUND');
     if (
       row.payableOperationId !==
-        deriveMoneyFactOperationId(targetOperationId, 'supplier-opening-payable') ||
+        deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier-opening-payable') ||
       BigInt(row.payableDeltaMinor) <= 0n ||
       row.creditDeltaMinor !== '0' ||
       row.reversalCount !== '0'
@@ -645,7 +650,7 @@ export class SupplierInvoiceCorrectionRepository {
     const rows = await transaction
       .insert(supplierLedgerEntries)
       .values({
-        id: deriveMoneyFactId(command.operationId, 'supplier-payable-reversal'),
+        id: deriveMoneyFactId(context.storeId, command.operationId, 'supplier-payable-reversal'),
         storeId: context.storeId,
         supplierId: target.supplierId,
         accountingPeriodId: posting.accountingPeriodId,
@@ -663,7 +668,11 @@ export class SupplierInvoiceCorrectionRepository {
             ? `Supplier Invoice ${command.kind}`
             : `Supplier opening payable ${command.kind}`,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-payable-reversal'),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          command.operationId,
+          'supplier-payable-reversal',
+        ),
       })
       .returning({
         id: supplierLedgerEntries.id,

@@ -187,8 +187,12 @@ export class ExpenseRecognitionRepository {
     let moneyMovement: PostedMoneyMovement | null = null;
     let ownerLedgerEntry: PostedOwnerLedgerEntry | null = null;
     if (command.mode !== 'DUE') {
-      const paymentId = deriveMoneyFactId(command.operationId, 'expense-payment');
-      const paymentOperationId = deriveMoneyFactOperationId(command.operationId, 'expense-payment');
+      const paymentId = deriveMoneyFactId(context.storeId, command.operationId, 'expense-payment');
+      const paymentOperationId = deriveMoneyFactOperationId(
+        context.storeId,
+        command.operationId,
+        'expense-payment',
+      );
       await transaction.insert(expensePayments).values({
         id: paymentId,
         storeId: context.storeId,
@@ -229,8 +233,12 @@ export class ExpenseRecognitionRepository {
           transaction,
           context,
           {
-            id: deriveMoneyFactId(command.operationId, 'expense-payment-owner'),
-            operationId: deriveMoneyFactOperationId(command.operationId, 'expense-payment-owner'),
+            id: deriveMoneyFactId(context.storeId, command.operationId, 'expense-payment-owner'),
+            operationId: deriveMoneyFactOperationId(
+              context.storeId,
+              command.operationId,
+              'expense-payment-owner',
+            ),
             entryType: 'owner_paid_expense',
             ownerLiabilityDeltaMinor: command.amountMinor,
             equityDeltaMinor: 0n,

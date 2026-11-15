@@ -255,7 +255,7 @@ export class SupplierReturnRepository {
       operationId: command.operationId,
       requestHash: command.requestHash,
       aggregateType: AGGREGATE_POSTING,
-      aggregateId: deriveMoneyFactId(command.operationId, command.family),
+      aggregateId: deriveMoneyFactId(context.storeId, command.operationId, command.family),
       action: `${command.family}.post`,
     };
     return this.executeMutation(context, descriptor, async (transaction) => {
@@ -284,7 +284,11 @@ export class SupplierReturnRepository {
       operationId: command.operationId,
       requestHash: command.requestHash,
       aggregateType: AGGREGATE_CORRECTION,
-      aggregateId: deriveMoneyFactId(command.operationId, 'supplier_financial_correction'),
+      aggregateId: deriveMoneyFactId(
+        context.storeId,
+        command.operationId,
+        'supplier_financial_correction',
+      ),
       action: `${command.family}.${command.kind}`,
     };
     return this.executeMutation(context, descriptor, async (transaction) => {
@@ -335,7 +339,7 @@ export class SupplierReturnRepository {
     );
     const outstandingMinor = this.invoiceOutstanding(invoice);
     const waterfall = calculateSupplierReturnWaterfall(command.amountMinor, outstandingMinor);
-    const returnId = deriveMoneyFactId(command.operationId, command.family);
+    const returnId = deriveMoneyFactId(context.storeId, command.operationId, command.family);
 
     await transaction.execute(sql`select set_config('app.audit_reason', ${command.reason}, true)`);
     // The approved Supplier Return is financial-only. Inserting the final root directly avoids
@@ -446,7 +450,7 @@ export class SupplierReturnRepository {
     this.applyPolicy(() =>
       assertSupplierCreditApplication(availableCreditMinor, outstandingMinor, command.amountMinor),
     );
-    const applicationId = deriveMoneyFactId(command.operationId, command.family);
+    const applicationId = deriveMoneyFactId(context.storeId, command.operationId, command.family);
     await transaction.execute(
       sql`select set_config('app.audit_reason', ${command.notes ?? 'Supplier Credit applied'}, true)`,
     );
@@ -503,7 +507,7 @@ export class SupplierReturnRepository {
       assertSupplierCreditConsumption(availableCreditMinor, command.amountMinor),
     );
     await this.lockCurrentMoneyAccount(transaction, context.storeId, command.moneyAccountId);
-    const refundId = deriveMoneyFactId(command.operationId, command.family);
+    const refundId = deriveMoneyFactId(context.storeId, command.operationId, command.family);
     await transaction.execute(
       sql`select set_config('app.audit_reason', ${command.notes ?? 'Supplier Refund received'}, true)`,
     );
@@ -679,6 +683,7 @@ export class SupplierReturnRepository {
     posting: AccountingPeriodPostingContext,
   ): Promise<SupplierFinancialCorrectionResponse> {
     const applicationId = deriveMoneyFactId(
+      context.storeId,
       command.targetOperationId,
       'supplier_credit_application',
     );
@@ -754,7 +759,11 @@ export class SupplierReturnRepository {
     command: Extract<SupplierFinancialCorrectionCommand, { family: 'supplier_refund' }>,
     posting: AccountingPeriodPostingContext,
   ): Promise<SupplierFinancialCorrectionResponse> {
-    const refundId = deriveMoneyFactId(command.targetOperationId, 'supplier_refund');
+    const refundId = deriveMoneyFactId(
+      context.storeId,
+      command.targetOperationId,
+      'supplier_refund',
+    );
     const identity = await this.findLedgerTargetIdentity(transaction, context.storeId, refundId);
     if (!identity) reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_NOT_FOUND');
     await this.lockSupplier(transaction, context.storeId, identity.supplierId, false);
@@ -965,9 +974,9 @@ export class SupplierReturnRepository {
           BigInt(row.payableDeltaMinor) !== -amount ||
           row.creditDeltaMinor !== '0' ||
           row.supplierLedgerEntryId !==
-            deriveMoneyFactId(targetOperationId, 'supplier_return_payable') ||
+            deriveMoneyFactId(storeId, targetOperationId, 'supplier_return_payable') ||
           row.operationId !==
-            deriveMoneyFactOperationId(targetOperationId, 'supplier_return_payable') ||
+            deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier_return_payable') ||
           row.transactionGroupId !== deriveTransactionGroupId(targetOperationId)
         ) {
           reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -979,9 +988,9 @@ export class SupplierReturnRepository {
         row.payableDeltaMinor === '0' &&
         BigInt(row.creditDeltaMinor) === amount &&
         row.supplierLedgerEntryId ===
-          deriveMoneyFactId(targetOperationId, 'supplier_return_credit') &&
+          deriveMoneyFactId(storeId, targetOperationId, 'supplier_return_credit') &&
         row.operationId ===
-          deriveMoneyFactOperationId(targetOperationId, 'supplier_return_credit') &&
+          deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier_return_credit') &&
         row.transactionGroupId === deriveTransactionGroupId(targetOperationId)
       ) {
         credit = row;
@@ -1025,7 +1034,7 @@ export class SupplierReturnRepository {
     storeId: string,
     targetOperationId: string,
   ): Promise<LedgerOperationTargetRow> {
-    const id = deriveMoneyFactId(targetOperationId, 'supplier_credit_application');
+    const id = deriveMoneyFactId(storeId, targetOperationId, 'supplier_credit_application');
     const row = await this.loadLedgerOperationTarget(transaction, storeId, id);
     if (!row) reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_NOT_FOUND');
     if (row.reversalCount !== '0') reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_NOT_ACTIVE');
@@ -1039,7 +1048,7 @@ export class SupplierReturnRepository {
       row.referenceId !== row.id ||
       row.transactionGroupId !== deriveTransactionGroupId(targetOperationId) ||
       row.operationId !==
-        deriveMoneyFactOperationId(targetOperationId, 'supplier_credit_application')
+        deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier_credit_application')
     ) {
       reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     }
@@ -1051,7 +1060,7 @@ export class SupplierReturnRepository {
     storeId: string,
     targetOperationId: string,
   ): Promise<RefundTarget> {
-    const id = deriveMoneyFactId(targetOperationId, 'supplier_refund');
+    const id = deriveMoneyFactId(storeId, targetOperationId, 'supplier_refund');
     const result = await transaction.execute<RefundTarget>(sql`
       select entry.id, entry.supplier_id as "supplierId",
         entry.accounting_period_id as "accountingPeriodId", entry.entry_type as "entryType",
@@ -1098,7 +1107,8 @@ export class SupplierReturnRepository {
       row.referenceType !== 'supplier_refund' ||
       row.referenceId !== row.id ||
       row.transactionGroupId !== deriveTransactionGroupId(targetOperationId) ||
-      row.operationId !== deriveMoneyFactOperationId(targetOperationId, 'supplier_refund') ||
+      row.operationId !==
+        deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier_refund') ||
       row.moneyAccountingPeriodId !== row.accountingPeriodId ||
       row.moneyMovementType !== 'supplier_refund' ||
       BigInt(row.moneyAmountDeltaMinor) !== amount ||
@@ -1106,7 +1116,7 @@ export class SupplierReturnRepository {
       row.moneyReferenceId !== row.id ||
       row.moneyTransactionGroupId !== row.transactionGroupId ||
       row.moneyOperationId !==
-        deriveMoneyFactOperationId(targetOperationId, 'supplier_refund_money')
+        deriveMoneyFactOperationId(storeId, targetOperationId, 'supplier_refund_money')
     ) {
       reject('SUPPLIER_FINANCIAL_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     }
@@ -1256,7 +1266,7 @@ export class SupplierReturnRepository {
     const rows = await transaction
       .insert(supplierLedgerEntries)
       .values({
-        id: deriveMoneyFactId(spec.operationId, spec.discriminator),
+        id: deriveMoneyFactId(context.storeId, spec.operationId, spec.discriminator),
         storeId: context.storeId,
         supplierId: spec.supplierId,
         accountingPeriodId: spec.accountingPeriodId,
@@ -1271,7 +1281,11 @@ export class SupplierReturnRepository {
         reversalOfId: spec.reversalOfId ?? null,
         reason: spec.reason,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(spec.operationId, spec.discriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          spec.operationId,
+          spec.discriminator,
+        ),
       })
       .returning({ id: supplierLedgerEntries.id, createdAt: supplierLedgerEntries.createdAt });
     const row = rows[0];
@@ -1458,8 +1472,8 @@ export class SupplierReturnRepository {
     try {
       const response =
         descriptor.aggregateType === AGGREGATE_CORRECTION
-          ? parseStoredSupplierFinancialCorrectionResponse(existing.responseBody)
-          : parseStoredSupplierFinancialPostingResponse(existing.responseBody);
+          ? parseStoredSupplierFinancialCorrectionResponse(context.storeId, existing.responseBody)
+          : parseStoredSupplierFinancialPostingResponse(context.storeId, existing.responseBody);
       return { ok: true, response };
     } catch {
       throw new Error('Stored Supplier financial response is invalid.');
@@ -1487,7 +1501,7 @@ export class SupplierReturnRepository {
     operationId: string,
     response: SupplierFinancialMutationResponse,
   ): Promise<void> {
-    const parsed = parseStoredSupplierFinancialMutationResponse(response);
+    const parsed = parseStoredSupplierFinancialMutationResponse(storeId, response);
     const result = await transaction.execute(sql`
       update sync.processed_operations
       set status='applied', response_code=201,
@@ -1796,7 +1810,7 @@ export class SupplierReturnRepository {
     const postings = new Map<string, SupplierFinancialPostingResponse>();
     const corrections: SupplierFinancialCorrectionResponse[] = [];
     for (const row of result.rows) {
-      const response = parseStoredSupplierFinancialMutationResponse(row.responseBody);
+      const response = parseStoredSupplierFinancialMutationResponse(storeId, row.responseBody);
       if ('intent' in response) {
         corrections.push(response);
         if (response.replacement) {

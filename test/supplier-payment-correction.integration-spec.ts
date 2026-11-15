@@ -582,7 +582,7 @@ describe('S13.5 Supplier Payment corrections on isolated PostgreSQL', () => {
     expect(await supplierOutstanding(supplierIds.cancelOwner)).toBe(amountMinor);
   });
 
-  it('edits by reversing first, then posts a canonical multi-allocation replacement', async () => {
+  it('Stage 3B B02 edits by reversing first, then posts a canonical multi-allocation replacement', async () => {
     const invoice = await postInvoice(supplierIds.edit, '500');
     const opening = await postOpening(supplierIds.edit, '200');
     const originalOperationId = randomUUID();
@@ -956,7 +956,11 @@ describe('S13.5 Supplier Payment corrections on isolated PostgreSQL', () => {
         randomUUID(),
         deriveTransactionGroupId(randomUUID()),
         septemberInstant,
-        deriveMoneyFactOperationId(correctionOperation, 'supplier-payment-money-reversal'),
+        deriveMoneyFactOperationId(
+          ownerA.storeId,
+          correctionOperation,
+          'supplier-payment-money-reversal',
+        ),
       ],
     );
     const before = await domainCounts();

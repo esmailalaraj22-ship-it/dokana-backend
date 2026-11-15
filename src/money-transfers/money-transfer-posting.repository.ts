@@ -140,7 +140,7 @@ export class MoneyTransferPostingRepository {
     context: TenantTransactionContext,
     input: MoneyTransferCommandInput,
   ): Promise<MoneyTransferMutationResult> {
-    const transferId = deriveMoneyFactId(input.operationId, 'transfer-header');
+    const transferId = deriveMoneyFactId(context.storeId, input.operationId, 'transfer-header');
     const transactionGroupId = deriveTransactionGroupId(input.operationId);
     const operation: MutationOperation = {
       operationId: input.operationId,
@@ -163,8 +163,13 @@ export class MoneyTransferPostingRepository {
             throw new MoneyTransferRejectedError(failure('MONEY_TRANSFER_SAME_ACCOUNT'));
           }
 
-          const sourceMovementId = deriveMoneyFactId(input.operationId, 'transfer-source');
+          const sourceMovementId = deriveMoneyFactId(
+            context.storeId,
+            input.operationId,
+            'transfer-source',
+          );
           const destinationMovementId = deriveMoneyFactId(
+            context.storeId,
             input.operationId,
             'transfer-destination',
           );
@@ -211,7 +216,11 @@ export class MoneyTransferPostingRepository {
           );
           const transfer = await this.insertTransferWithinTransaction(savepoint, context, {
             id: transferId,
-            operationId: deriveMoneyFactOperationId(input.operationId, 'transfer-header'),
+            operationId: deriveMoneyFactOperationId(
+              context.storeId,
+              input.operationId,
+              'transfer-header',
+            ),
             displayNumber,
             sourceAccountId: input.sourceAccountId,
             destinationAccountId: input.destinationAccountId,
@@ -537,7 +546,7 @@ export class MoneyTransferPostingRepository {
     if (existing.status === 'applied') {
       return {
         ok: true,
-        response: parseStoredMoneyTransferMutationResponse(existing.responseBody),
+        response: parseStoredMoneyTransferMutationResponse(context.storeId, existing.responseBody),
       };
     }
     if (existing.status === 'rejected') {

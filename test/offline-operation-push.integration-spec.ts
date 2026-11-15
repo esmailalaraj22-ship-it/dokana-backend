@@ -19,6 +19,7 @@ import { configureApplication } from '../src/bootstrap';
 import { AppConfigService } from '../src/config/app-config.service';
 import type { OfflineLicenseResponse } from '../src/offline-licenses/offline-license.types';
 import {
+  deriveMoneyFactId,
   deriveMoneyFactOperationId,
   deriveTransactionGroupId,
 } from '../src/money-movements/money-movement-identity';
@@ -31,9 +32,11 @@ import type { BootstrapManifest } from '../src/sync/bootstrap.types';
 import { SyncCursorService } from '../src/sync/sync-cursor.service';
 import {
   createInventoryTestDatabase,
+  upgradeInventoryTestDatabaseToCurrent,
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 const migrationFilename = '0033_platform_recovery_generation_fencing.sql';
 const environment = readLocalPostgresTestEnvironment();
@@ -412,6 +415,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       [fixture.expenseCategoryId, fixture.storeId, randomUUID()],
     );
 
+    await upgradeInventoryTestDatabaseToCurrent(db(), [fixture.storeId]);
     await startApplication();
 
     login = responseBody(
@@ -479,6 +483,273 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       else process.env[key] = value;
     }
   }, 60_000);
+
+  it('Stage 3B B02 executes precomputed offline Sale, Return and correction references with partial replay', async () => {
+    const saleOperationId = randomUUID();
+    const returnOperationId = randomUUID();
+    const correctionOperationId = randomUUID();
+    // All dependent references are generated before any envelope is sent.
+    const saleId = deriveMoneyFactId(fixture.storeId, saleOperationId, 'sale');
+    const saleItemId = deriveMoneyFactId(fixture.storeId, saleOperationId, 'sale-item:0');
+    const returnId = deriveMoneyFactId(fixture.storeId, returnOperationId, 'sale-return');
+    const sale = envelope({
+      operationId: saleOperationId,
+      operationType: 'sales.post.v1',
+      payload: {
+        occurredAt,
+        totalMinor: '500',
+        items: [
+          {
+            isManualLine: true,
+            description: 'Precomputed offline Sale',
+            unitName: 'service',
+            quantityMilli: '1000',
+            unitPriceMinor: '500',
+            lineTotalMinor: '500',
+          },
+        ],
+        payments: [{ moneyAccountId: fixture.moneyAccountId, amountMinor: '500' }],
+      },
+    });
+    const returned = envelope({
+      operationId: returnOperationId,
+      operationType: 'sale_returns.post.v1',
+      dependencies: [saleOperationId],
+      payload: {
+        saleId,
+        occurredAt,
+        reason: 'Precomputed offline Return',
+        lines: [{ saleItemId, quantityMilli: '1000', disposition: 'DAMAGED_NO_RESTOCK' }],
+        residualSettlement: { choice: 'REFUND', moneyAccountId: fixture.moneyAccountId },
+      },
+    });
+    const correction = envelope({
+      operationId: correctionOperationId,
+      operationType: 'sale_returns.cancel.v1',
+      dependencies: [returnOperationId],
+      payload: { targetReturnId: returnId, occurredAt, reason: 'Cancel offline Return' },
+    });
+    expect((await push([returned, correction])).results.map(({ status }) => status)).toEqual([
+      'DEPENDENCY_PENDING',
+      'DEPENDENCY_PENDING',
+    ]);
+    const first = await push([sale]);
+    expect(first.results.map(({ status }) => status)).toEqual(['APPLIED']);
+    const completed = await push([sale, returned, correction]);
+    expect(completed.results.map(({ status, code }) => ({ status, code }))).toEqual([
+      { status: 'EXACT_REPLAY', code: null },
+      { status: 'APPLIED', code: null },
+      { status: 'APPLIED', code: null },
+    ]);
+    const roots = await db().admin.query(
+      `select s.id as sale_id, i.id as item_id, r.id as return_id, r.status
+       from ledger.sales s join ledger.sale_items i on i.store_id=s.store_id and i.sale_id=s.id
+       join ledger.sale_returns r on r.store_id=s.store_id and r.sale_id=s.id
+       where s.store_id=$1 and s.id=$2`,
+      [fixture.storeId, saleId],
+    );
+    expect(roots.rows).toEqual([
+      { sale_id: saleId, item_id: saleItemId, return_id: returnId, status: 'cancelled' },
+    ]);
+    const facts = await db().admin.query<{
+      id: string;
+      delta: string;
+      reversal_of_id: string | null;
+    }>(
+      `select id, amount_delta_minor::text as delta, reversal_of_id from ledger.money_movements
+       where store_id=$1 and transaction_group_id=any($2::uuid[]) order by amount_delta_minor,id`,
+      [fixture.storeId, [saleOperationId, returnOperationId, correctionOperationId]],
+    );
+    expect(facts.rows.map(({ delta }) => delta)).toEqual(['-500', '500', '500']);
+    const refund = facts.rows.find(({ delta }) => delta === '-500');
+    expect(refund).toBeDefined();
+    expect(facts.rows.filter(({ reversal_of_id }) => reversal_of_id === refund?.id)).toHaveLength(
+      1,
+    );
+    for (const op of [saleOperationId, returnOperationId, correctionOperationId]) {
+      expect(await countByTransactionGroup('inventory_movements', op)).toBe(0);
+    }
+    const tables = [
+      'ledger.sales',
+      'ledger.sale_items',
+      'ledger.sale_payments',
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+      'ledger.sale_return_settlements',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.customer_ledger_entries',
+    ];
+    const before = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    const replay = await push([sale, returned, correction]);
+    expect(replay.results.map(({ status }) => status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+    ]);
+    expect(replay.results.map(({ response }) => response)).toEqual(
+      completed.results.map(({ response }) => response),
+    );
+    expect(await captureReplayEvidence(db().admin, fixture.storeId, tables)).toEqual(before);
+  });
+
+  it('Stage 3B B05 retries a partial economic batch, releases dependencies and preserves a terminal rejection', async () => {
+    const productId = randomUUID(),
+      unitId = randomUUID(),
+      productOperationId = randomUUID();
+    const moneyOperationId = randomUUID(),
+      inventoryOperationId = randomUUID(),
+      rejectedOperationId = randomUUID();
+    const product = envelope({
+      operationId: productOperationId,
+      operationType: 'products.create.v1',
+      aggregateId: productId,
+      payload: {
+        name: 'Stage 3B batch Product',
+        measurementType: 'count',
+        trackInventory: true,
+        initialBaseUnit: { id: unitId, unitName: 'piece' },
+      },
+    });
+    const money = envelope({
+      operationId: moneyOperationId,
+      operationType: 'owner_contributions.post.v1',
+      payload: { moneyAccountId: fixture.moneyAccountId, amountMinor: '17', occurredAt },
+    });
+    const inventoryPayload = {
+      productId,
+      productUnitId: unitId,
+      selectedQuantityMilli: '1000',
+      totalPurchaseCostMinor: '200',
+      occurredAt,
+    };
+    const pending = envelope({
+      operationId: inventoryOperationId,
+      operationType: 'inventory.increase.post.v1',
+      aggregateId: randomUUID(),
+      payload: inventoryPayload,
+      dependencies: [productOperationId],
+    });
+    const rejected = envelope({
+      operationId: rejectedOperationId,
+      operationType: 'inventory.increase.post.v1',
+      aggregateId: randomUUID(),
+      payload: inventoryPayload,
+    });
+    const first = await push([money, pending, rejected]);
+    expect(first.results.map(({ status }) => status)).toEqual([
+      'APPLIED',
+      'DEPENDENCY_PENDING',
+      'REJECTED',
+    ]);
+    const originalMoney = await accountingEffectVector(moneyOperationId);
+    expect(originalMoney).toMatchObject({
+      moneyMovements: 1,
+      moneyDelta: '17',
+      inventoryMovements: 0,
+    });
+    expect(await countByTransactionGroup('inventory_movements', inventoryOperationId)).toBe(0);
+    expect(await countByTransactionGroup('inventory_movements', rejectedOperationId)).toBe(0);
+    const terminal = await operationStatus(rejectedOperationId);
+    expect(terminal).toMatchObject({ status: 'REJECTED' });
+    const completed = await push([money, product, pending, rejected]);
+    expect(completed.results.map(({ status }) => status)).toEqual([
+      'EXACT_REPLAY',
+      'APPLIED',
+      'APPLIED',
+      'REJECTED',
+    ]);
+    expect(completed.results[0]?.response).toEqual(first.results[0]?.response);
+    expect(completed.results[3]).toEqual(first.results[2]);
+    expect(await operationStatus(rejectedOperationId)).toEqual(terminal);
+    expect(await accountingEffectVector(moneyOperationId)).toEqual(originalMoney);
+    expect(await accountingEffectVector(inventoryOperationId)).toMatchObject({
+      inventoryMovements: 1,
+      inventoryQuantityDelta: '1000',
+      inventoryValueDelta: '200',
+      manualInventoryEntries: 1,
+      moneyMovements: 0,
+    });
+    expect(await countByTransactionGroup('inventory_movements', rejectedOperationId)).toBe(0);
+    const tables = [
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+      'ledger.manual_inventory_entries',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.products',
+      'ledger.product_units',
+    ];
+    const before = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    const replay = await push([money, product, pending, rejected]);
+    expect(replay.results.map(({ status }) => status)).toEqual([
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'EXACT_REPLAY',
+      'REJECTED',
+    ]);
+    expect(replay.results.map(({ response }) => response)).toEqual(
+      completed.results.map(({ response }) => response),
+    );
+    expect(await captureReplayEvidence(db().admin, fixture.storeId, tables)).toEqual(before);
+    const provenance = await db().admin.query(
+      'select operation_id,disposition as status from sync.offline_operation_provenance_v1 where store_id=$1 and operation_id=any($2::uuid[]) order by operation_id',
+      [fixture.storeId, [moneyOperationId, inventoryOperationId, rejectedOperationId]],
+    );
+    expect(provenance.rows).toEqual(
+      [
+        { operation_id: moneyOperationId, status: 'applied' },
+        { operation_id: inventoryOperationId, status: 'applied' },
+        { operation_id: rejectedOperationId, status: 'rejected' },
+      ].sort((a, b) => a.operation_id.localeCompare(b.operation_id)),
+    );
+  });
+
+  it('Stage 3B B05 replays the identical persisted recovery rejection without an economic effect', async () => {
+    const operationId = randomUUID();
+    const rejected = envelope({
+      operationId,
+      operationType: 'inventory.increase.post.v1',
+      aggregateId: randomUUID(),
+      clockState: 'clock_rollback_suspected',
+      payload: {
+        productId: randomUUID(),
+        productUnitId: randomUUID(),
+        selectedQuantityMilli: '1000',
+        occurredAt,
+      },
+    });
+    const tables = [
+      'ledger.manual_inventory_entries',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+    ];
+    const before = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    expect((await push([rejected])).results[0]?.status).toBe('QUARANTINED');
+    const first = await recover(rejected);
+    expect(first).toMatchObject({
+      status: 'REJECTED',
+      code: 'INVENTORY_PRODUCT_NOT_FOUND',
+      response: { code: 'INVENTORY_PRODUCT_NOT_FOUND', message: 'Offline operation was rejected.' },
+    });
+    expect(await recover(rejected)).toEqual(first);
+    expect((await push([rejected])).results[0]).toEqual(first);
+    const after = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    for (const table of [
+      ...tables,
+      'sync.processed_operations',
+      'sync.change_events',
+      'sync.store_change_events_v1',
+    ])
+      expect(after[table]).toEqual(before[table]);
+    const persisted = await db().admin.query(
+      'select disposition,response_body from sync.offline_operation_provenance_v1 where store_id=$1 and operation_id=$2',
+      [fixture.storeId, operationId],
+    );
+    expect(persisted.rows).toEqual([{ disposition: 'rejected', response_body: first.response }]);
+  });
 
   it('enforces the dedicated sync token and trusted Store/device context', async () => {
     const operation = envelope({
@@ -859,6 +1130,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       await count(
         'customer_payments',
         deriveMoneyFactOperationId(
+          fixture.storeId,
           collectionOperationId,
           `customer-payment:${fixture.moneyAccountId}`,
         ),
@@ -1197,7 +1469,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(['S19.5 Customer A', 'S19.5 Customer B']).toContain(customer.rows[0]?.name);
   });
 
-  it('recovers a durable clock quarantine once and publishes one canonical change', async () => {
+  it('Stage 3B B05 recovers a durable clock quarantine once and publishes one canonical change', async () => {
     const operationId = randomUUID();
     const customerId = randomUUID();
     const quarantined = envelope({
@@ -1461,7 +1733,7 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     expect(await countByTransactionGroup('inventory_movements', inventoryOperationId)).toBe(1);
   });
 
-  it('serializes recovery against normal push and fails unknown quarantine reasons closed', async () => {
+  it('Stage 3B B05 serializes recovery against normal push and fails unknown quarantine reasons closed', async () => {
     const operationId = randomUUID();
     const recoverable = envelope({
       operationId,
@@ -1484,6 +1756,22 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       payableDelta: '0',
       inventoryQuantityDelta: '0',
     });
+    const tables = [
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+      'ledger.inventory_movements',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    expect((await recover(recoverable)).status).toBe('EXACT_REPLAY');
+    expect((await push([recoverable])).results[0]?.status).toBe('EXACT_REPLAY');
+    const afterReplay = await captureReplayEvidence(db().admin, fixture.storeId, tables);
+    for (const table of [
+      ...tables,
+      'sync.processed_operations',
+      'sync.change_events',
+      'sync.store_change_events_v1',
+    ])
+      expect(afterReplay[table]).toEqual(beforeReplay[table]);
 
     const blockedOperationId = randomUUID();
     const blocked = envelope({
@@ -1876,8 +2164,8 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
       onlineCreateOperationId,
       productOperationId,
       inventoryOperationId,
-      deriveMoneyFactOperationId(contributionOperationId, 'owner-entry'),
-      deriveMoneyFactOperationId(contributionOperationId, 'owner-money'),
+      deriveMoneyFactOperationId(fixture.storeId, contributionOperationId, 'owner-entry'),
+      deriveMoneyFactOperationId(fixture.storeId, contributionOperationId, 'owner-money'),
       saleOperationId,
       onlineUpdateOperationId,
     ]) {

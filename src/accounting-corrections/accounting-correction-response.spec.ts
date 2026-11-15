@@ -5,6 +5,7 @@ import {
 import { parseStoredAccountingCorrectionResponse } from './accounting-correction-response';
 
 const ids = {
+  store: '10000000-0000-4000-8000-000000000009',
   operation: '10000000-0000-4000-8000-000000000001',
   target: '10000000-0000-4000-8000-000000000002',
   period: '10000000-0000-4000-8000-000000000003',
@@ -24,13 +25,13 @@ function movement(
   reversalOfId: string | null,
 ) {
   return {
-    id: deriveMoneyFactId(ids.operation, role),
+    id: deriveMoneyFactId(ids.store, ids.operation, role),
     accountId,
     accountingPeriodId: ids.period,
     movementType: 'correction',
     amountDeltaMinor,
     transactionGroupId: ids.operation,
-    operationId: deriveMoneyFactOperationId(ids.operation, role),
+    operationId: deriveMoneyFactOperationId(ids.store, ids.operation, role),
     occurredAt,
     createdAt,
     reversalOfId,
@@ -65,7 +66,7 @@ function transferReplacementResponse() {
     ],
     ownerEntries: [],
     replacementTransfer: {
-      id: deriveMoneyFactId(ids.operation, 'replacement:transfer-header'),
+      id: deriveMoneyFactId(ids.store, ids.operation, 'replacement:transfer-header'),
       displayNumber: 'T-2026-000001',
       sourceAccountId: ids.source,
       destinationAccountId: ids.destination,
@@ -74,7 +75,11 @@ function transferReplacementResponse() {
       sourceMovementId: replacementSource.id,
       destinationMovementId: replacementDestination.id,
       status: 'posted',
-      operationId: deriveMoneyFactOperationId(ids.operation, 'replacement:transfer-header'),
+      operationId: deriveMoneyFactOperationId(
+        ids.store,
+        ids.operation,
+        'replacement:transfer-header',
+      ),
       createdAt,
       updatedAt: createdAt,
       version: '1',
@@ -85,13 +90,13 @@ function transferReplacementResponse() {
 describe('parseStoredAccountingCorrectionResponse', () => {
   it('accepts a structurally and deterministically valid Transfer replacement snapshot', () => {
     const value = transferReplacementResponse();
-    expect(parseStoredAccountingCorrectionResponse(value)).toEqual(value);
+    expect(parseStoredAccountingCorrectionResponse(ids.store, value)).toEqual(value);
   });
 
   it('rejects a replacement Transfer header that disagrees with its child facts', () => {
     const value = transferReplacementResponse();
     value.replacementTransfer.amountMinor = '16';
-    expect(() => parseStoredAccountingCorrectionResponse(value)).toThrow(
+    expect(() => parseStoredAccountingCorrectionResponse(ids.store, value)).toThrow(
       'Stored accounting-correction response is invalid.',
     );
   });
@@ -103,7 +108,7 @@ describe('parseStoredAccountingCorrectionResponse', () => {
       throw new Error('Test fixture is incomplete.');
     }
     replacementDestination.id = ids.originalDestinationMovement;
-    expect(() => parseStoredAccountingCorrectionResponse(value)).toThrow(
+    expect(() => parseStoredAccountingCorrectionResponse(ids.store, value)).toThrow(
       'Stored accounting-correction response is invalid.',
     );
   });

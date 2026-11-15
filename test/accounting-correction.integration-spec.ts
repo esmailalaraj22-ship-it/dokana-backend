@@ -292,6 +292,15 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     await adminPool.query('delete from ledger.devices where store_id = any($1::uuid[])', [
       storeIds,
     ]);
+    for (const table of [
+      'platform.store_memberships',
+      'sync.store_change_events_v1',
+      'sync.store_change_watermarks_v1',
+    ]) {
+      await adminPool.query('delete from ' + table + ' where store_id = any($1::uuid[])', [
+        storeIds,
+      ]);
+    }
     await adminPool.query('delete from ledger.stores where id = any($1::uuid[])', [storeIds]);
     await adminPool.query('delete from platform.users where id = any($1::uuid[])', [userIds]);
   }
@@ -352,6 +361,11 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       await adminPool.query(
         "insert into ledger.stores (id, name, status) values ($1,$2,'active')",
         [fixture.stores[key], `S10.5 ${key} store`],
+      );
+      await adminPool.query(
+        `insert into platform.store_memberships(id,store_id,user_id,role,status)
+         values($1,$2,$3,'owner','active')`,
+        [randomUUID(), fixture.stores[key], fixture.users[key]],
       );
       await adminPool.query(
         `insert into ledger.devices (
@@ -481,7 +495,10 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       idleTransactions: number;
     }>(
       `select
-        ((select count(*) from ledger.money_transfers where store_id = any($1::uuid[]))
+        ((select count(*) from platform.store_memberships where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_events_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from sync.store_change_watermarks_v1 where store_id = any($1::uuid[]))
+          + (select count(*) from ledger.money_transfers where store_id = any($1::uuid[]))
           + (select count(*) from ledger.money_movements where store_id = any($1::uuid[]))
           + (select count(*) from ledger.owner_ledger_entries where store_id = any($1::uuid[]))
           + (select count(*) from ledger.document_sequences where store_id = any($1::uuid[]))
@@ -515,7 +532,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     await adminPool.end();
   }, 30_000);
 
-  it('replaces signed Opening state through a linear active-leaf chain and terminates it by reversal', async () => {
+  it('Stage 3B B02 replaces signed Opening state through a linear active-leaf chain and terminates it by reversal', async () => {
     const originalOperationId = randomUUID();
     await ownerWrites.postOpeningBalance(
       principal('active'),
@@ -531,7 +548,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     );
     expect(first.movements.map((row) => row.amountDeltaMinor)).toEqual(['-100', '150']);
     expect(first.movements[0]?.reversalOfId).toBe(
-      deriveMoneyFactId(originalOperationId, 'opening'),
+      deriveMoneyFactId(fixture.stores.active, originalOperationId, 'opening'),
     );
     expect(first.movements[1]?.reversalOfId).toBeNull();
     expect(await balance(fixture.stores.active, fixture.accounts.openingPositive)).toBe(150n);
@@ -1051,7 +1068,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     ]);
     expect(result.movements.reduce((sum, row) => sum + BigInt(row.amountDeltaMinor), 0n)).toBe(0n);
     expect(result.replacementTransfer).toMatchObject({
-      id: deriveMoneyFactId(operationId, 'replacement:transfer-header'),
+      id: deriveMoneyFactId(fixture.stores.active, operationId, 'replacement:transfer-header'),
       sourceAccountId: fixture.accounts.activeCash,
       destinationAccountId: fixture.accounts.activeAlternate,
       amountMinor: '150',
@@ -1140,7 +1157,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     ).rejects.toMatchObject({ response: { code: 'MONEY_TRANSFER_SAME_ACCOUNT' } });
   });
 
-  it('replaces a Transfer source, destination, and amount with immutable net-zero history and exact replay', async () => {
+  it('Stage 3B B02 replaces a Transfer source, destination, and amount with immutable net-zero history and exact replay', async () => {
     const target = randomUUID();
     const original = await transferWrites.create(principal('active'), context('active'), {
       operationId: target,
@@ -1171,7 +1188,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     ]);
     expect(result.movements.reduce((sum, row) => sum + BigInt(row.amountDeltaMinor), 0n)).toBe(0n);
     expect(result.replacementTransfer).toMatchObject({
-      id: deriveMoneyFactId(operationId, 'replacement:transfer-header'),
+      id: deriveMoneyFactId(fixture.stores.active, operationId, 'replacement:transfer-header'),
       sourceAccountId: fixture.accounts.openingPositive,
       destinationAccountId: fixture.accounts.activeAlternate,
       amountMinor: '150',
@@ -1383,7 +1400,11 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       'select id from ledger.money_transfers where store_id = $1 and id = $2',
       [
         fixture.stores.active,
-        deriveMoneyFactId(command.operationId, 'replacement:transfer-header'),
+        deriveMoneyFactId(
+          fixture.stores.active,
+          command.operationId,
+          'replacement:transfer-header',
+        ),
       ],
     );
     expect(replacementHeader.rows).toEqual([]);
@@ -1455,7 +1476,7 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     const reversals = await adminPool.query<{ count: number }>(
       `select count(*)::integer as count from ledger.money_movements
        where store_id = $1 and reversal_of_id = $2`,
-      [fixture.stores.concurrent, deriveMoneyFactId(target, 'opening')],
+      [fixture.stores.concurrent, deriveMoneyFactId(fixture.stores.concurrent, target, 'opening')],
     );
     expect(reversals.rows[0]?.count).toBe(1);
   });
@@ -1651,7 +1672,11 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       ownerRequest(fixture.accounts.rollbackCash, '55', target),
     );
     const operationId = randomUUID();
-    const conflictingId = deriveMoneyFactId(operationId, 'replacement:owner-money');
+    const conflictingId = deriveMoneyFactId(
+      fixture.stores.rollback,
+      operationId,
+      'replacement:owner-money',
+    );
     await adminPool.query(
       `insert into ledger.money_movements (
          id, store_id, account_id, accounting_period_id, movement_type, amount_delta_minor,
@@ -1739,7 +1764,11 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
       occurredAt: '2026-01-15T10:00:00Z',
     });
     const operationId = randomUUID();
-    const conflictingId = deriveMoneyFactId(operationId, 'replacement:transfer-destination');
+    const conflictingId = deriveMoneyFactId(
+      fixture.stores.rollback,
+      operationId,
+      'replacement:transfer-destination',
+    );
     await adminPool.query(
       `insert into ledger.money_movements (
          id, store_id, account_id, accounting_period_id, movement_type, amount_delta_minor,
@@ -1766,7 +1795,10 @@ describe('S10.5 same-domain accounting corrections with real PostgreSQL', () => 
     expect(await movementRows(fixture.stores.rollback, operationId)).toEqual([]);
     const header = await adminPool.query(
       'select id from ledger.money_transfers where store_id = $1 and id = $2',
-      [fixture.stores.rollback, deriveMoneyFactId(operationId, 'replacement:transfer-header')],
+      [
+        fixture.stores.rollback,
+        deriveMoneyFactId(fixture.stores.rollback, operationId, 'replacement:transfer-header'),
+      ],
     );
     expect(header.rows).toEqual([]);
     await adminPool.query('delete from ledger.money_movements where id = $1', [conflictingId]);

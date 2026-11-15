@@ -265,8 +265,12 @@ export class InventoryPostingRepository {
       }
 
       const discriminator = `sale-return-item:${line.saleItemId}:inventory`;
-      const movementId = deriveMoneyFactId(input.operationId, discriminator);
-      const movementOperationId = deriveMoneyFactOperationId(input.operationId, discriminator);
+      const movementId = deriveMoneyFactId(context.storeId, input.operationId, discriminator);
+      const movementOperationId = deriveMoneyFactOperationId(
+        context.storeId,
+        input.operationId,
+        discriminator,
+      );
       await transaction.insert(inventoryMovements).values({
         id: movementId,
         storeId: context.storeId,
@@ -450,8 +454,12 @@ export class InventoryPostingRepository {
           ? inventoryUnitCost(inventoryValueAfterMinor, quantityAfterMilli)
           : 0n;
       const discriminator = `sale-return-inventory-reversal:${original.id}`;
-      const id = deriveMoneyFactId(input.operationId, discriminator);
-      const operationId = deriveMoneyFactOperationId(input.operationId, discriminator);
+      const id = deriveMoneyFactId(context.storeId, input.operationId, discriminator);
+      const operationId = deriveMoneyFactOperationId(
+        context.storeId,
+        input.operationId,
+        discriminator,
+      );
       await transaction.insert(inventoryMovements).values({
         id,
         storeId: context.storeId,
@@ -573,7 +581,11 @@ export class InventoryPostingRepository {
     )
       throw new InventoryPostingRejection('INVENTORY_NEGATIVE_NOT_ALLOWED');
     const entryId = c.entryId ?? randomUUID();
-    const movementId = deriveMoneyFactId(c.operationId, 'manual_inventory:movement');
+    const movementId = deriveMoneyFactId(
+      context.storeId,
+      c.operationId,
+      'manual_inventory:movement',
+    );
     const snapshot = {
       storeId: context.storeId,
       productId: c.productId,
@@ -602,7 +614,11 @@ export class InventoryPostingRepository {
       ...snapshot,
       ...effect,
       id: movementId,
-      operationId: deriveMoneyFactOperationId(c.operationId, 'manual_inventory:movement'),
+      operationId: deriveMoneyFactOperationId(
+        context.storeId,
+        c.operationId,
+        'manual_inventory:movement',
+      ),
       movementType: correctionReplacement
         ? 'correction'
         : c.kind === 'opening'

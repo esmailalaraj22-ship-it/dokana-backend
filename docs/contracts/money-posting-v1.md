@@ -11,10 +11,13 @@ The contract is subordinate to current backend-owner decisions, root
 [approved PRD v1.1](../product/Dokana_PRD_v1.1_APPROVED.md), applied migrations, and the
 closed [Accounting Period Contract v1](./accounting-period-v1.md) and
 [Store Settings / Operational Time Contract v1](./store-settings-operational-time-v1.md).
-The read-only PostgreSQL and SQLite reference package remains **unchanged**: Station 10 adds
+The PostgreSQL and SQLite SQL baselines remain **unchanged**: Station 10 adds
 **zero** migrations, columns, constraints, indexes, views, RLS policies, grants, functions,
 or triggers. All Station 10 invariants below are enforced in application code over the
 existing physical schema.
+
+Stage 3B's owner-approved pre-release identity cutover updates D10-P9a and the existing
+reference integration guides. It introduces no database schema change.
 
 ## 2. Scope and Ownership
 
@@ -201,26 +204,57 @@ receives deterministic, offline-reproducible identities derived by RFC 4122 UUID
 S10_FACT_NAMESPACE = faafc598-0d3d-5010-a246-0c178972e337
    = uuidv5("dokana:s10:money-fact-identity:v1", RFC4122 URL namespace 6ba7b811-9dad-11d1-80b4-00c04fd430c8)
 
+canonicalStoreId = lowercase hyphenated trusted tenant Store UUID
 canonicalCommandOp = lowercase hyphenated business operationId
-factId(effect)          = uuidv5(S10_FACT_NAMESPACE, `${canonicalCommandOp}|${discriminator}|id`)
-factOperationId(effect) = uuidv5(S10_FACT_NAMESPACE, `${canonicalCommandOp}|${discriminator}|op`)
+factId(effect)          = uuidv5(S10_FACT_NAMESPACE, `${canonicalStoreId}|${canonicalCommandOp}|${discriminator}|id`)
+factOperationId(effect) = uuidv5(S10_FACT_NAMESPACE, `${canonicalStoreId}|${canonicalCommandOp}|${discriminator}|op`)
 transaction_group_id    = canonicalCommandOp        (groups all facts of one command)
 ```
 
 Frozen effect discriminators: `opening`, `owner-money`, `owner-entry`, `transfer-source`,
 `transfer-destination`, `transfer-header`, and for a correction the reversing fact of an
-original effect `E`: `reversal:${E}` / `replacement:${E}`. Properties: same command+effect →
-same identity; different effect or command → different identity; no locale, device-clock, or
-random input. Verification vectors (command `7f3a9c2e-1b4d-4a6f-8c0e-2d5b7e9a1c33`):
+original effect `E`: `reversal:${E}` / `replacement:${E}`. Properties: same Store+command+effect →
+same identity; different Store, effect or command → different identity; no locale, device-clock, or
+random input. Verification vectors (Store `10000000-0000-4000-8000-000000000001`,
+command `7f3a9c2e-1b4d-4a6f-8c0e-2d5b7e9a1c33`):
 
 ```text
-opening              id=29d91ec3-f470-5698-af7b-0be86931a7ad  op=93c3fabf-9cba-5439-9520-b85d36402106
-owner-money          id=4fb42be9-9167-536a-b32b-c52bb1f6673d  op=e19a7e2f-e956-5e06-9a3f-6554371ac1cb
-owner-entry          id=cf6bec35-21d0-5d5f-84f8-5b93712b683e  op=d6f8f595-2938-57ba-acbd-9ecc0079d204
-transfer-source      id=8afc9b08-3b8e-5240-b560-69821294a154  op=4241cec8-4e2d-5010-8eb6-37ca37d8c9d3
-transfer-destination id=45685b8c-4f79-5a4f-b5be-1d0e4c16aea8  op=26a66f60-c2b7-5bdc-83a9-094f59d15466
-transfer-header      id=4bff13e7-f520-5287-b0aa-3581510bbc5f  op=07cde60a-d459-5a96-94f2-8762d78f4106
+opening              id=d79ad69a-59ee-554a-94a1-9a85fb28c365  op=c90a83e9-ab85-542d-9164-e0c6f22d1de0
+owner-money          id=1760fb70-7beb-531a-b9fc-6339c4f1e3ce  op=22aca6f1-b2d0-57b6-bc60-5b5bd12954da
+owner-entry          id=6a2373f1-bb6a-5ee5-b393-4ec9c15e2178  op=aa586aed-a607-5192-95db-e2b168a2c1c8
+transfer-source      id=92db34a1-c74b-5f98-bc4f-db7c9110cea1  op=4bf222e6-8a0e-577e-929a-d3813d7b30e1
+transfer-destination id=004d2fc2-06da-5aac-a688-56d4c850717b  op=5f08609c-2749-5a0d-b8bd-4e7aa4340c18
+transfer-header      id=ed64cda6-c5b0-5868-af4b-073f6e000cbb  op=8474e615-b4e1-5702-b755-a724a9ba21aa
 ```
+
+The backend-owner-approved pre-release clean cutover establishes this as the single
+canonical model for all generated financial and inventory facts using this helper.
+There are no deployed customer clients or production offline queues to preserve; no
+legacy identity parser, alias, identity-version field, or queue translation is added.
+The namespace remains stable; the UUIDv5 name now includes Store identity.
+
+Store identity is supplied explicitly from authenticated tenant transaction context, never
+from a command payload. Both fact IDs and fact-operation IDs include that Store. Existing
+UUID columns, global fact primary keys, Store-qualified foreign keys, and
+`UNIQUE(store_id, operation_id)` remain unchanged. `transaction_group_id` is still the
+command UUID and must be interpreted within its Store. Accepted client-generated root
+UUIDs are preserved; this rule applies only to server-derived deterministic facts.
+
+Stored-response validation uses the same trusted Store and canonical derivation. Corrections
+load persisted original facts within that Store, validate their identities and relationships,
+and append reversal/replacement facts; they never rewrite originals. Development fixtures
+must be regenerated with this convention. Unrelated historical audit/change rows are not
+rewritten. Restoring pre-cutover development snapshots
+requires an explicit disposable reset or separately reviewed data transition before use.
+
+First-release offline clients and SQLite projections must use the same UUIDv5 bytes and UTF-8
+name, including the canonical Store UUID. For example, a queued Sale uses discriminator
+`sale`, its first line uses `sale-item:0`, and a dependent Return's `saleId`/`saleItemId`
+reference those derived IDs before upload. Dependency IDs order execution; they do not
+translate payload references. Retrying an envelope preserves its operation ID, payload,
+sequence, and dependencies. PostgreSQL UUIDs and SQLite UUID TEXT columns represent this
+same identity without a schema migration. This contract supersedes the earlier Store-less
+formula in pre-release client notes and fixtures.
 
 ### D10-P10 — Immutability (physical + application)
 Posted `money_movements` and `owner_ledger_entries` are immutable. This is **already enforced

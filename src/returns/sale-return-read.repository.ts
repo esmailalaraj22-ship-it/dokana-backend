@@ -308,7 +308,7 @@ export class SaleReturnReadRepository {
         order by return_root.return_at desc, return_root.id desc
         limit ${criteria.limit + 1}
       `);
-      return result.rows.map((row) => this.mapSummary(row));
+      return result.rows.map((row) => this.mapSummary(context.storeId, row));
     });
   }
 
@@ -509,7 +509,7 @@ export class SaleReturnReadRepository {
           order by settlement.id
         `),
       ]);
-      const summary = this.mapSummary(header);
+      const summary = this.mapSummary(context.storeId, header);
       const lines = lineResult.rows.map((row) => this.mapLine(row, summary));
       const settlements = settlementResult.rows.map((row) => this.mapSettlement(row, summary));
       this.assertDetailIntegrity(summary, lines, settlements);
@@ -642,7 +642,7 @@ export class SaleReturnReadRepository {
     return { id: row.id, returnAt: new Date(row.returnAt) };
   }
 
-  private mapSummary(row: SummaryPhysicalRow): SaleReturnSummaryRow {
+  private mapSummary(storeId: string, row: SummaryPhysicalRow): SaleReturnSummaryRow {
     if (row.accountingPeriodId === null || row.lineCount <= 0) {
       throw new Error('Operational Sale Return root is incomplete.');
     }
@@ -650,8 +650,8 @@ export class SaleReturnReadRepository {
       throw new Error('Sale Return Customer lineage is inconsistent.');
     }
     const customer = this.mapCustomer(row);
-    const postingSnapshot = this.parsePostingSnapshot(row);
-    const correctionLineage = this.parseCorrectionLineage(row);
+    const postingSnapshot = this.parsePostingSnapshot(storeId, row);
+    const correctionLineage = this.parseCorrectionLineage(storeId, row);
     const totalMinor = BigInt(row.totalMinor);
     const version = BigInt(row.version);
     const settlementSummary = {
@@ -719,11 +719,14 @@ export class SaleReturnReadRepository {
     };
   }
 
-  private parsePostingSnapshot(row: SummaryPhysicalRow): SaleReturnPostingResponse {
+  private parsePostingSnapshot(
+    storeId: string,
+    row: SummaryPhysicalRow,
+  ): SaleReturnPostingResponse {
     if (row.postingAction === 'sale_returns.post') {
-      return parseStoredSaleReturnPostingResponse(row.postingResponse);
+      return parseStoredSaleReturnPostingResponse(storeId, row.postingResponse);
     }
-    const correction = parseStoredSaleReturnCorrectionResponse(row.postingResponse);
+    const correction = parseStoredSaleReturnCorrectionResponse(storeId, row.postingResponse);
     if (correction.intent !== 'replace' || correction.replacement === null) {
       throw new Error('Persisted replacement Sale Return lineage is inconsistent.');
     }
@@ -735,12 +738,13 @@ export class SaleReturnReadRepository {
   }
 
   private parseCorrectionLineage(
+    storeId: string,
     row: SummaryPhysicalRow,
   ): SaleReturnSummaryRow['correctionLineage'] {
     const correction =
       row.correctionResponse === null
         ? null
-        : parseStoredSaleReturnCorrectionResponse(row.correctionResponse);
+        : parseStoredSaleReturnCorrectionResponse(storeId, row.correctionResponse);
     const successorReturnId = correction?.replacement?.return.id ?? null;
     if (row.status === 'posted' && (row.cancelledAt !== null || correction !== null)) {
       throw new Error('Persisted Sale Return correction lineage is inconsistent.');

@@ -186,7 +186,7 @@ export class OfflineOperationService {
           await transaction.execute(sql.raw('release savepoint s19_offline_recovery_domain'));
           const failure = this.domainFailure(error);
           if (!failure) throw error;
-          await this.repository.finishRecovery(
+          const completed = await this.repository.finishRecovery(
             transaction,
             context.storeId,
             envelope.operationId,
@@ -194,7 +194,12 @@ export class OfflineOperationService {
             failure.disposition,
             failure.response,
           );
-          return this.result(envelope.operationId, failure.status, failure.response.code);
+          return this.result(
+            envelope.operationId,
+            failure.status,
+            failure.response.code,
+            completed.responseBody,
+          );
         }
         // Completion is infrastructure work, not a domain rejection. Any failure
         // here must reach the outer rollback while this savepoint is still alive.
@@ -254,14 +259,19 @@ export class OfflineOperationService {
           await transaction.execute(sql.raw('release savepoint s19_offline_domain'));
           const failure = this.domainFailure(error);
           if (!failure) throw error;
-          await this.repository.finish(
+          const completed = await this.repository.finish(
             transaction,
             context.storeId,
             envelope.operationId,
             failure.disposition,
             failure.response,
           );
-          return this.result(envelope.operationId, failure.status, failure.response.code);
+          return this.result(
+            envelope.operationId,
+            failure.status,
+            failure.response.code,
+            completed.responseBody,
+          );
         }
         const completed = await this.repository.finish(
           transaction,

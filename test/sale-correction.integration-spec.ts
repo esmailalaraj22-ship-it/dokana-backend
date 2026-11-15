@@ -424,7 +424,7 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
     }
   });
 
-  it('cancels paid, partial, credit, split-tender, tracked, and bigint Sales exactly once', async () => {
+  it('Stage 3B B02 cancels paid, partial, credit, split-tender, tracked, and bigint Sales exactly once', async () => {
     const [accountA, accountB] = await Promise.all([createAccount(), createAccount()]);
     const product = await createProduct();
     await seedInventory(product, '5000', '1000');
@@ -529,7 +529,7 @@ describe('S14.5 Sale corrections on isolated PostgreSQL', () => {
       .expect(({ body }) => expect(body).toMatchObject({ sale: { status: 'cancelled' } }));
   });
 
-  it('edits by reversing first, posts a larger replacement, and preserves one linear leaf', async () => {
+  it('Stage 3B B02 edits by reversing first, posts a larger replacement, and preserves one linear leaf', async () => {
     const [accountA, accountB] = await Promise.all([createAccount(), createAccount()]);
     const product = await createProduct();
     await seedInventory(product, '1000', '100');

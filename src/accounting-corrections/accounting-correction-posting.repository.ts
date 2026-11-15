@@ -339,6 +339,7 @@ export class AccountingCorrectionPostingRepository {
       input.targetOperationId,
     );
     const targetKind = this.resolveTargetKind(
+      context.storeId,
       targetOperation,
       input.targetOperationId,
       input.domain,
@@ -367,6 +368,7 @@ export class AccountingCorrectionPostingRepository {
   }
 
   private resolveTargetKind(
+    storeId: string,
     row: ProcessedOperationRow | undefined,
     operationId: string,
     domain: AccountingCorrectionDomain,
@@ -384,7 +386,7 @@ export class AccountingCorrectionPostingRepository {
     ) {
       const expectedAggregateId =
         domain === 'internal_transfer'
-          ? deriveMoneyFactId(operationId, 'transfer-header')
+          ? deriveMoneyFactId(storeId, operationId, 'transfer-header')
           : deriveTransactionGroupId(operationId);
       if (row.aggregateId !== expectedAggregateId) {
         reject('ACCOUNTING_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -460,10 +462,10 @@ export class AccountingCorrectionPostingRepository {
     const movement = await this.readMovement(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, role),
+      deriveMoneyFactId(storeId, operationId, role),
     );
     if (
-      movement?.operationId !== deriveMoneyFactOperationId(operationId, role) ||
+      movement?.operationId !== deriveMoneyFactOperationId(storeId, operationId, role) ||
       movement.transactionGroupId !== operationId ||
       movement.reversalOfId !== null ||
       movement.movementType !== (targetKind === 'original' ? 'opening_balance' : 'correction') ||
@@ -487,19 +489,19 @@ export class AccountingCorrectionPostingRepository {
     const movement = await this.readMovement(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, movementRole),
+      deriveMoneyFactId(storeId, operationId, movementRole),
     );
     const ownerEntry = await this.readOwnerEntry(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, ownerRole),
+      deriveMoneyFactId(storeId, operationId, ownerRole),
     );
     const descriptor = DOMAIN_DESCRIPTORS[domain];
     if (
       !movement ||
       !ownerEntry ||
-      movement.operationId !== deriveMoneyFactOperationId(operationId, movementRole) ||
-      ownerEntry.operationId !== deriveMoneyFactOperationId(operationId, ownerRole) ||
+      movement.operationId !== deriveMoneyFactOperationId(storeId, operationId, movementRole) ||
+      ownerEntry.operationId !== deriveMoneyFactOperationId(storeId, operationId, ownerRole) ||
       movement.transactionGroupId !== operationId ||
       ownerEntry.transactionGroupId !== operationId ||
       movement.reversalOfId !== null ||
@@ -551,17 +553,17 @@ export class AccountingCorrectionPostingRepository {
     const transfer = await this.readTransfer(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, headerRole),
+      deriveMoneyFactId(storeId, operationId, headerRole),
     );
     const sourceMovement = await this.readMovement(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, sourceRole),
+      deriveMoneyFactId(storeId, operationId, sourceRole),
     );
     const destinationMovement = await this.readMovement(
       transaction,
       storeId,
-      deriveMoneyFactId(operationId, destinationRole),
+      deriveMoneyFactId(storeId, operationId, destinationRole),
     );
     const expectedMovementType = targetKind === 'original' ? 'internal_transfer' : 'correction';
     if (
@@ -570,12 +572,12 @@ export class AccountingCorrectionPostingRepository {
       !destinationMovement ||
       transfer.status !== 'posted' ||
       !transfer.accountingPeriodId ||
-      transfer.operationId !== deriveMoneyFactOperationId(operationId, headerRole) ||
+      transfer.operationId !== deriveMoneyFactOperationId(storeId, operationId, headerRole) ||
       transfer.sourceMovementId !== sourceMovement.id ||
       transfer.destinationMovementId !== destinationMovement.id ||
-      sourceMovement.operationId !== deriveMoneyFactOperationId(operationId, sourceRole) ||
+      sourceMovement.operationId !== deriveMoneyFactOperationId(storeId, operationId, sourceRole) ||
       destinationMovement.operationId !==
-        deriveMoneyFactOperationId(operationId, destinationRole) ||
+        deriveMoneyFactOperationId(storeId, operationId, destinationRole) ||
       sourceMovement.transactionGroupId !== operationId ||
       destinationMovement.transactionGroupId !== operationId ||
       sourceMovement.reversalOfId !== null ||
@@ -769,8 +771,16 @@ export class AccountingCorrectionPostingRepository {
     posting: AccountingPeriodPostingContext,
   ) {
     const transactionGroupId = deriveTransactionGroupId(input.operationId);
-    const reversalMoneyId = deriveMoneyFactId(input.operationId, 'reversal:owner-money');
-    const reversalOwnerId = deriveMoneyFactId(input.operationId, 'reversal:owner-entry');
+    const reversalMoneyId = deriveMoneyFactId(
+      context.storeId,
+      input.operationId,
+      'reversal:owner-money',
+    );
+    const reversalOwnerId = deriveMoneyFactId(
+      context.storeId,
+      input.operationId,
+      'reversal:owner-entry',
+    );
     const reversalMovement = await this.insertMovement(transaction, context, input, posting, {
       discriminator: 'reversal:owner-money',
       accountId: target.movement.accountId,
@@ -795,8 +805,16 @@ export class AccountingCorrectionPostingRepository {
 
     if (input.replacement?.moneyAccountId) {
       const descriptor = DOMAIN_DESCRIPTORS[target.domain];
-      const replacementOwnerId = deriveMoneyFactId(input.operationId, 'replacement:owner-entry');
-      const replacementMoneyId = deriveMoneyFactId(input.operationId, 'replacement:owner-money');
+      const replacementOwnerId = deriveMoneyFactId(
+        context.storeId,
+        input.operationId,
+        'replacement:owner-entry',
+      );
+      const replacementMoneyId = deriveMoneyFactId(
+        context.storeId,
+        input.operationId,
+        'replacement:owner-money',
+      );
       const magnitude = input.replacement.amountMinor;
       const moneySign =
         descriptor.liabilityFactor === -1 || descriptor.equityFactor === -1 ? -1n : 1n;
@@ -865,11 +883,17 @@ export class AccountingCorrectionPostingRepository {
       // original source is reused. Reversal facts above always target the immutable original.
       const finalSource = input.replacement.sourceAccountId ?? target.transfer.sourceAccountId;
       const replacementHeaderId = deriveMoneyFactId(
+        context.storeId,
         input.operationId,
         'replacement:transfer-header',
       );
-      const sourceMovementId = deriveMoneyFactId(input.operationId, 'replacement:transfer-source');
+      const sourceMovementId = deriveMoneyFactId(
+        context.storeId,
+        input.operationId,
+        'replacement:transfer-source',
+      );
       const destinationMovementId = deriveMoneyFactId(
+        context.storeId,
         input.operationId,
         'replacement:transfer-destination',
       );
@@ -912,7 +936,11 @@ export class AccountingCorrectionPostingRepository {
         context,
         {
           id: replacementHeaderId,
-          operationId: deriveMoneyFactOperationId(input.operationId, 'replacement:transfer-header'),
+          operationId: deriveMoneyFactOperationId(
+            context.storeId,
+            input.operationId,
+            'replacement:transfer-header',
+          ),
           displayNumber,
           sourceAccountId: finalSource,
           destinationAccountId: input.replacement.destinationAccountId,
@@ -983,7 +1011,11 @@ export class AccountingCorrectionPostingRepository {
       context,
       {
         id: spec.id,
-        operationId: deriveMoneyFactOperationId(input.operationId, spec.discriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          input.operationId,
+          spec.discriminator,
+        ),
         entryType: 'correction',
         ownerLiabilityDeltaMinor: spec.ownerLiabilityDeltaMinor,
         equityDeltaMinor: spec.equityDeltaMinor,
@@ -1251,7 +1283,10 @@ export class AccountingCorrectionPostingRepository {
       return failure('OPERATION_ID_CONFLICT');
     }
     if (existing.status === 'applied') {
-      return { ok: true, response: parseStoredAccountingCorrectionResponse(existing.responseBody) };
+      return {
+        ok: true,
+        response: parseStoredAccountingCorrectionResponse(context.storeId, existing.responseBody),
+      };
     }
     if (existing.status === 'rejected') {
       return this.parseStoredRejection(existing);

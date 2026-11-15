@@ -225,7 +225,7 @@ export class SalePostingRepository {
     command: SalePostingCommand,
     postingDate: string,
   ): Promise<SalePostingResult> {
-    const saleId = deriveMoneyFactId(command.operationId, 'sale');
+    const saleId = deriveMoneyFactId(context.storeId, command.operationId, 'sale');
     const operation: MutationOperation = {
       operationId: command.operationId,
       aggregateType: 'sales',
@@ -259,7 +259,11 @@ export class SalePostingRepository {
     command: CustomerOpeningReceivableCommand,
     postingDate: string,
   ): Promise<CustomerOpeningReceivableResult> {
-    const receivableId = deriveMoneyFactId(command.operationId, 'customer-opening-receivable');
+    const receivableId = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      'customer-opening-receivable',
+    );
     const operation: MutationOperation = {
       operationId: command.operationId,
       aggregateType: 'customer_ledger_entries',
@@ -285,6 +289,7 @@ export class SalePostingRepository {
           const receivable = await this.insertReceivable(savepoint, context, {
             id: receivableId,
             operationId: deriveMoneyFactOperationId(
+              context.storeId,
               command.operationId,
               'customer-opening-receivable',
             ),
@@ -328,7 +333,7 @@ export class SalePostingRepository {
       context,
       command,
       posting,
-      deriveMoneyFactId(command.operationId, 'sale'),
+      deriveMoneyFactId(context.storeId, command.operationId, 'sale'),
       correctionOfId,
     );
   }
@@ -454,6 +459,7 @@ export class SalePostingRepository {
     const postedPayments: PostedSalePayment[] = [];
     for (const payment of command.payments) {
       const paymentId = deriveMoneyFactId(
+        context.storeId,
         command.operationId,
         `sale-payment:${payment.moneyAccountId}`,
       );
@@ -504,8 +510,12 @@ export class SalePostingRepository {
       command.creditTotalMinor === 0n || command.customerId === null
         ? null
         : await this.insertReceivable(transaction, context, {
-            id: deriveMoneyFactId(command.operationId, 'sale-receivable'),
-            operationId: deriveMoneyFactOperationId(command.operationId, 'sale-receivable'),
+            id: deriveMoneyFactId(context.storeId, command.operationId, 'sale-receivable'),
+            operationId: deriveMoneyFactOperationId(
+              context.storeId,
+              command.operationId,
+              'sale-receivable',
+            ),
             customerId: command.customerId,
             accountingPeriodId: posting.accountingPeriodId,
             entryType: 'sale_credit',
@@ -574,7 +584,11 @@ export class SalePostingRepository {
     index: number,
     line: Extract<SalePostingCommand['items'][number], { isManualLine: true }>,
   ): Promise<PostedSaleItem> {
-    const id = deriveMoneyFactId(command.operationId, `sale-item:${String(index)}`);
+    const id = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      `sale-item:${String(index)}`,
+    );
     await transaction.insert(saleItems).values({
       id,
       storeId: context.storeId,
@@ -647,7 +661,11 @@ export class SalePostingRepository {
     }
     if (baseQuantityMilli <= 0n) reject('SALE_AMOUNT_INVALID');
 
-    const id = deriveMoneyFactId(command.operationId, `sale-item:${String(index)}`);
+    const id = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      `sale-item:${String(index)}`,
+    );
     let costStatus: 'known' | 'pending' | 'unknown' = 'unknown';
     let storedUnitCostMinor: bigint | null = null;
     let storedLineCostMinor: bigint | null = null;
@@ -697,6 +715,7 @@ export class SalePostingRepository {
       responseLineCostMinor =
         costStatus === 'known' ? (storedLineCostMinor?.toString() ?? null) : null;
       inventoryMovementId = deriveMoneyFactId(
+        context.storeId,
         command.operationId,
         `sale-item:${String(index)}:inventory`,
       );
@@ -723,6 +742,7 @@ export class SalePostingRepository {
         reason: command.notes,
         deviceId: context.deviceId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           `sale-item:${String(index)}:inventory`,
         ),
@@ -915,7 +935,11 @@ export class SalePostingRepository {
     },
   ): Promise<PostedSaleCustomerCreditTender> {
     const ledgerDiscriminator = 'sale-customer-credit-ledger';
-    const ledgerEntryId = deriveMoneyFactId(input.command.operationId, ledgerDiscriminator);
+    const ledgerEntryId = deriveMoneyFactId(
+      context.storeId,
+      input.command.operationId,
+      ledgerDiscriminator,
+    );
     const ledgerRows = await transaction
       .insert(customerLedgerEntries)
       .values({
@@ -933,7 +957,11 @@ export class SalePostingRepository {
         occurredAt: input.command.occurredAt,
         reason: input.command.notes,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(input.command.operationId, ledgerDiscriminator),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          input.command.operationId,
+          ledgerDiscriminator,
+        ),
       })
       .returning({ createdAt: customerLedgerEntries.createdAt });
     if (!ledgerRows[0]) {
@@ -941,6 +969,7 @@ export class SalePostingRepository {
     }
 
     const applicationId = deriveMoneyFactId(
+      context.storeId,
       input.command.operationId,
       'sale-customer-credit-application',
     );

@@ -215,7 +215,7 @@ export class SupplierPaymentCorrectionRepository {
       context.storeId,
       command.targetOperationId,
     );
-    const descriptor = this.resolveTarget(targetOperation, command);
+    const descriptor = this.resolveTarget(context.storeId, targetOperation, command);
     const supplierId = await this.readTargetSupplier(
       transaction,
       context.storeId,
@@ -240,7 +240,7 @@ export class SupplierPaymentCorrectionRepository {
       context.storeId,
       target.paymentId,
     );
-    this.assertTargetIntegrity(target, originalAllocations);
+    this.assertTargetIntegrity(context.storeId, target, originalAllocations);
     await this.lockAffectedObligations(
       transaction,
       context.storeId,
@@ -308,6 +308,7 @@ export class SupplierPaymentCorrectionRepository {
   }
 
   private resolveTarget(
+    storeId: string,
     row: ProcessedOperationRow | undefined,
     command: SupplierPaymentCorrectionCommand,
   ): TargetDescriptor {
@@ -316,7 +317,7 @@ export class SupplierPaymentCorrectionRepository {
     if (row.responseCode !== 201) reject('SUPPLIER_PAYMENT_CORRECTION_TARGET_INTEGRITY_CONFLICT');
 
     if (row.action === 'supplier_payments.post' && row.aggregateType === 'supplier_payments') {
-      const expected = deriveMoneyFactId(command.targetOperationId, 'supplier-payment');
+      const expected = deriveMoneyFactId(storeId, command.targetOperationId, 'supplier-payment');
       if (row.aggregateId !== expected) {
         reject('SUPPLIER_PAYMENT_CORRECTION_TARGET_INTEGRITY_CONFLICT');
       }
@@ -453,6 +454,7 @@ export class SupplierPaymentCorrectionRepository {
   }
 
   private assertTargetIntegrity(
+    storeId: string,
     target: PaymentTargetRow,
     allocations: SupplierPaymentAllocationCommand[],
   ): void {
@@ -473,7 +475,11 @@ export class SupplierPaymentCorrectionRepository {
       target.payableTransactionGroupId !== expectedGroup ||
       target.payableReversalOfId !== null ||
       target.payableOperationId !==
-        deriveMoneyFactOperationId(target.paymentOperationId, 'supplier-payment-payable') ||
+        deriveMoneyFactOperationId(
+          storeId,
+          target.paymentOperationId,
+          'supplier-payment-payable',
+        ) ||
       target.payableReversalCount !== '0' ||
       target.allocationCount === '0' ||
       target.allocationCount !== allocations.length.toString() ||
@@ -592,7 +598,11 @@ export class SupplierPaymentCorrectionRepository {
         row.transactionGroupId !== expectedGroup ||
         row.reversalOfId !== null ||
         row.operationId !==
-          deriveMoneyFactOperationId(target.paymentOperationId, 'supplier-payment-money') ||
+          deriveMoneyFactOperationId(
+            storeId,
+            target.paymentOperationId,
+            'supplier-payment-money',
+          ) ||
         reversalCount !== '0'
       ) {
         reject('SUPPLIER_PAYMENT_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -644,7 +654,7 @@ export class SupplierPaymentCorrectionRepository {
       row.transactionGroupId !== expectedGroup ||
       row.reversalOfId !== null ||
       row.operationId !==
-        deriveMoneyFactOperationId(target.paymentOperationId, 'supplier-payment-owner') ||
+        deriveMoneyFactOperationId(storeId, target.paymentOperationId, 'supplier-payment-owner') ||
       reversalCount !== '0'
     ) {
       reject('SUPPLIER_PAYMENT_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -727,8 +737,13 @@ export class SupplierPaymentCorrectionRepository {
       moneyMovement = { ...movement, movementType: 'correction', reversalOfId: funding.id };
     } else {
       const entry = await this.ownerLedger.insertOwnerEntryWithinTransaction(transaction, context, {
-        id: deriveMoneyFactId(command.operationId, 'supplier-payment-owner-reversal'),
+        id: deriveMoneyFactId(
+          context.storeId,
+          command.operationId,
+          'supplier-payment-owner-reversal',
+        ),
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           'supplier-payment-owner-reversal',
         ),
@@ -759,7 +774,11 @@ export class SupplierPaymentCorrectionRepository {
     const rows = await transaction
       .insert(supplierLedgerEntries)
       .values({
-        id: deriveMoneyFactId(command.operationId, 'supplier-payment-payable-reversal'),
+        id: deriveMoneyFactId(
+          context.storeId,
+          command.operationId,
+          'supplier-payment-payable-reversal',
+        ),
         storeId: context.storeId,
         supplierId: target.supplierId,
         accountingPeriodId: posting.accountingPeriodId,
@@ -775,6 +794,7 @@ export class SupplierPaymentCorrectionRepository {
         reason: `Supplier Payment ${command.kind}`,
         deviceId: context.deviceId,
         operationId: deriveMoneyFactOperationId(
+          context.storeId,
           command.operationId,
           'supplier-payment-payable-reversal',
         ),

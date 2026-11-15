@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 import type { Server } from 'node:http';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -783,7 +784,7 @@ describe('S14.3 Sale posting and receivable origination on isolated PostgreSQL',
     }
   });
 
-  it('replays exactly across tender order and conflicts on a changed material request', async () => {
+  it('Stage 3B B03 replays exactly across tender order and conflicts on a changed material request', async () => {
     const [accountA, accountB] = await Promise.all([createAccount(), createAccount()]);
     const body = manualSale(accountA, {
       customerId: customers.primary,
@@ -817,7 +818,65 @@ describe('S14.3 Sale posting and receivable origination on isolated PostgreSQL',
     });
   });
 
-  it('serializes duplicate operation IDs and concurrent tracked Sales without duplicate effects', async () => {
+  it('Stage 3B B03 binds quantity, price, discounts, customer and semantic instant without second facts', async () => {
+    const line = {
+      isManualLine: true,
+      description: 'Canonical review Sale',
+      unitName: 'service',
+      quantityMilli: '1000',
+      unitPriceMinor: '500',
+    };
+    const body = {
+      operationId: randomUUID(),
+      occurredAt: saleInstant,
+      customerId: customers.primary,
+      items: [line],
+      payments: [],
+    };
+    const first = await postSale(body).expect(201);
+    const tables = [
+      'ledger.sales',
+      'ledger.sale_items',
+      'ledger.sale_payments',
+      'ledger.customer_ledger_entries',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+    ];
+    const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    const equivalent = {
+      ...body,
+      operationId: body.operationId.toUpperCase(),
+      customerId: body.customerId.toUpperCase(),
+      occurredAt: new Date(saleInstant).toISOString(),
+      items: [{ ...line, lineDiscountMinor: '0' }],
+      invoiceDiscountMinor: '0',
+      roundingMinor: '0',
+    };
+    expect((await postSale(equivalent).expect(201)).body).toEqual(first.body);
+    for (const changed of [
+      { ...body, items: [{ ...line, quantityMilli: '2000' }] },
+      { ...body, items: [{ ...line, unitPriceMinor: '501' }] },
+      { ...body, items: [{ ...line, lineDiscountMinor: '1' }] },
+      { ...body, invoiceDiscountMinor: '1' },
+      { ...body, customerId: customers.secondary },
+      { ...body, occurredAt: new Date(Date.parse(saleInstant) + 60_000).toISOString() },
+    ]) {
+      expect((await postSale(changed).expect(409)).body).toMatchObject({
+        code: 'OPERATION_ID_CONFLICT',
+      });
+      const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      for (const table of [...tables, 'sync.processed_operations'])
+        expect(after[table]).toEqual(before[table]);
+    }
+    expect(await factCounts(body.operationId)).toMatchObject({
+      sales: 1,
+      payments: 0,
+      moneyMovements: 0,
+      operations: 1,
+    });
+  });
+
+  it('Stage 3B B01 Sale serializes duplicate operation IDs and concurrent tracked Sales without duplicate effects', async () => {
     const accountId = await createAccount();
     const duplicate = manualSale(accountId);
     const duplicateResults = await Promise.all([postSale(duplicate), postSale(duplicate)]);
@@ -835,6 +894,19 @@ describe('S14.3 Sale posting and receivable origination on isolated PostgreSQL',
     const second = productSale(product, null, { customerId: customers.secondary });
     const results = await Promise.all([postSale(first), postSale(second)]);
     expect(results.map((result) => result.status)).toEqual([201, 201]);
+    const tables = [
+      'ledger.sales',
+      'ledger.sale_items',
+      'ledger.sale_payments',
+      'ledger.sale_customer_credit_applications',
+      'ledger.customer_ledger_entries',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    const beforeReplay = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    expect((await postSale(first).expect(201)).body).toEqual(results[0].body);
+    expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeReplay);
     expect(
       (
         await db().admin.query(

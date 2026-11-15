@@ -553,7 +553,7 @@ describe('S11.6 inventory corrections on isolated real PostgreSQL', () => {
     expect(await stock(occupied.productId)).toMatchObject({ quantity: '1000' });
   });
 
-  it('reverses and replaces a whole established multi-Product Stock Count', async () => {
+  it('Stage 3B B02 reverses and replaces a whole established multi-Product Stock Count', async () => {
     const first = await product();
     const second = await product();
     for (const fixture of [first, second]) {

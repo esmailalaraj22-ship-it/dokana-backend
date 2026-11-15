@@ -22,6 +22,7 @@ import {
   type InventoryTestDatabase,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 let environment = readLocalPostgresTestEnvironment();
 const describeWithPostgres = environment ? describe : describe.skip;
@@ -516,7 +517,7 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
     );
   });
 
-  it('exposes Subscription lifecycle and history through thin idempotent APIs', async () => {
+  it('Stage 3B B06 preserves Subscription history across later changes and rejects identity conflict', async () => {
     const token = await login('s18-5-admin@example.test');
     const actions = [
       ['activate', fixtures.stores.activation],
@@ -534,12 +535,51 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
         .send(body)
         .expect(200);
       expect(bodyOf(first)).toMatchObject({ action, replayed: false, operationId });
+      const evidence = await captureReplayEvidence(adminPool, storeId, [
+        'platform.subscriptions',
+        'platform.admin_actions',
+      ]);
       const replay = await request(server)
         .post(`/v1/admin/stores/${storeId}/subscriptions/${action}`)
         .set('Authorization', `Bearer ${token}`)
         .send(body)
         .expect(200);
-      expect(bodyOf(replay)).toMatchObject({ action, replayed: true, operationId });
+      expect(bodyOf(replay)).toEqual({ ...bodyOf(first), replayed: true });
+      expect(
+        await captureReplayEvidence(adminPool, storeId, [
+          'platform.subscriptions',
+          'platform.admin_actions',
+        ]),
+      ).toEqual(evidence);
+      if (action === 'extend') {
+        await request(server)
+          .post(`/v1/admin/stores/${storeId}/subscriptions/cancel`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ operationId: randomUUID(), reason: 'Stage 3B later cancellation' })
+          .expect(200);
+        const later = await captureReplayEvidence(adminPool, storeId, [
+          'platform.subscriptions',
+          'platform.admin_actions',
+        ]);
+        const historical = await request(server)
+          .post(`/v1/admin/stores/${storeId}/subscriptions/extend`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body)
+          .expect(200);
+        expect(bodyOf(historical)).toEqual({ ...bodyOf(first), replayed: true });
+        const conflict = await request(server)
+          .post(`/v1/admin/stores/${storeId}/subscriptions/extend`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ ...body, reason: 'Changed intent' })
+          .expect(409);
+        expect(bodyOf(conflict).code).toBe('OPERATION_ID_CONFLICT');
+        expect(
+          await captureReplayEvidence(adminPool, storeId, [
+            'platform.subscriptions',
+            'platform.admin_actions',
+          ]),
+        ).toEqual(later);
+      }
     }
 
     const subscriptions = await request(server)
@@ -609,7 +649,7 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
     expect(settings.rows).toEqual([{ customerDebtAmountAlertMinor: '50000' }]);
   });
 
-  it('suspends and restores Stores with versioning, audit, replay, and archive safety', async () => {
+  it('Stage 3B B06 preserves historical Store lifecycle results without a second mutation', async () => {
     const token = await login('s18-5-admin@example.test');
     const operationId = randomUUID();
     const payload = { operationId, expectedVersion: '1', reason: 'Security suspension' };
@@ -645,6 +685,33 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
       .send({ operationId: randomUUID(), expectedVersion: '2', reason: 'Approved restoration' })
       .expect(200);
     expect(bodyOf(restored)).toMatchObject({ status: 'active', version: '3' });
+    const laterEvidence = await captureReplayEvidence(adminPool, fixtures.stores.lifecycle, [
+      'platform.admin_actions',
+      'platform.subscriptions',
+    ]);
+    const laterStore = await adminPool.query(
+      'select to_jsonb(s)::text as row from ledger.stores s where id=$1',
+      [fixtures.stores.lifecycle],
+    );
+    const historical = await request(server)
+      .post(`/v1/admin/stores/${fixtures.stores.lifecycle}/lifecycle/suspend`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(payload)
+      .expect(200);
+    expect(bodyOf(historical)).toEqual({ ...bodyOf(suspended), replayed: true });
+    expect(
+      await captureReplayEvidence(adminPool, fixtures.stores.lifecycle, [
+        'platform.admin_actions',
+        'platform.subscriptions',
+      ]),
+    ).toEqual(laterEvidence);
+    expect(
+      (
+        await adminPool.query('select to_jsonb(s)::text as row from ledger.stores s where id=$1', [
+          fixtures.stores.lifecycle,
+        ])
+      ).rows,
+    ).toEqual(laterStore.rows);
     await request(server)
       .post(`/v1/admin/stores/${fixtures.stores.archived}/lifecycle/restore`)
       .set('Authorization', `Bearer ${token}`)
@@ -674,6 +741,14 @@ describeWithPostgres('S18.5 online entitlement and SaaS administration', () => {
     ]);
     expect(race.map((response) => response.status)).toEqual([200, 200]);
     expect(race.map((response) => bodyOf(response).replayed).sort()).toEqual([false, true]);
+    expect(
+      (
+        await adminPool.query(
+          'select count(*)::int as count from platform.admin_actions where store_id=$1 and request_id=$2',
+          [fixtures.stores.lifecycleRace, raceOperation],
+        )
+      ).rows,
+    ).toEqual([{ count: 1 }]);
 
     const history = await request(server)
       .get(`/v1/admin/stores/${fixtures.stores.lifecycle}/history`)

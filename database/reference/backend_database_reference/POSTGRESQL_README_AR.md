@@ -1,5 +1,21 @@
 # قاعدة PostgreSQL المركزية — نظام دفتر الدكان
 
+## Pre-release deterministic fact identity alignment
+
+The approved canonical derivation is [Money Posting D10-P9a](../../../docs/contracts/money-posting-v1.md#d10-p9a--deterministic-fact-identity-contract):
+UUIDv5 namespace `faafc598-0d3d-5010-a246-0c178972e337`, UTF-8 name
+`<lowercase trusted Store UUID>|<lowercase command UUID>|<effect discriminator>|id`
+(or suffix `op` for a fact-operation UUID). Store-scoped command IDs must not be used
+alone to derive globally unique fact IDs. `transaction_group_id` stays the command UUID
+within its Store; accepted client-generated root UUIDs remain unchanged.
+
+This is the single first-release convention for backend and future Flutter/Drift clients,
+including locally queued Sale/item IDs referenced by dependent Returns and corrections.
+Dependency ordering does not rewrite references. No deployed legacy queues require a
+translation protocol. UUID/TEXT keys and Store-qualified foreign keys already support the
+model, so this alignment changes no SQL schema or baseline. Use the contract's fixed test
+vectors when implementing a client derivation.
+
 ## الحالة
 
 هذه الحزمة هي **مرشح إنتاج PostgreSQL v1.0.0** المبني مباشرة على مخطط SQLite المحلي v1.1، مع إضافات الخادم الضرورية للمستخدمين والاشتراكات والتراخيص والمزامنة والاستعادة والتدقيق المركزي.

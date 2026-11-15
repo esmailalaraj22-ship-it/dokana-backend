@@ -572,7 +572,7 @@ describe('S17.5 immutable Sale Return corrections on isolated PostgreSQL', () =>
     expect(payments.rows[0]).toEqual({ count: 1 });
   });
 
-  it('reverses the exact historical refund account after archive and preserves both replays', async () => {
+  it('Stage 3B B02 reverses the exact historical refund account after archive and preserves both replays', async () => {
     const saleAccount = await createAccount();
     const refundAccount = await createAccount();
     const sale = await postManualSale({ accountId: saleAccount });
@@ -783,7 +783,7 @@ describe('S17.5 immutable Sale Return corrections on isolated PostgreSQL', () =>
     });
   });
 
-  it('creates one linear replacement chain and exposes predecessor, successor, and active leaf', async () => {
+  it('Stage 3B B02 creates one linear replacement chain and exposes predecessor, successor, and active leaf', async () => {
     const customerId = await createCustomer();
     const sale = await postManualSale({
       customerId,

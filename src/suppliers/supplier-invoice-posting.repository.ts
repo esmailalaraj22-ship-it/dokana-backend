@@ -135,7 +135,7 @@ export class SupplierInvoicePostingRepository {
     command: SupplierInvoicePostingCommand,
     postingDate: string,
   ): Promise<SupplierInvoicePostingResult> {
-    const invoiceId = deriveMoneyFactId(command.operationId, 'supplier-invoice');
+    const invoiceId = deriveMoneyFactId(context.storeId, command.operationId, 'supplier-invoice');
     const operation: MutationOperation = {
       operationId: command.operationId,
       aggregateType: 'purchase_invoices',
@@ -172,7 +172,11 @@ export class SupplierInvoicePostingRepository {
     command: SupplierOpeningPayableCommand,
     postingDate: string,
   ): Promise<SupplierOpeningPayableResult> {
-    const payableId = deriveMoneyFactId(command.operationId, 'supplier-opening-payable');
+    const payableId = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      'supplier-opening-payable',
+    );
     const operation: MutationOperation = {
       operationId: command.operationId,
       aggregateType: 'supplier_ledger_entries',
@@ -217,7 +221,7 @@ export class SupplierInvoicePostingRepository {
     posting: AccountingPeriodPostingContext,
     correctionOfId: string | null,
   ): Promise<SupplierInvoicePostingResponse> {
-    const invoiceId = deriveMoneyFactId(command.operationId, 'supplier-invoice');
+    const invoiceId = deriveMoneyFactId(context.storeId, command.operationId, 'supplier-invoice');
     await this.lockSupplier(transaction, context.storeId, command.supplierId);
     const items = await this.prepareItems(transaction, context.storeId, command);
     const displayNumber = `PI-${invoiceId}`;
@@ -264,8 +268,12 @@ export class SupplierInvoicePostingRepository {
     );
 
     const payable = await this.insertPayable(transaction, context, {
-      id: deriveMoneyFactId(command.operationId, 'supplier-invoice-payable'),
-      operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-invoice-payable'),
+      id: deriveMoneyFactId(context.storeId, command.operationId, 'supplier-invoice-payable'),
+      operationId: deriveMoneyFactOperationId(
+        context.storeId,
+        command.operationId,
+        'supplier-invoice-payable',
+      ),
       supplierId: command.supplierId,
       accountingPeriodId: posting.accountingPeriodId,
       entryType: 'supplier_invoice',
@@ -343,7 +351,11 @@ export class SupplierInvoicePostingRepository {
     posting: AccountingPeriodPostingContext,
     enforceOriginalUniqueness: boolean,
   ): Promise<SupplierOpeningPayableResponse> {
-    const payableId = deriveMoneyFactId(command.operationId, 'supplier-opening-payable');
+    const payableId = deriveMoneyFactId(
+      context.storeId,
+      command.operationId,
+      'supplier-opening-payable',
+    );
     await this.lockSupplier(transaction, context.storeId, command.supplierId);
     const existing = await transaction.execute<{ present: boolean }>(sql`
         select exists (
@@ -369,7 +381,11 @@ export class SupplierInvoicePostingRepository {
 
     const payable = await this.insertPayable(transaction, context, {
       id: payableId,
-      operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-opening-payable'),
+      operationId: deriveMoneyFactOperationId(
+        context.storeId,
+        command.operationId,
+        'supplier-opening-payable',
+      ),
       supplierId: command.supplierId,
       accountingPeriodId: posting.accountingPeriodId,
       entryType: 'opening_balance',
@@ -433,7 +449,11 @@ export class SupplierInvoicePostingRepository {
         throw error;
       }
       result.push({
-        id: deriveMoneyFactId(command.operationId, `supplier-invoice-item-${String(index)}`),
+        id: deriveMoneyFactId(
+          storeId,
+          command.operationId,
+          `supplier-invoice-item-${String(index)}`,
+        ),
         productId: item.productId,
         productUnitId: item.productUnitId,
         description: item.description,

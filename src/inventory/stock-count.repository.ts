@@ -284,9 +284,9 @@ export class StockCountRepository {
       const requiresMovement = !balance || effect.quantityDeltaMilli !== 0n;
       const itemDiscriminator = `stock_count:item:${input.productId}`;
       const movementDiscriminator = `stock_count:movement:${input.productId}`;
-      const itemId = deriveMoneyFactId(command.operationId, itemDiscriminator);
+      const itemId = deriveMoneyFactId(context.storeId, command.operationId, itemDiscriminator);
       const movementId = requiresMovement
-        ? deriveMoneyFactId(command.operationId, movementDiscriminator)
+        ? deriveMoneyFactId(context.storeId, command.operationId, movementDiscriminator)
         : null;
       const quantityFactKind =
         !balance && actual === 0n ? ('count_zero_establishment' as const) : ('movement' as const);
@@ -329,7 +329,11 @@ export class StockCountRepository {
           occurredAt: command.occurredAt,
           reason: null,
           deviceId: context.deviceId,
-          operationId: deriveMoneyFactOperationId(command.operationId, movementDiscriminator),
+          operationId: deriveMoneyFactOperationId(
+            context.storeId,
+            command.operationId,
+            movementDiscriminator,
+          ),
           productUnitId: movementSnapshotUnit.id,
           selectedQuantityMilli:
             quantityFactKind === 'count_zero_establishment'

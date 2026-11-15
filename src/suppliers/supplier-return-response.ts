@@ -119,14 +119,16 @@ const correctionResponse = z.object({
 });
 
 export function parseStoredSupplierFinancialPostingResponse(
+  storeId: string,
   value: unknown,
 ): SupplierFinancialPostingResponse {
   const response = postingResponse.parse(value) as SupplierFinancialPostingResponse;
-  assertPostingIdentity(response);
+  assertPostingIdentity(storeId, response);
   return response;
 }
 
 export function parseStoredSupplierFinancialCorrectionResponse(
+  storeId: string,
   value: unknown,
 ): SupplierFinancialCorrectionResponse {
   const response = correctionResponse.parse(value) as SupplierFinancialCorrectionResponse;
@@ -137,13 +139,14 @@ export function parseStoredSupplierFinancialCorrectionResponse(
     throw new Error('Stored Supplier correction replacement state is invalid.');
   }
   if (
-    response.target.id !== deriveMoneyFactId(response.targetOperationId, response.family) ||
+    response.target.id !==
+      deriveMoneyFactId(storeId, response.targetOperationId, response.family) ||
     response.target.status !== (response.family === 'supplier_return' ? 'cancelled' : 'reversed')
   ) {
     throw new Error('Stored Supplier correction target identity is invalid.');
   }
   if (response.replacement) {
-    assertPostingIdentity(response.replacement);
+    assertPostingIdentity(storeId, response.replacement);
     if (
       response.replacement.family !== response.family ||
       response.replacement.operationId !== response.operationId ||
@@ -156,20 +159,21 @@ export function parseStoredSupplierFinancialCorrectionResponse(
 }
 
 export function parseStoredSupplierFinancialMutationResponse(
+  storeId: string,
   value: unknown,
 ): SupplierFinancialMutationResponse {
   const parsedCorrection = correctionResponse.safeParse(value);
   if (parsedCorrection.success) {
-    return parseStoredSupplierFinancialCorrectionResponse(parsedCorrection.data);
+    return parseStoredSupplierFinancialCorrectionResponse(storeId, parsedCorrection.data);
   }
-  return parseStoredSupplierFinancialPostingResponse(value);
+  return parseStoredSupplierFinancialPostingResponse(storeId, value);
 }
 
-function assertPostingIdentity(response: SupplierFinancialPostingResponse): void {
+function assertPostingIdentity(storeId: string, response: SupplierFinancialPostingResponse): void {
   if (response.transactionGroupId !== deriveTransactionGroupId(response.operationId)) {
     throw new Error('Stored Supplier financial transaction identity is invalid.');
   }
-  const expectedId = deriveMoneyFactId(response.operationId, response.family);
+  const expectedId = deriveMoneyFactId(storeId, response.operationId, response.family);
   const actualId =
     response.family === 'supplier_return'
       ? response.return.id
@@ -182,9 +186,9 @@ function assertPostingIdentity(response: SupplierFinancialPostingResponse): void
   if (response.family === 'supplier_refund') {
     const movement = response.refund.moneyMovement;
     if (
-      movement.id !== deriveMoneyFactId(response.operationId, 'supplier_refund_money') ||
+      movement.id !== deriveMoneyFactId(storeId, response.operationId, 'supplier_refund_money') ||
       movement.operationId !==
-        deriveMoneyFactOperationId(response.operationId, 'supplier_refund_money')
+        deriveMoneyFactOperationId(storeId, response.operationId, 'supplier_refund_money')
     ) {
       throw new Error('Stored Supplier Refund Money identity is invalid.');
     }

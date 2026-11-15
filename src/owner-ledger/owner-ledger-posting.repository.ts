@@ -300,8 +300,12 @@ export class OwnerLedgerPostingRepository {
             }
           }
 
-          const ownerEntryId = deriveMoneyFactId(input.operationId, 'owner-entry');
-          const moneyMovementId = deriveMoneyFactId(input.operationId, 'owner-money');
+          const ownerEntryId = deriveMoneyFactId(context.storeId, input.operationId, 'owner-entry');
+          const moneyMovementId = deriveMoneyFactId(
+            context.storeId,
+            input.operationId,
+            'owner-money',
+          );
           const movement = await this.moneyMovements.insertMovementWithinTransaction(
             savepoint,
             context,
@@ -320,7 +324,11 @@ export class OwnerLedgerPostingRepository {
           );
           const ownerEntry = await this.insertOwnerEntryWithinTransaction(savepoint, context, {
             id: ownerEntryId,
-            operationId: deriveMoneyFactOperationId(input.operationId, 'owner-entry'),
+            operationId: deriveMoneyFactOperationId(
+              context.storeId,
+              input.operationId,
+              'owner-entry',
+            ),
             entryType: descriptor.entryType,
             ownerLiabilityDeltaMinor: descriptor.liabilityDelta(input.amountMinor),
             equityDeltaMinor: descriptor.equityDelta(input.amountMinor),

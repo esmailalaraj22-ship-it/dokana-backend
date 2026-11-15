@@ -338,6 +338,7 @@ export class ExpenseCorrectionRepository {
     ]);
 
     const internalPaymentOperationId = deriveMoneyFactOperationId(
+      context.storeId,
       command.targetOperationId,
       'expense-payment',
     );
@@ -457,7 +458,11 @@ export class ExpenseCorrectionRepository {
       context.storeId,
       command.targetOperationId,
     );
-    const descriptor = this.resolvePaymentTarget(operation, command.targetOperationId);
+    const descriptor = this.resolvePaymentTarget(
+      context.storeId,
+      operation,
+      command.targetOperationId,
+    );
     const expenseId = await this.readPaymentExpenseId(
       transaction,
       context.storeId,
@@ -579,6 +584,7 @@ export class ExpenseCorrectionRepository {
   }
 
   private resolvePaymentTarget(
+    storeId: string,
     row: ProcessedOperationRow | undefined,
     targetOperationId: string,
   ): PaymentDescriptor {
@@ -586,7 +592,7 @@ export class ExpenseCorrectionRepository {
     if (row.status !== 'applied') reject('EXPENSE_CORRECTION_TARGET_NOT_ACTIVE');
     if (row.responseCode !== 201) reject('EXPENSE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
     if (row.action === 'expense_payments.post' && row.aggregateType === 'expense_payments') {
-      const expected = deriveMoneyFactId(targetOperationId, 'expense-payment');
+      const expected = deriveMoneyFactId(storeId, targetOperationId, 'expense-payment');
       if (row.aggregateId !== expected) reject('EXPENSE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
       return { paymentId: expected };
     }
@@ -836,7 +842,8 @@ export class ExpenseCorrectionRepository {
         row.referenceId !== payment.paymentId ||
         row.transactionGroupId !== expectedGroup ||
         row.reversalOfId !== null ||
-        row.operationId !== deriveMoneyFactOperationId(rootOperationId, 'expense-payment-money') ||
+        row.operationId !==
+          deriveMoneyFactOperationId(storeId, rootOperationId, 'expense-payment-money') ||
         reversalCount !== '0'
       ) {
         reject('EXPENSE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -889,7 +896,8 @@ export class ExpenseCorrectionRepository {
       row.referenceId !== payment.paymentId ||
       row.transactionGroupId !== expectedGroup ||
       row.reversalOfId !== null ||
-      row.operationId !== deriveMoneyFactOperationId(rootOperationId, 'expense-payment-owner') ||
+      row.operationId !==
+        deriveMoneyFactOperationId(storeId, rootOperationId, 'expense-payment-owner') ||
       reversalCount !== '0'
     ) {
       reject('EXPENSE_CORRECTION_TARGET_INTEGRITY_CONFLICT');
@@ -1008,8 +1016,12 @@ export class ExpenseCorrectionRepository {
       };
     }
     const entry = await this.ownerLedger.insertOwnerEntryWithinTransaction(transaction, context, {
-      id: deriveMoneyFactId(operationId, `${referenceType}-owner-reversal`),
-      operationId: deriveMoneyFactOperationId(operationId, `${referenceType}-owner-reversal`),
+      id: deriveMoneyFactId(context.storeId, operationId, `${referenceType}-owner-reversal`),
+      operationId: deriveMoneyFactOperationId(
+        context.storeId,
+        operationId,
+        `${referenceType}-owner-reversal`,
+      ),
       entryType: 'correction',
       ownerLiabilityDeltaMinor: -funding.ownerLiabilityDeltaMinor,
       equityDeltaMinor: -funding.equityDeltaMinor,

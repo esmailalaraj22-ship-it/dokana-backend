@@ -105,11 +105,14 @@ const responseSchema = z
   })
   .strict();
 
-export function parseStoredSaleReturnPostingResponse(value: unknown): SaleReturnPostingResponse {
+export function parseStoredSaleReturnPostingResponse(
+  storeId: string,
+  value: unknown,
+): SaleReturnPostingResponse {
   const response = responseSchema.parse(value);
   if (
     response.transactionGroupId !== response.operationId ||
-    response.return.id !== deriveMoneyFactId(response.operationId, 'sale-return')
+    response.return.id !== deriveMoneyFactId(storeId, response.operationId, 'sale-return')
   ) {
     throw new Error('Stored Sale Return response identity is invalid.');
   }
@@ -118,16 +121,22 @@ export function parseStoredSaleReturnPostingResponse(value: unknown): SaleReturn
       throw new Error('Stored Sale Return line quantity is invalid.');
     }
     if (
-      line.id !== deriveMoneyFactId(response.operationId, `sale-return-item:${line.saleItemId}`)
+      line.id !==
+      deriveMoneyFactId(storeId, response.operationId, `sale-return-item:${line.saleItemId}`)
     ) {
       throw new Error('Stored Sale Return line identity is invalid.');
     }
     if (
       line.inventoryMovement &&
       (line.inventoryMovement.id !==
-        deriveMoneyFactId(response.operationId, `sale-return-item:${line.saleItemId}:inventory`) ||
+        deriveMoneyFactId(
+          storeId,
+          response.operationId,
+          `sale-return-item:${line.saleItemId}:inventory`,
+        ) ||
         line.inventoryMovement.operationId !==
           deriveMoneyFactOperationId(
+            storeId,
             response.operationId,
             `sale-return-item:${line.saleItemId}:inventory`,
           ))
@@ -145,7 +154,7 @@ export function parseStoredSaleReturnPostingResponse(value: unknown): SaleReturn
   for (const settlement of response.settlements) {
     if (
       settlement.id !==
-      deriveMoneyFactId(response.operationId, `sale-return-settlement:${settlement.kind}`)
+      deriveMoneyFactId(storeId, response.operationId, `sale-return-settlement:${settlement.kind}`)
     ) {
       throw new Error('Stored Sale Return settlement identity is invalid.');
     }
@@ -165,9 +174,9 @@ export function parseStoredSaleReturnPostingResponse(value: unknown): SaleReturn
     if (ledgerDiscriminator) {
       if (
         settlement.customerLedgerEntryId !==
-          deriveMoneyFactId(response.operationId, ledgerDiscriminator) ||
+          deriveMoneyFactId(storeId, response.operationId, ledgerDiscriminator) ||
         settlement.customerLedgerOperationId !==
-          deriveMoneyFactOperationId(response.operationId, ledgerDiscriminator) ||
+          deriveMoneyFactOperationId(storeId, response.operationId, ledgerDiscriminator) ||
         settlement.moneyAccountId !== null ||
         settlement.moneyMovement !== null
       ) {
@@ -178,9 +187,9 @@ export function parseStoredSaleReturnPostingResponse(value: unknown): SaleReturn
       settlement.customerLedgerOperationId !== null ||
       settlement.moneyAccountId === null ||
       settlement.moneyMovement?.id !==
-        deriveMoneyFactId(response.operationId, 'sale-return-refund-money') ||
+        deriveMoneyFactId(storeId, response.operationId, 'sale-return-refund-money') ||
       settlement.moneyMovement.operationId !==
-        deriveMoneyFactOperationId(response.operationId, 'sale-return-refund-money') ||
+        deriveMoneyFactOperationId(storeId, response.operationId, 'sale-return-refund-money') ||
       settlement.moneyMovement.accountId !== settlement.moneyAccountId ||
       settlement.moneyMovement.transactionGroupId !== response.operationId ||
       BigInt(settlement.moneyMovement.amountDeltaMinor) !== -BigInt(settlement.amountMinor)

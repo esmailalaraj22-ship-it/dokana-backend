@@ -178,7 +178,7 @@ export class SupplierPaymentPostingRepository {
     command: SupplierPaymentPostingCommand,
     postingDate: string,
   ): Promise<SupplierPaymentPostingResult> {
-    const paymentId = deriveMoneyFactId(command.operationId, 'supplier-payment');
+    const paymentId = deriveMoneyFactId(context.storeId, command.operationId, 'supplier-payment');
 
     return this.database.withTenantTransaction(context, async (transaction) => {
       const begun = await this.beginMutation(transaction, context, command, paymentId);
@@ -202,7 +202,7 @@ export class SupplierPaymentPostingRepository {
     command: SupplierPaymentPostingCommand,
     postingDate: string,
   ): Promise<SupplierPaymentPostingResponse> {
-    const paymentId = deriveMoneyFactId(command.operationId, 'supplier-payment');
+    const paymentId = deriveMoneyFactId(context.storeId, command.operationId, 'supplier-payment');
     const posting = await this.resolvePosting(transaction, context, command, postingDate);
     await this.lockSupplier(transaction, context.storeId, command.supplierId);
     await this.lockAndValidateTargets(transaction, context.storeId, command);
@@ -271,8 +271,12 @@ export class SupplierPaymentPostingRepository {
         transaction,
         context,
         {
-          id: deriveMoneyFactId(command.operationId, 'supplier-payment-owner'),
-          operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-payment-owner'),
+          id: deriveMoneyFactId(context.storeId, command.operationId, 'supplier-payment-owner'),
+          operationId: deriveMoneyFactOperationId(
+            context.storeId,
+            command.operationId,
+            'supplier-payment-owner',
+          ),
           entryType: 'owner_paid_supplier',
           ownerLiabilityDeltaMinor: command.amountMinor,
           equityDeltaMinor: 0n,
@@ -343,7 +347,7 @@ export class SupplierPaymentPostingRepository {
     paymentId: string,
   ): Promise<PostedSupplierPaymentAllocation[]> {
     const values = command.allocations.map((allocation) => ({
-      id: this.allocationId(command.operationId, allocation),
+      id: this.allocationId(context.storeId, command.operationId, allocation),
       storeId: context.storeId,
       supplierPaymentId: paymentId,
       purchaseInvoiceId: allocation.targetType === 'purchase_invoice' ? allocation.targetId : null,
@@ -361,7 +365,7 @@ export class SupplierPaymentPostingRepository {
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
     return command.allocations.map((allocation) => {
-      const id = this.allocationId(command.operationId, allocation);
+      const id = this.allocationId(context.storeId, command.operationId, allocation);
       const row = byId.get(id);
       if (!row) throw new Error('Supplier Payment allocation insertion is incomplete.');
       const targetId = row.purchaseInvoiceId ?? row.openingPayableLedgerEntryId;
@@ -386,7 +390,7 @@ export class SupplierPaymentPostingRepository {
     const rows = await transaction
       .insert(supplierLedgerEntries)
       .values({
-        id: deriveMoneyFactId(command.operationId, 'supplier-payment-payable'),
+        id: deriveMoneyFactId(context.storeId, command.operationId, 'supplier-payment-payable'),
         storeId: context.storeId,
         supplierId: command.supplierId,
         accountingPeriodId: posting.accountingPeriodId,
@@ -400,7 +404,11 @@ export class SupplierPaymentPostingRepository {
         occurredAt: command.occurredAt,
         reason: command.notes,
         deviceId: context.deviceId,
-        operationId: deriveMoneyFactOperationId(command.operationId, 'supplier-payment-payable'),
+        operationId: deriveMoneyFactOperationId(
+          context.storeId,
+          command.operationId,
+          'supplier-payment-payable',
+        ),
       })
       .returning({
         id: supplierLedgerEntries.id,
@@ -601,8 +609,13 @@ export class SupplierPaymentPostingRepository {
     }
   }
 
-  private allocationId(operationId: string, allocation: SupplierPaymentAllocationCommand): string {
+  private allocationId(
+    storeId: string,
+    operationId: string,
+    allocation: SupplierPaymentAllocationCommand,
+  ): string {
     return deriveMoneyFactId(
+      storeId,
       operationId,
       `supplier-payment-allocation-${allocation.targetType}-${allocation.targetId}`,
     );

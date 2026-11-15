@@ -43,6 +43,7 @@ import {
   upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { interceptOperationQueries } from './stage3b-driver-boundary';
 
 const migrationFilename = '0015_sale_customer_credit_tender.sql';
 
@@ -505,6 +506,336 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
     }
   });
 
+  describe('Stage 3B B01 Customer Collection', () => {
+    function runtime(): Pool {
+      if (!runtimePool) throw new Error('Collection runtime pool is unavailable');
+      return runtimePool;
+    }
+    async function fixture() {
+      const customerId = await createCustomer();
+      const accounts: [string, string] = [await createAccount(), await createAccount()];
+      accounts.sort();
+      const opening = await postOpening(customerId, '1000', '2026-06-01T10:00:00Z');
+      const body = fifoRequest([
+        { moneyAccountId: accounts[0], amountMinor: '40' },
+        { moneyAccountId: accounts[1], amountMinor: '60' },
+      ]);
+      return { customerId, accounts, opening, body, operationId: body.operationId as string };
+    }
+
+    type Fixture = Awaited<ReturnType<typeof fixture>>;
+    type Facts = Record<string, Record<string, unknown>[]>;
+
+    async function facts(f: Fixture): Promise<Facts> {
+      // Read entire authoritative rows, not only net balances or response IDs.
+      const result: Facts = {};
+      const queries: Record<string, string> = {
+        payments: 'select * from ledger.customer_payments where store_id=$1 and customer_id=$3',
+        allocations: `select a.* from ledger.customer_payment_allocations a
+          join ledger.customer_payments p on p.store_id=a.store_id and p.id=a.customer_payment_id
+          where a.store_id=$1 and p.customer_id=$3`,
+        ledger:
+          'select * from ledger.customer_ledger_entries where store_id=$1 and transaction_group_id=$2',
+        movements:
+          'select * from ledger.money_movements where store_id=$1 and transaction_group_id=$2',
+        operations: 'select * from sync.processed_operations where store_id=$1 and operation_id=$2',
+      };
+      for (const [name, query] of Object.entries(queries)) {
+        result[name] = (
+          await db().admin.query<{ row: Record<string, unknown> }>(
+            `select to_jsonb(q) as row from (${query}) q
+           where $2::uuid is not null and $3::uuid is not null order by to_jsonb(q)::text`,
+            [owner.storeId, f.operationId, f.customerId],
+          )
+        ).rows.map((r) => r.row);
+      }
+      // Store-wide evidence also catches orphan audit/change records after rollback.
+      for (const [name, table] of Object.entries({
+        audit: 'audit.central_audit_logs',
+        changes: 'sync.change_events',
+        orderedChanges: 'sync.store_change_events_v1',
+      })) {
+        result[name] = (
+          await db().admin.query<{ row: Record<string, unknown> }>(
+            `select to_jsonb(t) as row from ${table} t
+           where store_id=$1 order by to_jsonb(t)::text`,
+            [owner.storeId],
+          )
+        ).rows.map((r) => r.row);
+      }
+      return result;
+    }
+
+    async function assertApplied(f: Fixture): Promise<Facts> {
+      const state = await facts(f);
+      expect(state.payments).toHaveLength(2);
+      expect(state.allocations).toHaveLength(2);
+      expect(state.ledger).toHaveLength(2);
+      expect(state.movements).toHaveLength(2);
+      expect(state.operations).toHaveLength(1);
+      expect(state.operations?.[0]).toMatchObject({ status: 'applied', response_code: 201 });
+      for (const [index, account] of f.accounts.entries()) {
+        const amount = index === 0 ? 40 : 60;
+        const paymentId = deriveMoneyFactId(
+          owner.storeId,
+          f.operationId,
+          `customer-payment:${account}`,
+        );
+        const movementId = deriveMoneyFactId(
+          owner.storeId,
+          f.operationId,
+          `customer-collection-money:${account}`,
+        );
+        const discriminator = `customer-collection-allocation:${account}:opening_receivable:${f.opening.receivable.id}`;
+        const ledgerId = deriveMoneyFactId(
+          owner.storeId,
+          f.operationId,
+          `customer-collection-ledger:${discriminator}`,
+        );
+        expect(state.payments).toContainEqual(
+          expect.objectContaining({
+            id: paymentId,
+            customer_id: f.customerId,
+            money_account_id: account,
+            amount_minor: amount,
+            allocated_total_minor: amount,
+            credit_created_minor: 0,
+            money_movement_id: movementId,
+            status: 'posted',
+            operation_id: deriveMoneyFactOperationId(
+              owner.storeId,
+              f.operationId,
+              `customer-payment:${account}`,
+            ),
+          }),
+        );
+        expect(state.allocations).toContainEqual(
+          expect.objectContaining({
+            id: deriveMoneyFactId(owner.storeId, f.operationId, discriminator),
+            customer_payment_id: paymentId,
+            opening_receivable_ledger_entry_id: f.opening.receivable.id,
+            customer_ledger_entry_id: ledgerId,
+            amount_minor: amount,
+          }),
+        );
+        expect(state.ledger).toContainEqual(
+          expect.objectContaining({
+            id: ledgerId,
+            reference_id: paymentId,
+            entry_type: 'payment',
+            receivable_delta_minor: -amount,
+            credit_delta_minor: 0,
+            transaction_group_id: f.operationId,
+          }),
+        );
+        expect(state.movements).toContainEqual(
+          expect.objectContaining({
+            id: movementId,
+            reference_id: paymentId,
+            account_id: account,
+            amount_delta_minor: amount,
+            transaction_group_id: f.operationId,
+          }),
+        );
+        // Draft insertion and posted transition are separate, intentional events.
+        expect(state.audit?.filter((r) => r.entity_id === paymentId)).toHaveLength(2);
+        expect(state.changes?.filter((r) => r.entity_id === paymentId)).toHaveLength(2);
+        expect(state.orderedChanges?.filter((r) => r.entity_id === paymentId)).toHaveLength(2);
+        expect(await moneyBalance(account)).toBe(String(amount));
+      }
+      expect(await customerBalances(f.customerId)).toEqual({ receivable: '900', credit: '0' });
+      expect(await allocatedTo(owner.storeId, 'opening', f.opening.receivable.id)).toBe(100n);
+      return state;
+    }
+
+    it('A/E exact replay preserves every fact and changed economic fields conflict', async () => {
+      const f = await fixture();
+      const original = await postCollection(f.customerId, f.body).expect(201);
+      const before = await assertApplied(f);
+      expect((await postCollection(f.customerId, f.body).expect(201)).body).toEqual(original.body);
+      expect(await facts(f)).toEqual(before);
+      const otherCustomer = await createCustomer();
+      const otherAccount = await createAccount();
+      for (const [customerId, body] of [
+        [
+          f.customerId,
+          {
+            ...f.body,
+            tenders: [
+              { moneyAccountId: f.accounts[0], amountMinor: '41' },
+              { moneyAccountId: f.accounts[1], amountMinor: '60' },
+            ],
+          },
+        ],
+        [
+          f.customerId,
+          {
+            ...f.body,
+            tenders: [
+              { moneyAccountId: otherAccount, amountMinor: '40' },
+              { moneyAccountId: f.accounts[1], amountMinor: '60' },
+            ],
+          },
+        ],
+        [f.customerId, { ...f.body, occurredAt: '2026-09-14T12:01:00Z' }],
+        [otherCustomer, f.body],
+      ] as const) {
+        await postCollection(customerId, body)
+          .expect(409)
+          .expect(expectResponseCode('OPERATION_ID_CONFLICT'));
+        expect(await facts(f)).toEqual(before);
+      }
+      expect(
+        (
+          await db().admin.query(
+            `select count(*)::int as count from sync.conflicts
+        where store_id=$1 and operation_id=$2 and conflict_type='duplicate_identity'`,
+            [owner.storeId, f.operationId],
+          )
+        ).rows,
+      ).toEqual([{ count: 4 }]);
+      expect(await moneyBalance(otherAccount)).toBe('0');
+      expect(await customerBalances(otherCustomer)).toEqual({ receivable: '0', credit: '0' });
+    });
+
+    it('B forces an overlapping duplicate to wait and then recover one committed effect set', async () => {
+      const f = await fixture();
+      let arrived!: () => void;
+      let release!: () => void;
+      const atCommit = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let held = false;
+      const restore = interceptOperationQueries(runtime(), f.operationId, async (text, execute) => {
+        if (text === 'commit' && !held) {
+          held = true;
+          arrived();
+          await gate;
+        }
+        return execute();
+      });
+      const first = postCollection(f.customerId, f.body).then((r) => r);
+      let second: Promise<request.Response> | undefined;
+      try {
+        await Promise.race([
+          atCommit,
+          first.then(() => {
+            throw new Error('Request ended before the COMMIT gate');
+          }),
+        ]);
+        second = postCollection(f.customerId, f.body).then((r) => r);
+        let waiting = false;
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline && !waiting) {
+          waiting =
+            (
+              await db().admin.query<{ waiting: boolean }>(`select exists(
+            select 1 from pg_stat_activity where datname=current_database()
+            and application_name='dokana-s153-runtime' and wait_event_type='Lock'
+            and cardinality(pg_blocking_pids(pid)) > 0) as waiting`)
+            ).rows[0]?.waiting === true;
+          if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(waiting).toBe(true);
+        expect((await facts(f)).operations).toHaveLength(0);
+        release();
+        const responses = await Promise.all([first, second]);
+        expect(responses.map((r) => r.status)).toEqual([201, 201]);
+        expect(responses[1].body).toEqual(responses[0].body);
+        await assertApplied(f);
+      } finally {
+        release();
+        await Promise.allSettled([first, ...(second ? [second] : [])]);
+        restore();
+      }
+    });
+
+    it('C retries after the caller discards a successful committed response', async () => {
+      const f = await fixture();
+      await postCollection(f.customerId, f.body).expect(201); // Response intentionally discarded.
+      const committed = await assertApplied(f);
+      const retry = await postCollection(f.customerId, f.body).expect(201);
+      expect(retry.body).toEqual(committed.operations?.[0]?.response_body);
+      expect(await facts(f)).toEqual(committed);
+    });
+
+    it.each(['commit-ack-lost', 'commit-not-sent', 'before-completion'] as const)(
+      'D/F safely retries %s without duplicate effects or a permanent infrastructure rejection',
+      async (boundary) => {
+        const f = await fixture();
+        const before = await facts(f);
+        let injected = 0;
+        const restore = interceptOperationQueries(
+          runtime(),
+          f.operationId,
+          async (text, execute) => {
+            const selected =
+              boundary === 'before-completion'
+                ? text.includes('update sync.processed_operations') &&
+                  text.includes("status='applied'")
+                : text === 'commit';
+            if (selected && injected++ === 0) {
+              if (boundary === 'commit-ack-lost') await execute();
+              throw new Error(`Stage 3B controlled ${boundary}`);
+            }
+            return execute();
+          },
+        );
+        try {
+          await postCollection(f.customerId, f.body).expect(500);
+        } finally {
+          restore();
+        }
+        expect(injected).toBe(1);
+        // Caller sees an ambiguous failure for lost COMMIT acknowledgement.
+        // Independent PostgreSQL observation establishes what really committed.
+        const durable = boundary === 'commit-ack-lost' ? await assertApplied(f) : await facts(f);
+        if (boundary !== 'commit-ack-lost') {
+          expect(durable).toEqual(before);
+          expect(await customerBalances(f.customerId)).toEqual({ receivable: '1000', credit: '0' });
+        }
+        const retry = await postCollection(f.customerId, f.body).expect(201);
+        const after = await assertApplied(f);
+        expect(retry.body).toEqual(after.operations?.[0]?.response_body);
+        if (boundary === 'commit-ack-lost') expect(after).toEqual(durable);
+      },
+    );
+
+    it('F persists domain rejection and replays it after the account becomes available', async () => {
+      const f = await fixture();
+      await db().admin.query(
+        "update ledger.money_accounts set availability='held_by_external_party' where id=$1",
+        [f.accounts[0]],
+      );
+      await postCollection(f.customerId, f.body)
+        .expect(409)
+        .expect(expectResponseCode('MONEY_ACCOUNT_UNAVAILABLE'));
+      const rejected = await facts(f);
+      expect(rejected.operations).toHaveLength(1);
+      expect(rejected.operations?.[0]).toMatchObject({
+        status: 'rejected',
+        error_code: 'MONEY_ACCOUNT_UNAVAILABLE',
+      });
+      for (const name of ['payments', 'allocations', 'ledger', 'movements'])
+        expect(rejected[name]).toHaveLength(0);
+      await db().admin.query(
+        "update ledger.money_accounts set availability='available' where id=$1",
+        [f.accounts[0]],
+      );
+      const replay = await postCollection(f.customerId, f.body).expect(409);
+      expect(replay.body).toMatchObject(rejected.operations?.[0]?.response_body as object);
+      expect(await facts(f)).toEqual(rejected);
+      // A fresh identity proves that the changed business state is now eligible.
+      f.body = { ...f.body, operationId: randomUUID() };
+      f.operationId = f.body.operationId as string;
+      await postCollection(f.customerId, f.body).expect(201);
+      await assertApplied(f);
+    });
+  });
+
   it('posts mixed-tender FIFO across Opening and Sale Receivables with exact accounting effects', async () => {
     const customerId = await createCustomer();
     const accountA = await createAccount();
@@ -868,12 +1199,12 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
         reference_type,reference_id,transaction_group_id,occurred_at,operation_id
       ) values($1,$2,$3,$4,'other',1,'fixture',$5,$5,'2026-07-01T10:00:00Z',$6)`,
       [
-        deriveMoneyFactId(operationId, discriminator),
+        deriveMoneyFactId(owner.storeId, operationId, discriminator),
         owner.storeId,
         account,
         opening.accountingPeriodId,
         randomUUID(),
-        deriveMoneyFactOperationId(operationId, discriminator),
+        deriveMoneyFactOperationId(owner.storeId, operationId, discriminator),
       ],
     );
     await postCollection(
@@ -900,7 +1231,7 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
             where store_id=$1 and operation_id=$3) as operation`,
         [
           owner.storeId,
-          deriveMoneyFactOperationId(operationId, `customer-payment:${account}`),
+          deriveMoneyFactOperationId(owner.storeId, operationId, `customer-payment:${account}`),
           operationId,
         ],
       )
@@ -1769,7 +2100,11 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
     const rollbackCustomer = await createCustomer();
     const advance = await createCustomerCredit(rollbackCustomer, account, '100');
     const rollbackOperationId = randomUUID();
-    const collidingId = deriveMoneyFactId(rollbackOperationId, 'sale-customer-credit-ledger');
+    const collidingId = deriveMoneyFactId(
+      owner.storeId,
+      rollbackOperationId,
+      'sale-customer-credit-ledger',
+    );
     await db().admin.query(
       `insert into ledger.customer_ledger_entries(
          id,store_id,customer_id,accounting_period_id,entry_type,
@@ -1787,7 +2122,7 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
         randomUUID(),
       ],
     );
-    const rollbackSaleId = deriveMoneyFactId(rollbackOperationId, 'sale');
+    const rollbackSaleId = deriveMoneyFactId(owner.storeId, rollbackOperationId, 'sale');
     await postSale(
       customerCreditSaleRequest({
         customerId: rollbackCustomer,
@@ -1893,7 +2228,11 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
     expect(duplicate.filter((response) => response.status === 201).length).toBeGreaterThanOrEqual(
       1,
     );
-    const duplicateSaleId = deriveMoneyFactId(duplicateCommand.operationId as string, 'sale');
+    const duplicateSaleId = deriveMoneyFactId(
+      owner.storeId,
+      duplicateCommand.operationId as string,
+      'sale',
+    );
     expect(
       (
         await db().admin.query(
@@ -1950,12 +2289,12 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
         reference_type,reference_id,transaction_group_id,occurred_at,operation_id
       ) values($1,$2,$3,$4,'other',1,'fixture',$5,$5,'2026-09-15T10:00:00Z',$6)`,
       [
-        deriveMoneyFactId(operationId, discriminator),
+        deriveMoneyFactId(owner.storeId, operationId, discriminator),
         owner.storeId,
         account,
         (advance.body as CustomerCollectionPostingResponse).accountingPeriodId,
         randomUUID(),
-        deriveMoneyFactOperationId(operationId, discriminator),
+        deriveMoneyFactOperationId(owner.storeId, operationId, discriminator),
       ],
     );
     await postCustomerFinancial(customerId, 'credit/refunds', {

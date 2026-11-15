@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import { isUUID } from 'class-validator';
 
 // Deterministic, offline-reproducible fact identity (D10-P9a of the Money Posting
-// Contract v1). Each generated fact receives a UUIDv5 derived from the business command
-// operationId and a frozen effect discriminator, so retries reproduce identical rows and
-// the existing per-table UNIQUE(store_id, operation_id) constraint is satisfied.
+// Contract v1). Each generated fact receives a UUIDv5 derived from the trusted Store
+// UUID, command operationId and frozen effect discriminator. Retries reproduce the same
+// rows while different Stores cannot alias globally unique facts through a shared command.
 
 export const S10_FACT_NAMESPACE = 'faafc598-0d3d-5010-a246-0c178972e337';
 
@@ -25,29 +25,45 @@ export function canonicalizeCommandOperationId(operationId: string): string {
   return operationId.toLowerCase();
 }
 
-export function deriveMoneyFactId(commandOperationId: string, discriminator: string): string {
-  return derive(commandOperationId, discriminator, 'id');
-}
-
-export function deriveMoneyFactOperationId(
+export function deriveMoneyFactId(
+  storeId: string,
   commandOperationId: string,
   discriminator: string,
 ): string {
-  return derive(commandOperationId, discriminator, 'op');
+  return derive(storeId, commandOperationId, discriminator, 'id');
+}
+
+export function deriveMoneyFactOperationId(
+  storeId: string,
+  commandOperationId: string,
+  discriminator: string,
+): string {
+  return derive(storeId, commandOperationId, discriminator, 'op');
 }
 
 // The transaction group is the canonical business command identity; it groups all facts
-// produced by one command.
+// produced by one command within its Store; it is not a globally unique fact identity.
 export function deriveTransactionGroupId(commandOperationId: string): string {
   return canonicalizeCommandOperationId(commandOperationId);
 }
 
-function derive(commandOperationId: string, discriminator: string, suffix: 'id' | 'op'): string {
+function derive(
+  storeId: string,
+  commandOperationId: string,
+  discriminator: string,
+  suffix: 'id' | 'op',
+): string {
+  if (typeof storeId !== 'string' || !POSTGRESQL_UUID_PATTERN.test(storeId)) {
+    throw new MoneyFactIdentityError('storeId');
+  }
   const canonicalOperationId = canonicalizeCommandOperationId(commandOperationId);
   if (typeof discriminator !== 'string' || discriminator.length === 0) {
     throw new MoneyFactIdentityError('discriminator');
   }
-  return uuidV5(`${canonicalOperationId}|${discriminator}|${suffix}`, S10_FACT_NAMESPACE);
+  return uuidV5(
+    `${storeId.toLowerCase()}|${canonicalOperationId}|${discriminator}|${suffix}`,
+    S10_FACT_NAMESPACE,
+  );
 }
 
 function uuidV5(name: string, namespace: string): string {

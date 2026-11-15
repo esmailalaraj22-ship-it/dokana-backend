@@ -385,7 +385,7 @@ export class SaleReturnCorrectionRepository {
     await this.assertNoAppliedCorrection(transaction, storeId, root.id);
 
     const operation = await this.readOperation(transaction, storeId, root.operationId);
-    const snapshot = this.resolvePostingSnapshot(operation, root);
+    const snapshot = this.resolvePostingSnapshot(storeId, operation, root);
     const [items, settlements] = await Promise.all([
       transaction
         .select()
@@ -472,6 +472,7 @@ export class SaleReturnCorrectionRepository {
   }
 
   private resolvePostingSnapshot(
+    storeId: string,
     operation: ProcessedOperationRow | undefined,
     root: SaleReturnRow,
   ): SaleReturnPostingResponse {
@@ -484,13 +485,13 @@ export class SaleReturnCorrectionRepository {
         operation.aggregateId === root.id &&
         operation.action === 'sale_returns.post'
       ) {
-        return parseStoredSaleReturnPostingResponse(operation.responseBody);
+        return parseStoredSaleReturnPostingResponse(storeId, operation.responseBody);
       }
       if (
         operation.aggregateType === 'sale_return_corrections' &&
         operation.action === 'sale_returns.replace'
       ) {
-        const correction = parseStoredSaleReturnCorrectionResponse(operation.responseBody);
+        const correction = parseStoredSaleReturnCorrectionResponse(storeId, operation.responseBody);
         if (correction.replacement?.return.id === root.id) return correction.replacement;
       }
     } catch {
@@ -909,7 +910,10 @@ export class SaleReturnCorrectionRepository {
     if (row.status === 'applied') {
       if (row.responseCode !== 201)
         throw new Error('Invalid Sale Return correction replay status.');
-      return { ok: true, response: parseStoredSaleReturnCorrectionResponse(row.responseBody) };
+      return {
+        ok: true,
+        response: parseStoredSaleReturnCorrectionResponse(context.storeId, row.responseBody),
+      };
     }
     if (row.status === 'rejected') {
       const code = row.errorCode;
