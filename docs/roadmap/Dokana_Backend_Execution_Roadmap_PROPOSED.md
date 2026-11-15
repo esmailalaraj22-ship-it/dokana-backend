@@ -2909,3 +2909,84 @@ This Roadmap-only closure follows the implementation commit.
 
 Unresolved Critical/High transaction findings: zero within this review. Ready for Stage 3B under
 the approved master sequence; Stage 3B was not started.
+
+### Stage 3B Independent Idempotency / Replay Review Closure — 2026-11-15
+
+Stage 3B is PASS within the approved bounded identity, replay, versioning and retry scope.
+Reviewed baseline: `e429ba86cb2cf0dda12745b7d807899aae335797`; implementation commit:
+`4bec0bd` (`fix(idempotency): qualify deterministic facts by store and preserve rejection replay`).
+This Roadmap-only closure follows that implementation commit. Stage 4 was not started.
+
+- **S3B-01 (High) CLOSED.** Store-scoped command UUIDs previously generated globally keyed
+  financial facts without Store identity. Real PostgreSQL reproduced a second Store's transfer
+  failing with `23505` / `money_movements_pkey`. The owner-approved pre-release clean cutover
+  uses UUIDv5 namespace `faafc598-0d3d-5010-a246-0c178972e337` and UTF-8 name
+  `<lowercase trusted Store UUID>|<lowercase command UUID>|<effect discriminator>|id`
+  (suffix `op` for fact-operation UUIDs). All 182 production helper calls pass trusted Store
+  identity explicitly. There is one canonical model, with no legacy parser, alias, identity
+  version, queue translation or V1/V2 runtime branch. Accepted client root UUIDs are preserved;
+  `transaction_group_id` remains the command UUID within its Store.
+- The shared correction covers posting, response validation, original-target loading and
+  reversal/replacement consumers across Money, Owner Ledger, Sales, Customer Collections/Credit,
+  Suppliers, Expenses, Returns, Inventory and Stock Count. Immutable originals remain unchanged.
+  Existing D10-P9a and the PostgreSQL/SQLite integration guides now share the formula and fixed
+  vectors. An offline Sale/line/Return/correction dependency chain precomputes references before
+  upload and resolves them without translation. SQLite parity is reference/contract alignment;
+  no mobile implementation or deployed-client validation is claimed.
+- **S3B-02 (Medium) CLOSED.** First offline domain rejection returned `response: null` while
+  replay returned the persisted rejection body. Push and recovery now return the completion
+  record's response body immediately, so first rejection and subsequent retries agree.
+  Domain savepoint rollback and outer transaction failure propagation remain intact. Runtime
+  proofs preserve terminal rejection even after the missing Product is later created, and prove
+  recovery rejection causes zero economic effects. Existing transaction-boundary unit tests pass.
+- **B01 PASS:** exact and changed replay, concurrent duplicates, discarded response, actual
+  COMMIT followed by controlled acknowledgment loss, unsent COMMIT, completion rollback and
+  persisted rejection. Driver-boundary faults use real PostgreSQL; no packet-level chaos claim.
+  **B02 PASS:** both cross-Store winner orders, same-Store device/actor behavior, both cross-family
+  winner orders, representative correction chains and precomputed offline references.
+  **B03 PASS:** amounts, quantities, prices, discounts, allocations, accounts, parties, semantic
+  instants and command family remain bound to intent; canonical order/case/default forms replay;
+  absent cost remains distinct from known zero. **B04 PASS:** historical response after later
+  resource changes, changed expectedVersion conflict, stale fresh write rejection, and one winner
+  behind a real PostgreSQL operation-lock barrier.
+  **B05 PASS:** partial economic batch retry, dependency release, terminal rejection, bounded
+  quarantine/recovery and recovery-versus-push race. **B06 PASS:** Platform Admin and License
+  identity conflicts, historical results after later Store/Subscription changes, and one issuance
+  under duplicate concurrency. No authorization or synchronization architecture was redesigned.
+- Proofs inspect authoritative IDs, Store ownership, amounts, quantities, links, allocations,
+  versions, operation records and audit/change rows. Duplicate Money, receivable, payable and
+  inventory effects and foreign-Store effects: **0 in the selected scenarios**. Initial failures
+  exposed S3B-01/S3B-02 and stale test setup; fixtures now supply real memberships required by
+  0039 and the offline disposable fixture upgrades to current migrations. No runtime authority,
+  RLS, constraint or assertion was weakened.
+- Final consolidated command: `$stage3bPaths = @(rg -l 'Stage 3B' test -g '*.integration-spec.ts')`
+  then `npm.cmd run test:integration -- --runTestsByPath @stage3bPaths --testNamePattern 'Stage 3B'`.
+  Result: **49 PASS / 21 files / 335 intentionally unselected tests / 241.202 seconds / exit 0**.
+  Focused unit runs: **34 PASS / 6 identity and parser files**, **43 PASS / 3 canonical command
+  files**, and **19 PASS / offline-operation.service.spec.ts**; **96 total / 10 files**, all exit 0.
+  Commands used `npm.cmd run test:unit -- --runTestsByPath` with the named identity/response/service
+  files, `sale-posting-command.spec.ts`, `customer-payment-posting-command.spec.ts`,
+  `supplier-payment-posting-command.spec.ts`, and `offline-operation.service.spec.ts`.
+  `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`,
+  `npm.cmd run db:migrate:verify`, `npm.cmd run db:check`, and `git diff --check`: **PASS**.
+- PostgreSQL 18.4 / approved local `DOCANA`: **39 applied / 0 pending**; runtime role
+  `dokana_runtime_login` verified. **Migration 0040: NONE; 0041: NONE.** No schema, SQL baseline,
+  function, trigger, grant, RLS, dependency, environment or endpoint delta. No affected development
+  financial facts required transformation; no data reset or rewrite was performed. Existing
+  pre-cutover development snapshots require an explicit reset or separately reviewed transition.
+- Cleanup inspection: **temporary databases 0; idle transactions 0; other Dokana test connections
+  0; remaining users/stores 0; Stage 3B fixture residue 0**. All Store-scoped tables are empty except
+  the pre-existing 540 central audit rows and 772 legacy change rows. The pre-existing 6,548
+  unattributed orphan refresh tokens remain unchanged; the License suite verified full-row
+  fingerprints and zero new orphans. Historical residue was not deleted to obtain a clean result.
+- Changed implementation scope: 30 production TypeScript files, 7 unit files, 21 integration
+  files, 2 test helpers and 3 existing contract/reference documents; this closure adds only the
+  existing Roadmap update. Full diff, trusted-context propagation, stale identity references,
+  prohibited SQL changes and added credential-pattern checks were reviewed. No production
+  secret, real customer data or unrelated file was added.
+
+Unresolved Critical/High findings and new owner decisions within this review: **0**. Full unit/
+integration, full accounting/inventory, synchronization architecture, recovery/DR, baseline
+`06_runtime_tests.sql`, clean-install and release campaigns were not rerun. This is a bounded
+Stage 3B review, not production approval or a separate external Fable sign-off. Ready for Stage 4
+under the approved sequence, subject to the owner's progression gate; **do not start it here**.
