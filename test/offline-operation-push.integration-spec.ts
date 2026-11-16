@@ -345,6 +345,75 @@ describeWithPostgres('S19.5 offline operation push and canonical domain applicat
     return responseBody(response) as BootstrapManifest;
   }
 
+  it('S4B2-04 offline inventory dispatch respects Product override over Store policy', async () => {
+    try {
+      for (const allowed of [false, true]) {
+        await db().admin.query(
+          'update ledger.app_settings set allow_negative_stock=$2 where store_id=$1',
+          [fixture.storeId, !allowed],
+        );
+        const productId = randomUUID();
+        const productUnitId = randomUUID();
+        const created = await push([
+          envelope({
+            operationType: 'products.create.v1',
+            aggregateId: productId,
+            payload: {
+              name: `Stage4B ${productId}`,
+              measurementType: 'count',
+              trackInventory: true,
+              allowNegativeStockOverride: allowed,
+              initialBaseUnit: { id: productUnitId, unitName: 'piece' },
+            },
+          }),
+        ]);
+        expect(created.results[0]?.status).toBe('APPLIED');
+        const operationId = randomUUID();
+        const result = await push([
+          envelope({
+            operationId,
+            aggregateId: randomUUID(),
+            operationType: 'inventory.decrease.post.v1',
+            payload: {
+              productId,
+              productUnitId,
+              selectedQuantityMilli: '1000',
+              occurredAt,
+              reason: 'Policy proof',
+            },
+          }),
+        ]);
+        expect(result.results[0]).toMatchObject({
+          status: allowed ? 'APPLIED' : 'CONFLICT',
+          code: allowed ? null : 'INVENTORY_NEGATIVE_NOT_ALLOWED',
+        });
+        expect(
+          (
+            await db().admin.query(
+              `select quantity_delta_milli::text as quantity,cost_state_after as state
+          from ledger.inventory_movements where store_id=$1 and product_id=$2`,
+              [fixture.storeId, productId],
+            )
+          ).rows,
+        ).toEqual(allowed ? [{ quantity: '-1000', state: 'pending' }] : []);
+        expect(
+          (
+            await db().admin.query(
+              `select quantity_milli::text as quantity,cost_state as state
+          from ledger.stock_balances where store_id=$1 and product_id=$2`,
+              [fixture.storeId, productId],
+            )
+          ).rows,
+        ).toEqual(allowed ? [{ quantity: '-1000', state: 'pending' }] : []);
+      }
+    } finally {
+      await db().admin.query(
+        'update ledger.app_settings set allow_negative_stock=false where store_id=$1',
+        [fixture.storeId],
+      );
+    }
+  });
+
   beforeAll(async () => {
     if (!environment)
       throw new Error('The approved local PostgreSQL test environment is required.');

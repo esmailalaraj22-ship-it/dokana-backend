@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { captureReplayEvidence } from './stage3b-replay-evidence';
+import {
+  assertInventoryReconciles,
+  inventoryFinancialEvidence,
+} from './stage4b-inventory-evidence';
+import { DatabaseService } from '../src/database/database.service';
 import type { Server } from 'node:http';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -291,6 +296,853 @@ describe('S17.3 atomic Customer Sale Return posting on isolated PostgreSQL', () 
     if (!row) throw new Error('Stock projection is missing.');
     return row;
   }
+
+  it('S4B2-01 reconciles each inventory family, count establishment and rollback against authoritative history', async () => {
+    const product = await createProduct();
+    const inventory = (kind: string, quantity: string, cost?: string) =>
+      request(server)
+        .post(`/v1/inventory/${kind}`)
+        .set(authorized())
+        .send({
+          operationId: randomUUID(),
+          productId: product.productId,
+          productUnitId: product.unitId,
+          selectedQuantityMilli: quantity,
+          occurredAt,
+          reason: 'Stage 4B sequence',
+          ...(cost === undefined ? {} : { totalPurchaseCostMinor: cost }),
+        });
+    const reconcile = () => assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+    const financialBefore = await inventoryFinancialEvidence(db().admin, owner.storeId);
+    await inventory('opening', '10000', '1000').expect(201);
+    await reconcile();
+    await inventory('increase', '2000', '240').expect(201);
+    await reconcile();
+    await inventory('decrease', '1000').expect(201);
+    await reconcile();
+    expect(await inventoryFinancialEvidence(db().admin, owner.storeId)).toEqual(financialBefore);
+    const account = await createAccount();
+    const sale = await postTrackedSale(product, account);
+    await reconcile();
+    await postReturn(
+      sale.sale.id,
+      returnRequest(sale, {
+        lines: [
+          { saleItemId: sale.items[0]?.id, quantityMilli: '1000', disposition: 'RESTOCK_SALEABLE' },
+        ],
+        residualSettlement: { choice: 'REFUND', moneyAccountId: account },
+      }),
+    ).expect(201);
+    await reconcile();
+    const financialAfterSale = await inventoryFinancialEvidence(db().admin, owner.storeId);
+    const count = (p: ProductFixture, actual: string, operationId = randomUUID()) =>
+      request(server)
+        .post('/v1/inventory/counts')
+        .set(authorized())
+        .send({
+          operationId,
+          countType: 'partial',
+          occurredAt,
+          items: [{ productId: p.productId, productUnitId: p.unitId, actualQuantityMilli: actual }],
+        });
+    await count(product, '13000').expect(201);
+    await reconcile();
+    const target = randomUUID();
+    await count(product, '12000', target).expect(201);
+    await reconcile();
+    const unchangedBefore = await stock(product.productId);
+    const unchanged = await count(product, '12000').expect(201);
+    expect(unchanged.body).toMatchObject({ items: [{ movementId: null, adjustmentKind: 'none' }] });
+    expect(await stock(product.productId)).toEqual(unchangedBefore);
+    await reconcile();
+    await request(server)
+      .post('/v1/inventory/corrections')
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        targetOperationId: target,
+        correctionType: 'REVERSAL',
+        occurredAt,
+      })
+      .expect(201);
+    await reconcile();
+    for (const actual of ['0', '5000']) {
+      const missing = await createProduct();
+      const result = await count(missing, actual).expect(201);
+      expect(result.body).toMatchObject({
+        items: [
+          {
+            previousProjectionState: 'MISSING',
+            adjustmentKind: 'establishment',
+            quantityFactKind: actual === '0' ? 'count_zero_establishment' : 'movement',
+          },
+        ],
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, missing.productId);
+    }
+    expect(await inventoryFinancialEvidence(db().admin, owner.storeId)).toEqual(financialAfterSale);
+    if (!app) throw new Error('Application unavailable');
+    const tables = [
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.manual_inventory_entries',
+      'ledger.stock_counts',
+      'ledger.stock_count_items',
+    ];
+    const beforeFailure = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    const service = app.get(DatabaseService);
+    const original = service.withTenantTransaction.bind(service);
+    const spy = jest.spyOn(service, 'withTenantTransaction').mockImplementation((context, work) =>
+      original(context, async (transaction) => {
+        await work(transaction);
+        throw new Error('Stage 4B after staged inventory');
+      }),
+    );
+    try {
+      await inventory('increase', '1000', '10').expect(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeFailure);
+    await reconcile();
+  });
+
+  it('S4B2-02 preserves unresolved cost, exact empty-stock boundaries and immutable historical costs', async () => {
+    const account = await createAccount();
+    for (const initial of ['known', 'zero', 'unknown', 'pending'] as const) {
+      const product = await createProduct();
+      if (initial === 'pending') {
+        await db().admin.query(
+          'update ledger.products set allow_negative_stock_override=true where id=$1',
+          [product.productId],
+        );
+      } else {
+        await seedInventory(
+          product,
+          initial === 'known' ? '10' : initial === 'zero' ? '0' : undefined,
+          '5000',
+        );
+        expect(await stock(product.productId)).toEqual({
+          quantity: '5000',
+          value: initial === 'known' ? '10' : '0',
+          state: initial === 'unknown' ? 'unknown' : 'known',
+        });
+      }
+      const sale = await postTrackedSale(product, account);
+      expect(sale.items[0]).toMatchObject({
+        costStatus: initial === 'zero' ? 'known' : initial,
+        lineCostMinor: initial === 'known' ? '2' : initial === 'zero' ? '0' : null,
+      });
+      const before = await captureReplayEvidence(db().admin, owner.storeId, [
+        'ledger.inventory_movements',
+        'ledger.sale_items',
+      ]);
+      if (initial === 'pending') {
+        expect(await stock(product.productId)).toEqual({
+          quantity: '-1000',
+          value: '0',
+          state: 'pending',
+        });
+        await seedInventory(product, '8', '2000');
+        expect(await stock(product.productId)).toEqual({
+          quantity: '1000',
+          value: '0',
+          state: 'pending',
+        });
+      } else {
+        await seedInventory(product, undefined, '1000');
+        expect((await stock(product.productId)).state).toBe('unknown');
+        await seedInventory(product, '9', '1000');
+        expect(await stock(product.productId)).toEqual({
+          quantity: '6000',
+          value: '0',
+          state: 'unknown',
+        });
+      }
+      const unresolved = await request(server)
+        .get(`/v1/inventory/stock/${product.productId}`)
+        .set(authorized())
+        .expect(200);
+      expect(unresolved.body).toMatchObject({
+        stock: {
+          cost: {
+            status: initial === 'pending' ? 'pending' : 'unknown',
+            valueMinor: null,
+            averageUnitCostMinor: null,
+          },
+        },
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+      const current = await stock(product.productId);
+      await request(server)
+        .post('/v1/inventory/decrease')
+        .set(authorized())
+        .send({
+          operationId: randomUUID(),
+          productId: product.productId,
+          productUnitId: product.unitId,
+          occurredAt,
+          selectedQuantityMilli: current.quantity,
+          reason: 'Complete depletion',
+        })
+        .expect(201);
+      expect(await stock(product.productId)).toEqual({ quantity: '0', value: '0', state: 'known' });
+      await seedInventory(product, '7', '1000');
+      expect(await stock(product.productId)).toEqual({
+        quantity: '1000',
+        value: '7',
+        state: 'known',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+      const after = await captureReplayEvidence(db().admin, owner.storeId, [
+        'ledger.inventory_movements',
+        'ledger.sale_items',
+      ]);
+      for (const table of Object.keys(before))
+        expect(after[table]).toEqual(expect.arrayContaining(before[table] ?? []));
+    }
+    const missing = await createProduct();
+    const counted = await request(server)
+      .post('/v1/inventory/counts')
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        occurredAt,
+        countType: 'partial',
+        items: [
+          { productId: missing.productId, productUnitId: missing.unitId, actualQuantityMilli: '0' },
+        ],
+      })
+      .expect(201);
+    expect(counted.body).toMatchObject({
+      items: [{ stock: { cost: { status: 'unknown', valueMinor: null } } }],
+    });
+    expect(await stock(missing.productId)).toEqual({ quantity: '0', value: '0', state: 'unknown' });
+    await assertInventoryReconciles(db().admin, owner.storeId, missing.productId);
+  });
+
+  it('S4B2-06 enforces exact append-only reversal lineage and rejects recost or missing-projection rewind', async () => {
+    const inventory = async (product: ProductFixture, cost?: string) => {
+      const operationId = randomUUID();
+      const result = await request(server)
+        .post('/v1/inventory/increase')
+        .set(authorized())
+        .send({
+          operationId,
+          productId: product.productId,
+          productUnitId: product.unitId,
+          selectedQuantityMilli: '1000',
+          occurredAt,
+          ...(cost === undefined ? {} : { totalPurchaseCostMinor: cost }),
+        })
+        .expect(201);
+      return { operationId, movementId: (result.body as { movementId: string }).movementId };
+    };
+    const correct = (targetOperationId: string, replacement?: Record<string, unknown>) =>
+      request(server)
+        .post('/v1/inventory/corrections')
+        .set(authorized())
+        .send({
+          operationId: randomUUID(),
+          targetOperationId,
+          occurredAt,
+          correctionType: replacement ? 'REPLACEMENT' : 'REVERSAL',
+          ...(replacement ? { replacement } : {}),
+        });
+    const tables = [
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.manual_inventory_entries',
+      'ledger.stock_counts',
+      'ledger.stock_count_items',
+    ];
+    const product = await createProduct();
+    const original = await inventory(product, '10');
+    const originalRow = (
+      await db().admin.query<{ row: string }>(
+        'select to_jsonb(m)::text as row from ledger.inventory_movements m where id=$1',
+        [original.movementId],
+      )
+    ).rows;
+    for (const invalid of [
+      { reversal_of_id: randomUUID() },
+      { quantity_delta_milli: '1000', quantity_after_milli: '2000' },
+      { value_delta_minor: '-9', inventory_value_after_minor: '1' },
+    ]) {
+      const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      const client = await db().runtime.connect();
+      try {
+        await client.query('begin');
+        await client.query(
+          `select set_config('app.store_id',$1,true),set_config('app.user_id',$2,true),set_config('app.device_id',$3,true),set_config('app.request_id',$4,true)`,
+          [owner.storeId, owner.userId, owner.deviceId, randomUUID()],
+        );
+        await expect(
+          client.query(
+            `insert into ledger.inventory_movements select
+          (jsonb_populate_record(null::ledger.inventory_movements,to_jsonb(m)||$2::jsonb)).*
+          from ledger.inventory_movements m where id=$1`,
+            [
+              original.movementId,
+              JSON.stringify({
+                id: randomUUID(),
+                operation_id: randomUUID(),
+                movement_type: 'correction',
+                reversal_of_id: original.movementId,
+                quantity_before_milli: '1000',
+                quantity_delta_milli: '-1000',
+                quantity_after_milli: '0',
+                inventory_value_before_minor: '10',
+                value_delta_minor: '-10',
+                inventory_value_after_minor: '0',
+                average_unit_cost_after_minor: '0',
+                ...invalid,
+              }),
+            ],
+          ),
+        ).rejects.toMatchObject({
+          code: '23514',
+          message: 'Inventory reversal lineage is inconsistent',
+        });
+      } finally {
+        await client.query('rollback');
+        client.release();
+      }
+      expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(before);
+    }
+    await correct(original.operationId).expect(201);
+    expect(
+      (
+        await db().admin.query<{ row: string }>(
+          'select to_jsonb(m)::text as row from ledger.inventory_movements m where id=$1',
+          [original.movementId],
+        )
+      ).rows,
+    ).toEqual(originalRow);
+    expect(
+      (
+        await db().admin.query(
+          `select count(*)::int as children,
+      min(r.quantity_delta_milli+o.quantity_delta_milli)::text as quantity,
+      min(r.value_delta_minor+o.value_delta_minor)::text as value
+      from ledger.inventory_movements r join ledger.inventory_movements o on o.store_id=r.store_id and o.id=r.reversal_of_id
+      where o.id=$1`,
+          [original.movementId],
+        )
+      ).rows[0],
+    ).toEqual({ children: 1, quantity: '0', value: '0' });
+    const beforeDuplicate = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    await correct(original.operationId).expect(409);
+    const afterDuplicate = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of tables) expect(afterDuplicate[table]).toEqual(beforeDuplicate[table]);
+    await assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+    const replaceTarget = await inventory(product, '10');
+    const replaced = await correct(replaceTarget.operationId, {
+      family: 'increase',
+      productId: product.productId,
+      productUnitId: product.unitId,
+      selectedQuantityMilli: '2000',
+      totalPurchaseCostMinor: '30',
+    }).expect(201);
+    expect(replaced.body).toMatchObject({
+      reversalMovements: [{ reversedMovementId: replaceTarget.movementId }],
+      replacement: { family: 'increase' },
+    });
+    expect(await stock(product.productId)).toEqual({
+      quantity: '2000',
+      value: '30',
+      state: 'known',
+    });
+    await assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+    for (const reason of ['intervening', 'recost']) {
+      const p = await createProduct();
+      const first = await inventory(p, '10');
+      const second = await inventory(p, reason === 'recost' ? undefined : '4');
+      const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      const result = await correct(
+        reason === 'recost' ? second.operationId : first.operationId,
+      ).expect(409);
+      expect(result.body).toMatchObject({ code: 'INVENTORY_CORRECTION_REQUIRES_RECOST' });
+      const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      for (const table of tables) expect(after[table]).toEqual(before[table]);
+      await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+    }
+    for (const actual of ['0', '1000']) {
+      const p = await createProduct();
+      const target = randomUUID();
+      await request(server)
+        .post('/v1/inventory/counts')
+        .set(authorized())
+        .send({
+          operationId: target,
+          countType: 'partial',
+          occurredAt,
+          items: [{ productId: p.productId, productUnitId: p.unitId, actualQuantityMilli: actual }],
+        })
+        .expect(201);
+      const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      const result = await correct(target).expect(409);
+      expect(result.body).toMatchObject({
+        code: 'INVENTORY_CORRECTION_MISSING_PROJECTION_UNSUPPORTED',
+      });
+      const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      for (const table of tables) expect(after[table]).toEqual(before[table]);
+      await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+    }
+  });
+
+  it('S4B2-03 preserves exact conversions, int8 arithmetic and half-up residual allocation', async () => {
+    const post = (p: ProductFixture, kind: string, quantity: string, cost?: string) =>
+      request(server)
+        .post(`/v1/inventory/${kind}`)
+        .set(authorized())
+        .send({
+          operationId: randomUUID(),
+          productId: p.productId,
+          productUnitId: p.unitId,
+          selectedQuantityMilli: quantity,
+          occurredAt,
+          reason: 'Precision proof',
+          ...(cost === undefined ? {} : { totalPurchaseCostMinor: cost }),
+        });
+    const tables = [
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.manual_inventory_entries',
+    ];
+    const p = await createProduct();
+    await post(p, 'increase', '1000', '10').expect(201);
+    const alternate = randomUUID();
+    await db().admin.query(
+      `insert into ledger.product_units(id,store_id,product_id,measurement_type,unit_name,is_base,factor_num,factor_den,status,operation_id)
+      values($1,$2,$3,'count','alternate',false,3,2,'active',$4)`,
+      [alternate, owner.storeId, p.productId, randomUUID()],
+    );
+    await post({ ...p, unitId: alternate }, 'increase', '2000', '30').expect(201);
+    expect(await stock(p.productId)).toEqual({ quantity: '4000', value: '40', state: 'known' });
+    const beforeFraction = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    await post({ ...p, unitId: alternate }, 'increase', '1', '1').expect(400);
+    const afterFraction = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of Object.keys(beforeFraction).filter(
+      (table) => table !== 'sync.processed_operations',
+    ))
+      expect(afterFraction[table]).toEqual(beforeFraction[table]);
+    await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+    for (const magnitude of ['9007199254740993', '9223372036854775807']) {
+      const large = await createProduct();
+      const posted = await post(large, 'increase', magnitude, magnitude).expect(201);
+      expect(posted.body).toMatchObject({
+        stock: { baseQuantityMilli: magnitude, cost: { valueMinor: magnitude } },
+      });
+      expect(await stock(large.productId)).toEqual({
+        quantity: magnitude,
+        value: magnitude,
+        state: 'known',
+      });
+      if (magnitude === '9223372036854775807') {
+        const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+        const overflow = await post(large, 'increase', '1', '1').expect(400);
+        expect(overflow.body).toMatchObject({ code: 'INVENTORY_AMOUNT_INVALID' });
+        const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+        for (const table of tables) expect(after[table]).toEqual(before[table]);
+      }
+      await post(large, 'decrease', '1').expect(201);
+      expect(await stock(large.productId)).toEqual({
+        quantity: (BigInt(magnitude) - 1n).toString(),
+        value: (BigInt(magnitude) - 1n).toString(),
+        state: 'known',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, large.productId);
+    }
+    const beyond = await createProduct();
+    const beforeRange = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    await post(beyond, 'increase', '9223372036854775808', '1').expect(400);
+    expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeRange);
+    const beforeConversionOverflow = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    expect(
+      (await post({ ...p, unitId: alternate }, 'increase', '9223372036854775806', '1').expect(400))
+        .body,
+    ).toMatchObject({ code: 'INVENTORY_AMOUNT_INVALID' });
+    const afterConversionOverflow = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of tables)
+      expect(afterConversionOverflow[table]).toEqual(beforeConversionOverflow[table]);
+    const valueBoundary = await createProduct();
+    await post(valueBoundary, 'increase', '1000', '9223372036854775807').expect(201);
+    const beforeValueOverflow = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    expect((await post(valueBoundary, 'increase', '1000', '1').expect(400)).body).toMatchObject({
+      code: 'INVENTORY_AMOUNT_INVALID',
+    });
+    const afterValueOverflow = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of tables)
+      expect(afterValueOverflow[table]).toEqual(beforeValueOverflow[table]);
+    await assertInventoryReconciles(db().admin, owner.storeId, valueBoundary.productId);
+    for (const [quantity, value, residual] of [
+      ['3000', '1', '1'],
+      ['2000', '1', '0'],
+      ['3000', '2', '1'],
+      ['3000', '10', '7'],
+    ] as const) {
+      const rounding = await createProduct();
+      await post(rounding, 'increase', quantity, value).expect(201);
+      await post(rounding, 'decrease', '1000').expect(201);
+      const remaining = (BigInt(quantity) - 1000n).toString();
+      expect(await stock(rounding.productId)).toEqual({
+        quantity: remaining,
+        value: residual,
+        state: 'known',
+      });
+      await post(rounding, 'decrease', remaining).expect(201);
+      expect(await stock(rounding.productId)).toEqual({
+        quantity: '0',
+        value: '0',
+        state: 'known',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, rounding.productId);
+    }
+  });
+
+  it('S4B2-04 applies Product then Store negative policy across inventory families and excludes untracked stock', async () => {
+    const account = await createAccount();
+    const inventory = (
+      p: ProductFixture,
+      kind: string,
+      quantity: string,
+      operationId = randomUUID(),
+    ) =>
+      request(server)
+        .post(`/v1/inventory/${kind}`)
+        .set(authorized())
+        .send({
+          operationId,
+          productId: p.productId,
+          productUnitId: p.unitId,
+          selectedQuantityMilli: quantity,
+          occurredAt,
+          reason: 'Policy proof',
+        });
+    const saleRequest = (p: ProductFixture) =>
+      request(server)
+        .post('/v1/sales')
+        .set(authorized())
+        .send({
+          operationId: randomUUID(),
+          occurredAt,
+          items: [
+            {
+              isManualLine: false,
+              productId: p.productId,
+              productUnitId: p.unitId,
+              quantityMilli: '1000',
+              unitPriceMinor: '500',
+              lineTotalMinor: '500',
+            },
+          ],
+          payments: [{ moneyAccountId: account, amountMinor: '500' }],
+          totalMinor: '500',
+        });
+    const tables = [
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.manual_inventory_entries',
+      'ledger.sales',
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+      'ledger.sale_return_settlements',
+      'ledger.money_movements',
+      'ledger.customer_ledger_entries',
+    ];
+    try {
+      for (const storePolicy of [false, true]) {
+        await db().admin.query(
+          'update ledger.app_settings set allow_negative_stock=$2 where store_id=$1',
+          [owner.storeId, storePolicy],
+        );
+        for (const override of [null, false, true]) {
+          const p = await createProduct();
+          await db().admin.query(
+            'update ledger.products set allow_negative_stock_override=$2 where id=$1',
+            [p.productId, override],
+          );
+          const allowed = override ?? storePolicy;
+          const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+          const manual = await inventory(p, 'decrease', '1000').expect(allowed ? 201 : 409);
+          const sale = await saleRequest(p).expect(allowed ? 201 : 409);
+          if (!allowed) {
+            expect(manual.body).toMatchObject({ code: 'INVENTORY_NEGATIVE_NOT_ALLOWED' });
+            expect(sale.body).toMatchObject({ code: 'SALE_NEGATIVE_STOCK_NOT_ALLOWED' });
+            const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+            for (const table of tables) expect(after[table]).toEqual(before[table]);
+          } else {
+            const inboundId = randomUUID();
+            await inventory(p, 'increase', '500', inboundId).expect(201);
+            expect(await stock(p.productId)).toEqual({
+              quantity: '-1500',
+              value: '0',
+              state: 'pending',
+            });
+            await db().admin.query(
+              'update ledger.products set allow_negative_stock_override=false where id=$1',
+              [p.productId],
+            );
+            const beforeBlocked = await captureReplayEvidence(db().admin, owner.storeId, tables);
+            await inventory(p, 'increase', '1').expect(409);
+            const postedSale = sale.body as SalePostingResponse;
+            const blockedReturn = await postReturn(
+              postedSale.sale.id,
+              returnRequest(postedSale, {
+                lines: [
+                  {
+                    saleItemId: postedSale.items[0]?.id,
+                    quantityMilli: '1000',
+                    disposition: 'RESTOCK_SALEABLE',
+                  },
+                ],
+                residualSettlement: { choice: 'REFUND', moneyAccountId: account },
+              }),
+            ).expect(409);
+            expect(blockedReturn.body).toMatchObject({ code: 'SALE_RETURN_RESTOCK_UNAVAILABLE' });
+            await request(server)
+              .post('/v1/inventory/corrections')
+              .set(authorized())
+              .send({
+                operationId: randomUUID(),
+                targetOperationId: inboundId,
+                correctionType: 'REVERSAL',
+                occurredAt,
+              })
+              .expect(409);
+            const afterBlocked = await captureReplayEvidence(db().admin, owner.storeId, tables);
+            for (const table of Object.keys(beforeBlocked).filter(
+              (table) => table !== 'sync.processed_operations',
+            ))
+              expect(afterBlocked[table]).toEqual(beforeBlocked[table]);
+          }
+          await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+        }
+      }
+      await db().admin.query('delete from ledger.app_settings where store_id=$1', [owner.storeId]);
+      const fallback = await createProduct();
+      expect((await inventory(fallback, 'decrease', '1000').expect(409)).body).toMatchObject({
+        code: 'INVENTORY_NEGATIVE_NOT_ALLOWED',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, fallback.productId);
+    } finally {
+      await db().admin.query(
+        'insert into ledger.app_settings(store_id) values($1) on conflict(store_id) do update set allow_negative_stock=false',
+        [owner.storeId],
+      );
+    }
+    const untracked = await createProduct();
+    await db().admin.query('update ledger.products set track_inventory=false where id=$1', [
+      untracked.productId,
+    ]);
+    await inventory(untracked, 'increase', '1000').expect(409);
+    await request(server)
+      .post('/v1/inventory/counts')
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        occurredAt,
+        countType: 'partial',
+        items: [
+          {
+            productId: untracked.productId,
+            productUnitId: untracked.unitId,
+            actualQuantityMilli: '1000',
+          },
+        ],
+      })
+      .expect(409);
+    const sale = (await saleRequest(untracked).expect(201)).body as SalePostingResponse;
+    expect(sale.items[0]).toMatchObject({ costStatus: 'unknown', lineCostMinor: null });
+    const returned = await postReturn(
+      sale.sale.id,
+      returnRequest(sale, {
+        lines: [
+          { saleItemId: sale.items[0]?.id, quantityMilli: '1000', disposition: 'RESTOCK_SALEABLE' },
+        ],
+        residualSettlement: { choice: 'REFUND', moneyAccountId: account },
+      }),
+    ).expect(201);
+    expect(returned.body).toMatchObject({
+      lines: [{ inventoryMovement: null, historicalCostMinor: null }],
+    });
+    await assertInventoryReconciles(db().admin, owner.storeId, untracked.productId);
+  });
+
+  it('S4B2-05 restores historical Return cost with cumulative remainders and preserves unresolved compatibility states', async () => {
+    const account = await createAccount();
+    const restock = (sale: SalePostingResponse, quantity = '1000') =>
+      postReturn(
+        sale.sale.id,
+        returnRequest(sale, {
+          lines: [
+            {
+              saleItemId: sale.items[0]?.id,
+              quantityMilli: quantity,
+              disposition: 'RESTOCK_SALEABLE',
+            },
+          ],
+          residualSettlement: { choice: 'REFUND', moneyAccountId: account },
+        }),
+      );
+    const product = await createProduct();
+    await seedInventory(product, '3', '1000');
+    const sale = await postTrackedSale(product, account);
+    expect(sale.items[0]).toMatchObject({ costStatus: 'known', lineCostMinor: '3' });
+    const historical = await captureReplayEvidence(db().admin, owner.storeId, [
+      'ledger.inventory_movements',
+      'ledger.sale_items',
+    ]);
+    await seedInventory(product, '100', '1000');
+    let restored = 0n;
+    let quantity = 1000n;
+    for (const [part, cost] of [
+      ['333', '0'],
+      ['333', '1'],
+      ['334', '2'],
+    ] as const) {
+      const returned = await restock(sale, part).expect(201);
+      expect(returned.body).toMatchObject({
+        lines: [
+          {
+            historicalCostMinor: cost,
+            costStatus: 'known',
+            inventoryMovement: { quantityDeltaMilli: part, valueDeltaMinor: cost },
+          },
+        ],
+      });
+      restored += BigInt(cost);
+      quantity += BigInt(part);
+      expect(await stock(product.productId)).toEqual({
+        quantity: quantity.toString(),
+        value: (100n + restored).toString(),
+        state: 'known',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, product.productId);
+    }
+    expect(restored).toBe(3n);
+    const tables = [
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+    ];
+    const beforeExcess = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    await restock(sale, '1').expect(409);
+    const afterExcess = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of tables) expect(afterExcess[table]).toEqual(beforeExcess[table]);
+    const after = await captureReplayEvidence(db().admin, owner.storeId, [
+      'ledger.inventory_movements',
+      'ledger.sale_items',
+    ]);
+    for (const table of Object.keys(historical))
+      expect(after[table]).toEqual(expect.arrayContaining(historical[table] ?? []));
+
+    for (const state of ['zero', 'unknown', 'pending', 'estimated'] as const) {
+      const p = await createProduct();
+      if (state === 'pending')
+        await db().admin.query(
+          'update ledger.products set allow_negative_stock_override=true where id=$1',
+          [p.productId],
+        );
+      else
+        await seedInventory(
+          p,
+          state === 'zero' ? '0' : state === 'estimated' ? '3' : undefined,
+          '1000',
+        );
+      const original = await postTrackedSale(p, account);
+      if (state === 'estimated') {
+        // Legacy compatibility fixture only; current Sale posting never emits estimated.
+        await db().admin.query(
+          "update ledger.sale_items set cost_status='estimated' where sale_id=$1",
+          [original.sale.id],
+        );
+      }
+      const before = await captureReplayEvidence(db().admin, owner.storeId, [
+        'ledger.inventory_movements',
+        'ledger.sale_items',
+      ]);
+      await seedInventory(p, '100', state === 'pending' ? '2000' : '1000');
+      const result = await restock(original).expect(201);
+      expect(result.body).toMatchObject({
+        lines: [
+          {
+            costStatus: state === 'zero' ? 'known' : state,
+            historicalCostMinor: state === 'zero' ? '0' : null,
+            inventoryMovement: {
+              quantityDeltaMilli: '1000',
+              valueDeltaMinor: state === 'zero' ? '0' : null,
+            },
+          },
+        ],
+      });
+      expect(await stock(p.productId)).toEqual({
+        quantity: '2000',
+        value: state === 'zero' ? '100' : '0',
+        state: state === 'zero' ? 'known' : state === 'pending' ? 'pending' : 'unknown',
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+      const after = await captureReplayEvidence(db().admin, owner.storeId, [
+        'ledger.inventory_movements',
+        'ledger.sale_items',
+      ]);
+      for (const table of Object.keys(before))
+        expect(after[table]).toEqual(expect.arrayContaining(before[table] ?? []));
+    }
+    for (const currentState of ['unknown', 'pending'] as const) {
+      const p = await createProduct();
+      await seedInventory(p, '3', '1000');
+      const original = await postTrackedSale(p, account);
+      if (currentState === 'unknown') await seedInventory(p, undefined, '1000');
+      else {
+        await db().admin.query(
+          'update ledger.products set allow_negative_stock_override=true where id=$1',
+          [p.productId],
+        );
+        await request(server)
+          .post('/v1/inventory/decrease')
+          .set(authorized())
+          .send({
+            operationId: randomUUID(),
+            productId: p.productId,
+            productUnitId: p.unitId,
+            selectedQuantityMilli: '2000',
+            occurredAt,
+            reason: 'Later negative stock',
+          })
+          .expect(201);
+      }
+      const returned = await restock(original).expect(201);
+      expect(returned.body).toMatchObject({
+        lines: [{ costStatus: 'known', historicalCostMinor: '3', cogsReversalMinor: '3' }],
+      });
+      expect(await stock(p.productId)).toEqual({
+        quantity: currentState === 'unknown' ? '2000' : '-1000',
+        value: '0',
+        state: currentState,
+      });
+      await assertInventoryReconciles(db().admin, owner.storeId, p.productId);
+    }
+    const damaged = await createProduct();
+    await seedInventory(damaged, '3', '1000');
+    const damagedSale = await postTrackedSale(damaged, account);
+    const beforeDamage = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    const damage = await postReturn(
+      damagedSale.sale.id,
+      returnRequest(damagedSale, {
+        residualSettlement: { choice: 'REFUND', moneyAccountId: account },
+      }),
+    ).expect(201);
+    expect(damage.body).toMatchObject({
+      lines: [{ inventoryMovement: null, cogsReversalMinor: null }],
+    });
+    const afterDamage = await captureReplayEvidence(db().admin, owner.storeId, tables);
+    for (const table of ['ledger.inventory_movements', 'ledger.stock_balances'])
+      expect(afterDamage[table]).toEqual(beforeDamage[table]);
+    await assertInventoryReconciles(db().admin, owner.storeId, damaged.productId);
+  });
 
   beforeAll(async () => {
     const environment = readLocalPostgresTestEnvironment();

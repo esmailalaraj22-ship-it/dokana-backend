@@ -180,7 +180,12 @@ export class InventoryPostingRepository {
     const productIds = [...new Set(input.lines.map((line) => line.productId))].sort();
     const unitIds = [...new Set(input.lines.map((line) => line.productUnitId))].sort();
     const productRows = await transaction
-      .select({ id: products.id, status: products.status, trackInventory: products.trackInventory })
+      .select({
+        id: products.id,
+        status: products.status,
+        trackInventory: products.trackInventory,
+        allowNegativeStockOverride: products.allowNegativeStockOverride,
+      })
       .from(products)
       .where(and(eq(products.storeId, context.storeId), inArray(products.id, productIds)))
       .orderBy(asc(products.id))
@@ -199,6 +204,11 @@ export class InventoryPostingRepository {
       .orderBy(asc(productUnits.id))
       .for('share');
     const unitById = new Map(unitRows.map((row) => [`${row.productId}:${row.id}`, row]));
+    const [settings] = await transaction
+      .select({ allowNegativeStock: appSettings.allowNegativeStock })
+      .from(appSettings)
+      .where(eq(appSettings.storeId, context.storeId))
+      .for('share');
 
     const ordered = [...input.lines].sort((left, right) => {
       if (left.productId !== right.productId) return left.productId.localeCompare(right.productId);
@@ -262,6 +272,15 @@ export class InventoryPostingRepository {
           throw new SaleReturnInventoryError('SALE_RETURN_AMOUNT_INVALID');
         }
         throw error;
+      }
+
+      // Apply the same policy as the movement trigger before staging a restock.
+      // A positive Return can still leave the current projection negative.
+      if (
+        effect.quantityAfterMilli < 0n &&
+        !(product.allowNegativeStockOverride ?? settings?.allowNegativeStock ?? false)
+      ) {
+        throw new SaleReturnInventoryError('SALE_RETURN_RESTOCK_UNAVAILABLE');
       }
 
       const discriminator = `sale-return-item:${line.saleItemId}:inventory`;
