@@ -3053,3 +3053,85 @@ negative-stock precedence; **4C** payable/payment accounting and historical Supp
 correction-date and DST boundaries; **4F** opening balances and historical account presentation.
 No database-change candidate or new backend-owner decision was established. **Stage 4A PASS;
 ready for Stage 4B under the owner's progression gate. Do not start Stage 4B here.**
+
+### Stage 4B Independent Inventory / Stock / Costing Closure — 2026-11-16
+
+Stage 4B is **PASS** within the authorized runtime-verification scope. Starting checkpoint:
+`main`, HEAD/origin `e703cf86e5b784a89a5bb6d7067b576df166a47e`, clean, 0/0;
+PostgreSQL **39 applied / 0 pending**. Stage 4B.1 mapping was reused. Candidates were
+executed in the approved order **01, 02, 06, 03, 04, 05**. **Stage 4C was not started.**
+
+- **S4B2-01 PASS:** opening, increase, decrease, Sale, saleable Return, positive/negative
+  Stock Count variance and correction reconcile authoritative quantity/value deltas and
+  before/after snapshots with projection quantity, value, state, average, pending flag and
+  last Movement ID. Unchanged counts create no Movement; missing positive/zero counts follow
+  establishment semantics. A controlled post-work failure rolls back all business, operation,
+  audit and change rows. Manual/opening/count payable, receivable, Money and expense effects: **0**.
+- **S4B2-02 PASS:** known positive, explicit known zero, omitted/unknown and pending are distinct.
+  Mixed known/unknown inventory remains unknown; negative-to-positive known inbound remains
+  pending. Public unresolved valuation stays null. Exact depletion removes residual value;
+  fresh addition starts a known valuation. Zero-count establishment remains explicitly unknown.
+  Earlier Movement/Sale-item snapshots, stored operation responses and existing audit/change
+  rows remain unchanged across subsequent cost transitions.
+- **S4B2-06 PASS:** exact inverse quantity/value and persisted reversal lineage, one valid
+  reversal, linked replacement and immutable originals. Runtime PostgreSQL rejects wrong
+  lineage, opposite quantity and value restoration. Duplicate, intervening-state, recost-required
+  and missing-projection Stock Count corrections leave business effects unchanged. The existing
+  missing-establishment correction limitation is preserved; no recost resolver was introduced.
+- **S4B2-03 PASS:** base/exact alternate conversion, non-exact rejection, above-JavaScript-safe
+  integers through int8 maximum, exact response/persistence/arithmetic, and conversion,
+  quantity and value overflow rejection. Below/at/above-half rounding and remainder cases keep
+  the correct residual; complete depletion leaves quantity/value zero.
+- **S4B2-04 PASS after S4B2-F01:** Product allow/block/inherit overrides Store allow/block, with
+  missing-setting fallback false. Sale, manual decrease, still-negative inbound, Return and
+  correction preserve policy. Real `/v1/sync/push` dispatch applies the same authority, including
+  the expected `CONFLICT` result and no inventory effect when blocked. Non-tracked Products
+  reject manual/count writes and produce no Sale/Return stock Movement or projection.
+- **S4B2-05 PASS:** Return quantity is bounded by the original Sale; excessive quantity creates
+  no inventory effect. Partial quantities 333/333/334 restore original cost 3 as 0/1/2, despite
+  later inventory cost 100. Full returns, known zero, unknown, pending, damaged and untracked
+  cases preserve their semantics. An explicit legacy estimated fixture contributes unknown,
+  never known zero. Known historical Return cost remains distinct from unresolved current stock.
+  One narrow Supplier Invoice regression confirms no Movement, stock or goods-receipt effect.
+
+**Confirmed finding S4B2-F01 — Medium — CLOSED:** a saleable Return leaving stock negative
+after policy became blocking reached the PostgreSQL guard and surfaced HTTP 500 instead of a
+stable domain rejection. Diagnostic execution observed SQLSTATE `23514`, `Negative inventory
+is not permitted`; the database prevented the write. The shared restock repository now reads
+the locked Product override and Store setting and checks the resulting quantity before insert,
+returning existing **409 / SALE_RETURN_RESTOCK_UNAVAILABLE**. Rejection preserves inventory,
+Return, settlement, Money, customer-ledger, audit and change facts. No inventory corruption or
+negative-policy bypass was established. **Critical 0 / High 0 / Medium 1 resolved / Low 0;
+unresolved findings 0.** Test-setup corrections covered rejection metadata, offline envelope
+aggregate ID, conflict classification and derived Movement operation IDs; these were not defects.
+
+- Final consolidated integration: **16 PASS / 4 files / 46 intentionally unselected /
+  73.404 seconds / exit 0**. Command: `npm.cmd run test:integration -- --runTestsByPath
+  test/sale-return-posting.integration-spec.ts test/offline-operation-push.integration-spec.ts
+  test/sale-return-correction.integration-spec.ts test/supplier-invoice-posting.integration-spec.ts
+  --testNamePattern='S4B2|restocks saleable tracked|reverses saleable known-cost|preserves unknown and pending historical|revalidates replacement Product|accepts an optional same-store Product link|replays exactly, rejects changed identity, and serializes competing over-returns|fails closed for authentication, actor role, tenant RLS|rolls back every Return fact|serializes Return against'`.
+  This includes directly affected happy, rejection, replay, rollback, tenant and concurrency regressions.
+- Focused unit: `npm.cmd run test:unit -- --runTestsByPath src/inventory/inventory-math.spec.ts
+  src/inventory/inventory-posting.spec.ts src/returns/sale-return-policy.spec.ts`:
+  **118 PASS / 3 files / 32.744 seconds / exit 0**.
+  `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`,
+  `npm.cmd run db:migrate:verify`, `npm.cmd run db:check`, `git diff --check`: **PASS**.
+- Changed scope: one production repository, two existing integration files, one reconciliation
+  helper and this Roadmap. **Database/schema/migration delta 0; ceiling 0039; 0040+ NONE.**
+  No function, trigger, constraint, RLS, grant, ownership, dependency or environment change.
+  Existing endpoint/error vocabulary and successful response shapes are preserved; the affected
+  invalid Return now produces a durable domain rejection rather than an unexpected 500.
+  Implementation/tests commit: `3ebab8ee118493ea8e3e003b3cb56b7e9cb800db`; this closure
+  documentation is committed separately.
+- PostgreSQL **18.4**, approved local `DOCANA`, runtime `dokana_runtime_login` verified.
+  Cleanup: temporary databases **0**, idle transactions **0**, other test connections **0**,
+  development Stores/Users/Devices **0**, Stage 4B fixture residue **0**. Pre-existing audit
+  **540**, legacy changes **772** and refresh tokens **6,548** remain untouched.
+
+Full unit/integration, release/clean-install, recovery/DR and baseline `06_runtime_tests.sql`
+campaigns were not run. This is bounded Stage 4B verification, not production approval or an
+external Fable sign-off. Deferred and not reviewed here: **4C** supplier payable/payment
+accounting; **4D** receivable/credit and Sale/Return financial formulas; **4E** period/correction
+date and DST boundaries; **4F** opening balances and account presentation. No new database
+authorization is required. **Stage 4B PASS; ready for Stage 4C under the owner's progression
+gate. Do not start Stage 4C here.**
