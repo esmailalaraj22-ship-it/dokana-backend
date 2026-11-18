@@ -3135,3 +3135,106 @@ accounting; **4D** receivable/credit and Sale/Return financial formulas; **4E** 
 date and DST boundaries; **4F** opening balances and account presentation. No new database
 authorization is required. **Stage 4B PASS; ready for Stage 4C under the owner's progression
 gate. Do not start Stage 4C here.**
+
+### Independent Review Stage 4C - Supplier Finance Runtime Closure (2026-11-18)
+
+**Stage 4C PASS.** Start: `main` at `10eb27497766ef64461eedf0af60e7367e8f144c`,
+equal to `origin/main`, clean, 0/0; PostgreSQL 39 applied / 0 pending. Stage 4C.1
+mapping was reused. Stage 4C.2 executed in order 01, 02, 04, 05, 03, 06.
+
+- **S4C2-01 PASS:** invoice 10000, payments 4000 and 6000 reconcile raw Supplier
+  payable, invoice adjusted obligation, active allocations, outstanding, Money and API
+  reads. Allocations subtract once at invoice scope, never again from Supplier-wide
+  payable. Opening payable creates no invoice; its settlement is exact. Payable 2000
+  and credit 2500 coexist independently with net -500.
+- **S4C2-02 PASS:** exact complete allocation, multi-invoice allocation and reordered
+  replay preserve one effect set. Duplicate targets, excessive exposure, incomplete or
+  excessive allocation totals, empty, zero and negative allocations reject without
+  financial mutation. Injected failure after staged funding rolls back business facts,
+  processed-operation success, audit and both change feeds. Payment expense effect 0.
+- **S4C2-04 PASS:** unpaid, partially paid and fully paid invoices follow payable-first
+  Return allocation; excess creates independent credit. Cumulative Returns are bounded
+  by original basis. Partial/full credit applications reduce both dimensions without
+  Money; refunds reduce credit and increase Money without changing payable. Excess
+  application/refund and duplicate replay create no extra financial effects.
+- **S4C2-05 PASS:** invoice, normal/owner payment, Return, credit application and refund
+  corrections retain original facts and stored responses; linked inverses are exact,
+  replacements create new facts, and cancelled payment allocations stop counting without
+  deletion. Active payment/Return/credit-application and consumed-credit dependencies
+  prevent unsafe correction. No duplicate reversal was observed.
+- **S4C2-03 PASS:** owner payments 4000 then 6000 reduce payable and increase owner
+  liability equally; Money, equity, expense and inventory effects remain 0. Stored
+  funding links and transaction groups agree; funding models are mutually exclusive.
+- **S4C2-06 PASS after owner decision and S4C2-F01:** Supplier descriptive edits preserve
+  financial history; archived accounts reject new/replacement funding while historical
+  payment reads and exact inverses remain available. Half-up line 1.5 x 101 = 152,
+  discount 2, invoice discount 10 and adjustment +1 produce payable 141. Invoice/payment
+  9007199254740993 remains exact in PostgreSQL and APIs. All financial workflows preserve
+  expense, inventory, stock, goods-receipt and legacy Supplier Return-item boundaries.
+
+**Owner decision S4C2-D01:** restore the Supplier before any new invoice, opening payable,
+payment, financial Return, credit application or refund. Historical reads and exact
+completed replay remain available. Safe pure reversals retain existing dependency checks;
+replacement facts require an active Supplier. This decision resolves the previously
+deferred financial eligibility in `supplier-lifecycle-v1.md`; it does not authorize a
+migration or change archive-balance rules. Previously stored rejections remain replayable
+after restore; a genuinely new operation ID is required for a new attempt.
+
+**S4C2-F01 - Medium - CLOSED:** invoice/opening/payment Supplier row locks previously
+checked existence only. Runtime proof accepted new invoice 1000, opening 300 and payment
+400 against an archived Supplier, leaving payable 900 while Return/application/refund
+rejected. Under S4C2-D01 this violates lifecycle eligibility, although the amounts reconcile.
+The two posting repositories now validate status under the existing row lock and return
+**409 / SUPPLIER_INACTIVE**; typed failure maps, including invoice correction, preserve
+durable rejection. The new policy regression failed before the fix (expected 409, got 201)
+and passed afterward. All six historical response replays and safe corrections passed;
+archived replacement rollback and rejection replay after restore passed. Real PostgreSQL
+lock-wait tests prove invoice/opening/payment writers reject after a competing archive
+commits. **Critical 0 / High 0 / Medium 1 resolved / Low 0; unresolved findings 0.**
+
+Verification (all commands use repository scripts):
+
+- Consolidated selection: `npm.cmd run test:integration -- --runTestsByPath
+  test/supplier-return.integration-spec.ts test/supplier-invoice-correction.integration-spec.ts
+  test/supplier-payment-correction.integration-spec.ts test/supplier-invoice-posting.integration-spec.ts
+  test/supplier-payment-posting.integration-spec.ts --testNamePattern
+  'S4C2-|maps Cancel Invoice|Stage 3B B02 maps Edit Invoice|cancels Money Account settlement|cancels an Owner-funded bigint|Stage 3B B02 edits by reversing|Stage 3B B02 cancels and replaces Supplier Returns|blocks originating Return correction|cancels and replaces Credit Applications|Stage 3B B02 reverses a Refund|enforces owner, active-store|rejects unavailable and foreign sources|serializes concurrent|focused concurrency|fails closed across Stores'`.
+  Initial result: **26 passed, 1 failed, 37 intentionally unselected; 75.554 s**.
+  The old invoice concurrency test requires the preceding bigint fixture (expects two
+  invoices). The filter omitted that prerequisite; both concurrent HTTP responses matched.
+  No production or existing-test change was made for this selection failure.
+- Affected-file rerun: `npm.cmd run test:integration -- --runTestsByPath
+  test/supplier-invoice-posting.integration-spec.ts --testNamePattern
+  'preserves bigint amounts above JavaScript safe integer range|serializes concurrent duplicate|enforces owner, active-store'`:
+  **3 passed / 6 unselected / 22.931 s / exit 0**. Final required integration coverage:
+  **28 distinct tests passed across five files; 36 distinct tests outside the selection**.
+  Other four successful files were not repeated. HTTP, raw PostgreSQL, rollback, replay,
+  tenant rejection and concurrency evidence are included; no unresolved test failure.
+- Focused unit: `npm.cmd run test:unit -- --runTestsByPath
+  src/suppliers/supplier-invoice-posting.service.spec.ts src/suppliers/supplier-payment-posting.service.spec.ts
+  src/suppliers/supplier-invoice-correction.service.spec.ts src/suppliers/supplier-payment-correction.service.spec.ts
+  src/suppliers/supplier-invoice-posting-command.spec.ts src/suppliers/supplier-payment-posting-command.spec.ts
+  src/suppliers/supplier-settlement.spec.ts src/suppliers/supplier-return.spec.ts`:
+  **63 passed / 8 files / no skips / 54.515 s / exit 0**.
+- `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`,
+  `npm.cmd run db:migrate:verify`, `npm.cmd run db:check`, `git diff --check`: **PASS**.
+  PostgreSQL **18.4**, local `DOCANA`, runtime `dokana_runtime_login` verified;
+  migrations **39 applied / 0 pending / 39 executed / 0 baseline registrations**.
+- Cleanup: temporary databases **0**, idle transactions **0**, other test connections **0**,
+  development Stores/Users/Devices **0**, Stage 4C fixture residue **0**. Pre-existing audit
+  **540**, legacy changes **772**, refresh tokens **6548** preserved.
+
+Implementation/tests commit: `9f9d5157759a38719720f79aba54d6aabcf16420`; this Roadmap
+closure is separate. Changed scope: five production TypeScript files, one existing
+integration suite, one evidence helper and this Roadmap. No dependency/environment change.
+**Database/schema/migration delta 0; ceiling 0039; 0040+ NONE.** No RLS, grants, ownership,
+function, trigger, constraint or reference changes. Response shapes and operation identity
+remain compatible; new archived-Supplier postings now receive the existing domain error
+vocabulary instead of acceptance. No arithmetic redesign or destructive history repair.
+
+Full unit/integration, release/clean-install, recovery/DR and baseline `06_runtime_tests.sql`
+campaigns were not run. This is bounded Stage 4C verification, not production approval or
+external Fable sign-off. Deferred: **4D** customer receivable/credit and Sale/Return financial
+formulas; **4E** period/correction-date and DST boundaries; **4F** opening balances and account
+presentation. **Stage 4C PASS - ready for Stage 4D under the owner's progression gate.
+Stage 4D was not started.**
