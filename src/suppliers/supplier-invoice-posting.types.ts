@@ -72,6 +72,7 @@ export type SupplierPostingFailureCode =
   | 'OPERATION_IN_PROGRESS'
   | 'SUPPLIER_INVOICE_AMOUNT_INVALID'
   | 'SUPPLIER_INVOICE_PRODUCT_LINK_NOT_FOUND'
+  | 'SUPPLIER_INACTIVE'
   | 'SUPPLIER_NOT_FOUND';
 
 export interface SupplierPostingFailure {

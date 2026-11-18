@@ -15,6 +15,7 @@ import { configureApplication } from '../src/bootstrap';
 import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
 import { DATABASE_POOL } from '../src/database/database.constants';
+import { DatabaseService } from '../src/database/database.service';
 import type { SupplierInvoicePostingResponse } from '../src/suppliers/supplier-invoice-posting.types';
 import { parseStoredSupplierFinancialPostingResponse } from '../src/suppliers/supplier-return-response';
 import type { SupplierReturnPostingResponse } from '../src/suppliers/supplier-return.types';
@@ -25,6 +26,14 @@ import {
   upgradeInventoryTestDatabaseToCurrent,
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
+import {
+  assertSupplierDimensions,
+  assertSupplierPaymentFacts,
+  assertSupplierReversalFacts,
+  supplierBoundaries,
+  supplierFinancialTables,
+} from './stage4c-financial-evidence';
 
 const migrationFilename = '0015_sale_customer_credit_tender.sql';
 
@@ -145,7 +154,7 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     amountMinor: string,
     identity: Identity = owner,
     at = occurredAt,
-    operationId = randomUUID(),
+    operationId: string = randomUUID(),
   ): Promise<InvoiceFixture> {
     const result = await request(server)
       .post(`/v1/suppliers/${supplierId}/invoices`)
@@ -349,6 +358,1048 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     ).expect(201);
     return { supplierId, invoice, returnOperationId };
   }
+
+  it('S4C2-01 reconciles invoice and opening exposure once while preserving independent Supplier credit', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const invoice = await postInvoice(supplier, '10000');
+    const invoiceId = invoice.response.invoice.id;
+    const check = async (payable: string, allocated: string, credit = '0') => {
+      await assertSupplierDimensions(db().admin, owner.storeId, supplier, payable, credit);
+      expect(
+        (
+          await db().admin.query(
+            `select outstanding_minor::text as obligation
+        from ledger.v_supplier_invoice_outstanding where store_id=$1 and purchase_invoice_id=$2`,
+            [owner.storeId, invoiceId],
+          )
+        ).rows,
+      ).toEqual([{ obligation: '10000' }]);
+      expect(
+        (
+          await db().admin.query(
+            `select coalesce(sum(a.amount_minor),0)::text as allocated
+        from ledger.supplier_payment_allocations a join ledger.supplier_payments p on p.store_id=a.store_id and p.id=a.supplier_payment_id
+        where a.store_id=$1 and a.purchase_invoice_id=$2 and p.status='posted'`,
+            [owner.storeId, invoiceId],
+          )
+        ).rows,
+      ).toEqual([{ allocated }]);
+      expect(await invoiceOutstanding(invoiceId)).toBe((10000n - BigInt(allocated)).toString());
+      const read = await request(server)
+        .get(`/v1/suppliers/${supplier}/invoices`)
+        .set(authorized())
+        .expect(200);
+      expect(read.body).toMatchObject({
+        totalOutstandingMinor: (BigInt(payable) - BigInt(credit)).toString(),
+        invoices: expect.arrayContaining([
+          expect.objectContaining({
+            id: invoiceId,
+            paidAmountMinor: allocated,
+            outstandingMinor: (10000n - BigInt(allocated)).toString(),
+          }),
+        ]) as unknown,
+      });
+    };
+    await check('10000', '0');
+    expect(await accountBalance(account)).toBe('0');
+    await payInvoice(supplier, invoiceId, '4000', account);
+    await check('6000', '4000');
+    expect(await accountBalance(account)).toBe('-4000');
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    await payInvoice(supplier, invoiceId, '6000', account);
+    await check('0', '10000');
+    expect(await accountBalance(account)).toBe('-10000');
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    const beforeOpening = (
+      await db().admin.query(
+        'select id from ledger.purchase_invoices where store_id=$1 order by id',
+        [owner.storeId],
+      )
+    ).rows;
+    const opening = await request(server)
+      .post(`/v1/suppliers/${supplier}/opening-payables`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        amountMinor: '3000',
+        occurredAt,
+      })
+      .expect(201);
+    const openingId = (opening.body as { payable: { id: string } }).payable.id;
+    expect(
+      (
+        await db().admin.query(
+          'select id from ledger.purchase_invoices where store_id=$1 order by id',
+          [owner.storeId],
+        )
+      ).rows,
+    ).toEqual(beforeOpening);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '3000', '0');
+    await request(server)
+      .post(`/v1/suppliers/${supplier}/payments`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        paymentSource: 'money_account',
+        moneyAccountId: account,
+        amountMinor: '1000',
+        occurredAt,
+        allocations: [{ targetType: 'opening_payable', targetId: openingId, amountMinor: '1000' }],
+      })
+      .expect(201);
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    await check('2000', '10000');
+    const openingRead = await request(server)
+      .get(`/v1/suppliers/${supplier}/invoices`)
+      .set(authorized())
+      .expect(200);
+    expect(openingRead.body).toMatchObject({
+      openingPayable: { amountMinor: '3000', paidAmountMinor: '1000', outstandingMinor: '2000' },
+    });
+    await postReturn(supplier, invoiceId, '2500').expect(201);
+    await check('2000', '10000', '2500');
+    const creditRead = await request(server)
+      .get(`/v1/suppliers/${supplier}/return-financials`)
+      .set(authorized())
+      .expect(200);
+    expect(creditRead.body).toMatchObject({
+      balances: { payableMinor: '2000', supplierCreditAvailableMinor: '2500' },
+    });
+    expect(await accountBalance(account)).toBe('-11000');
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-02 enforces complete exact allocation and rolls back staged funding without a second expense', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const first = await postInvoice(supplier, '1000');
+    const second = await postInvoice(supplier, '2000');
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const target = (id: string, amountMinor: string) => ({
+      targetType: 'purchase_invoice',
+      targetId: id,
+      amountMinor,
+    });
+    const command = {
+      operationId: randomUUID(),
+      paymentSource: 'money_account',
+      moneyAccountId: account,
+      amountMinor: '1500',
+      occurredAt,
+      allocations: [
+        target(first.response.invoice.id, '500'),
+        target(second.response.invoice.id, '1000'),
+      ],
+    };
+    const post = (body: Record<string, unknown>) =>
+      request(server).post(`/v1/suppliers/${supplier}/payments`).set(authorized()).send(body);
+    const accepted = await post(command).expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '1500', '0');
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    expect(await accountBalance(account)).toBe('-1500');
+    const beforeReplay = await captureReplayEvidence(
+      db().admin,
+      owner.storeId,
+      supplierFinancialTables,
+    );
+    expect(
+      (await post({ ...command, allocations: [...command.allocations].reverse() }).expect(201))
+        .body,
+    ).toEqual(accepted.body);
+    expect(await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables)).toEqual(
+      beforeReplay,
+    );
+    for (const invalid of [
+      {
+        amountMinor: '2',
+        allocations: [
+          target(first.response.invoice.id, '1'),
+          target(first.response.invoice.id, '1'),
+        ],
+        status: 400,
+      },
+      { amountMinor: '501', allocations: [target(first.response.invoice.id, '501')], status: 409 },
+      { amountMinor: '2', allocations: [target(first.response.invoice.id, '1')], status: 400 },
+      { amountMinor: '1', allocations: [target(first.response.invoice.id, '2')], status: 400 },
+      { amountMinor: '1', allocations: [], status: 400 },
+      { amountMinor: '1', allocations: [target(first.response.invoice.id, '0')], status: 400 },
+      { amountMinor: '1', allocations: [target(first.response.invoice.id, '-1')], status: 400 },
+    ]) {
+      const before = await captureReplayEvidence(
+        db().admin,
+        owner.storeId,
+        supplierFinancialTables,
+      );
+      const { status, ...payload } = invalid;
+      await post({ ...command, ...payload, operationId: randomUUID() }).expect(status);
+      const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      for (const table of Object.keys(before).filter(
+        (table) => table !== 'sync.processed_operations',
+      ))
+        expect(after[table]).toEqual(before[table]);
+    }
+    if (!app) throw new Error('Application unavailable');
+    const service = app.get(DatabaseService);
+    const original = service.withTenantTransaction.bind(service);
+    const beforeFailure = await captureReplayEvidence(
+      db().admin,
+      owner.storeId,
+      supplierFinancialTables,
+    );
+    const spy = jest.spyOn(service, 'withTenantTransaction').mockImplementation((context, work) =>
+      original(context, async (transaction) => {
+        await work(transaction);
+        throw new Error('Stage 4C controlled failure after funding');
+      }),
+    );
+    try {
+      await post({
+        ...command,
+        operationId: randomUUID(),
+        amountMinor: '500',
+        allocations: [target(first.response.invoice.id, '500')],
+      }).expect(500);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables)).toEqual(
+      beforeFailure,
+    );
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+  });
+
+  it('S4C2-04 reconciles payable-first Returns, independent credit consumption and actual refunds', async () => {
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const rejectedUnchanged = async (test: request.Test) => {
+      const before = await captureReplayEvidence(
+        db().admin,
+        owner.storeId,
+        supplierFinancialTables,
+      );
+      await test.expect(409);
+      const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      for (const table of Object.keys(before).filter(
+        (table) => table !== 'sync.processed_operations',
+      ))
+        expect(after[table]).toEqual(before[table]);
+    };
+    for (const paid of ['0', '700', '1000']) {
+      const supplier = await createSupplier();
+      const account = await createAccount();
+      const invoice = await postInvoice(supplier, '1000');
+      if (paid !== '0') await payInvoice(supplier, invoice.response.invoice.id, paid, account);
+      const operation = randomUUID();
+      const posted = await postReturn(
+        supplier,
+        invoice.response.invoice.id,
+        '500',
+        operation,
+      ).expect(201);
+      const reduction = paid === '0' ? '500' : paid === '700' ? '300' : '0';
+      const credit = paid === '0' ? '0' : paid === '700' ? '200' : '500';
+      const remaining = paid === '0' ? '500' : '0';
+      await assertSupplierDimensions(db().admin, owner.storeId, supplier, remaining, credit);
+      expect(await invoiceOutstanding(invoice.response.invoice.id)).toBe(remaining);
+      const facts = (
+        await db().admin.query(
+          `select entry_type as type,payable_delta_minor::text as payable,
+        credit_delta_minor::text as credit,source_purchase_invoice_id as invoice from ledger.supplier_ledger_entries
+        where store_id=$1 and reference_type='supplier_return' and reference_id=$2 order by entry_type`,
+          [owner.storeId, supplierReturnBody(posted).return.id],
+        )
+      ).rows;
+      expect(facts).toEqual([
+        ...(credit === '0'
+          ? []
+          : [
+              {
+                type: 'credit_created',
+                payable: '0',
+                credit,
+                invoice: invoice.response.invoice.id,
+              },
+            ]),
+        ...(reduction === '0'
+          ? []
+          : [
+              {
+                type: 'return',
+                payable: (-BigInt(reduction)).toString(),
+                credit: '0',
+                invoice: invoice.response.invoice.id,
+              },
+            ]),
+      ]);
+      expect(await accountBalance(account)).toBe((-BigInt(paid)).toString());
+      const beforeReplay = await captureReplayEvidence(
+        db().admin,
+        owner.storeId,
+        supplierFinancialTables,
+      );
+      expect(
+        (await postReturn(supplier, invoice.response.invoice.id, '500', operation).expect(201))
+          .body,
+      ).toEqual(posted.body);
+      expect(
+        await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables),
+      ).toEqual(beforeReplay);
+      await postReturn(supplier, invoice.response.invoice.id, '500').expect(201);
+      await assertSupplierDimensions(db().admin, owner.storeId, supplier, '0', paid);
+      await rejectedUnchanged(postReturn(supplier, invoice.response.invoice.id, '1'));
+      await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    }
+    const source = await createCredit('1000');
+    const target = await postInvoice(source.supplierId, '1200');
+    await assertSupplierDimensions(db().admin, owner.storeId, source.supplierId, '1200', '1000');
+    const moneyBefore = (
+      await db().admin.query(
+        `select to_jsonb(m)::text as row from ledger.money_movements m where store_id=$1 order by id`,
+        [owner.storeId],
+      )
+    ).rows;
+    await applyCredit(source.supplierId, target.response.invoice.id, '400').expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, source.supplierId, '800', '600');
+    await applyCredit(source.supplierId, target.response.invoice.id, '600').expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, source.supplierId, '200', '0');
+    expect(await invoiceOutstanding(target.response.invoice.id)).toBe('200');
+    await rejectedUnchanged(applyCredit(source.supplierId, target.response.invoice.id, '1'));
+    expect(
+      (
+        await db().admin.query(
+          `select to_jsonb(m)::text as row from ledger.money_movements m where store_id=$1 order by id`,
+          [owner.storeId],
+        )
+      ).rows,
+    ).toEqual(moneyBefore);
+    const refundSource = await createCredit('500');
+    const smallInvoice = await postInvoice(refundSource.supplierId, '100');
+    await rejectedUnchanged(
+      applyCredit(refundSource.supplierId, smallInvoice.response.invoice.id, '101'),
+    );
+    const account = await createAccount();
+    for (const [amount, remaining, total] of [
+      ['200', '300', '200'],
+      ['300', '0', '500'],
+    ] as const) {
+      await refundCredit(refundSource.supplierId, account, amount).expect(201);
+      await assertSupplierDimensions(
+        db().admin,
+        owner.storeId,
+        refundSource.supplierId,
+        '100',
+        remaining,
+      );
+      expect(await accountBalance(account)).toBe(total);
+    }
+    await rejectedUnchanged(refundCredit(refundSource.supplierId, account, '1'));
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-05 preserves original facts and response identities through exact financial reversal and replacement', async () => {
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const invoice = await postInvoice(supplier, '1000');
+    const invoiceEdit = await request(server)
+      .post(`/v1/suppliers/invoices/${invoice.operationId}/edit`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        occurredAt,
+        replacement: {
+          supplierId: supplier,
+          items: [
+            {
+              description: 'Replacement',
+              unitName: 'piece',
+              quantityMilli: '1000',
+              unitCostMinor: '1200',
+            },
+          ],
+        },
+      })
+      .expect(201);
+    const replacement = (invoiceEdit.body as { replacement: SupplierInvoicePostingResponse })
+      .replacement;
+    expect(
+      (await postInvoice(supplier, '1000', owner, occurredAt, invoice.operationId)).response,
+    ).toEqual(invoice.response);
+    const payment = (source: string, amount: string, operationId = randomUUID()) => ({
+      operationId,
+      paymentSource: source,
+      ...(source === 'money_account' ? { moneyAccountId: account } : {}),
+      amountMinor: amount,
+      occurredAt,
+      allocations: [
+        { targetType: 'purchase_invoice', targetId: replacement.invoice.id, amountMinor: amount },
+      ],
+    });
+    const post = (body: Record<string, unknown>) =>
+      request(server).post(`/v1/suppliers/${supplier}/payments`).set(authorized()).send(body);
+    const normal = payment('money_account', '400');
+    const ownerPaid = payment('owner_pocket', '400');
+    const normalResponse = await post(normal).expect(201);
+    const ownerResponse = await post(ownerPaid).expect(201);
+    const immutableTables = [
+      'ledger.supplier_ledger_entries',
+      'ledger.money_movements',
+      'ledger.owner_ledger_entries',
+      'ledger.supplier_payment_allocations',
+      'ledger.purchase_items',
+    ];
+    const before = await captureReplayEvidence(db().admin, owner.storeId, immutableTables);
+    await request(server)
+      .post(`/v1/suppliers/payments/${normal.operationId}/cancel`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), occurredAt })
+      .expect(201);
+    const ownerEditId = randomUUID();
+    const ownerReplacement = payment('owner_pocket', '200');
+    const { operationId: unused, ...ownerPayload } = ownerReplacement;
+    void unused;
+    await request(server)
+      .post(`/v1/suppliers/payments/${ownerPaid.operationId}/edit`)
+      .set(authorized())
+      .send({
+        operationId: ownerEditId,
+        occurredAt,
+        replacement: { supplierId: supplier, ...ownerPayload },
+      })
+      .expect(201);
+    expect((await post(normal).expect(201)).body).toEqual(normalResponse.body);
+    expect((await post(ownerPaid).expect(201)).body).toEqual(ownerResponse.body);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '1000', '0');
+    expect(await invoiceOutstanding(replacement.invoice.id)).toBe('1000');
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    const returnId = randomUUID();
+    const originalReturn = await postReturn(
+      supplier,
+      replacement.invoice.id,
+      '300',
+      returnId,
+    ).expect(201);
+    await correct(
+      'financial-returns',
+      'replace',
+      returnId,
+      correctionBody({ amountMinor: '150', reason: 'Adjusted return' }),
+    ).expect(201);
+    expect(
+      (await postReturn(supplier, replacement.invoice.id, '300', returnId).expect(201)).body,
+    ).toEqual(originalReturn.body);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '850', '0');
+    const source = await createCredit('1000');
+    const target = await postInvoice(source.supplierId, '600');
+    const applicationId = randomUUID();
+    const application = await applyCredit(
+      source.supplierId,
+      target.response.invoice.id,
+      '200',
+      applicationId,
+    ).expect(201);
+    await correct(
+      'credit-applications',
+      'replace',
+      applicationId,
+      correctionBody({
+        purchaseInvoiceId: target.response.invoice.id,
+        amountMinor: '100',
+        notes: 'Adjusted credit',
+      }),
+    ).expect(201);
+    expect(
+      (
+        await applyCredit(
+          source.supplierId,
+          target.response.invoice.id,
+          '200',
+          applicationId,
+        ).expect(201)
+      ).body,
+    ).toEqual(application.body);
+    const refundId = randomUUID();
+    const refundAccount = await createAccount();
+    const refund = await refundCredit(source.supplierId, refundAccount, '200', refundId).expect(
+      201,
+    );
+    await correct(
+      'refunds',
+      'replace',
+      refundId,
+      correctionBody({
+        moneyAccountId: refundAccount,
+        amountMinor: '100',
+        notes: 'Adjusted refund',
+      }),
+    ).expect(201);
+    expect(
+      (await refundCredit(source.supplierId, refundAccount, '200', refundId).expect(201)).body,
+    ).toEqual(refund.body);
+    await assertSupplierDimensions(db().admin, owner.storeId, source.supplierId, '500', '800');
+    expect(await accountBalance(refundAccount)).toBe('100');
+    const dependency = await postInvoice(supplier, '100');
+    await postReturn(supplier, dependency.response.invoice.id, '20').expect(201);
+    for (const operation of [
+      target.operationId,
+      source.invoice.operationId,
+      dependency.operationId,
+    ]) {
+      const saved = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      await request(server)
+        .post(`/v1/suppliers/invoices/${operation}/cancel`)
+        .set(authorized())
+        .send({ operationId: randomUUID(), occurredAt })
+        .expect(409);
+      const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      for (const table of supplierFinancialTables) expect(after[table]).toEqual(saved[table]);
+    }
+    const saved = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    await correct('financial-returns', 'cancel', source.returnOperationId, correctionBody()).expect(
+      409,
+    );
+    const afterRejected = await captureReplayEvidence(
+      db().admin,
+      owner.storeId,
+      supplierFinancialTables,
+    );
+    for (const table of supplierFinancialTables) expect(afterRejected[table]).toEqual(saved[table]);
+    const after = await captureReplayEvidence(db().admin, owner.storeId, immutableTables);
+    for (const table of Object.keys(before))
+      expect(after[table]).toEqual(expect.arrayContaining(before[table] ?? []));
+    await assertSupplierReversalFacts(db().admin, owner.storeId);
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-03 funds partial and full Supplier settlement exclusively through Owner liability', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const invoice = await postInvoice(supplier, '10000');
+    const before = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const body = (amount: string) => ({
+      operationId: randomUUID(),
+      paymentSource: 'owner_pocket',
+      amountMinor: amount,
+      occurredAt,
+      allocations: [
+        {
+          targetType: 'purchase_invoice',
+          targetId: invoice.response.invoice.id,
+          amountMinor: amount,
+        },
+      ],
+    });
+    for (const invalid of [
+      { ...body('1'), moneyAccountId: account },
+      { ...body('1'), paymentSource: 'money_account' },
+    ]) {
+      await request(server)
+        .post(`/v1/suppliers/${supplier}/payments`)
+        .set(authorized())
+        .send(invalid)
+        .expect(400);
+      expect(
+        await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables),
+      ).toEqual(before);
+    }
+    for (const [amount, payable, liability] of [
+      ['4000', '6000', '4000'],
+      ['6000', '0', '10000'],
+    ] as const) {
+      await request(server)
+        .post(`/v1/suppliers/${supplier}/payments`)
+        .set(authorized())
+        .send(body(amount))
+        .expect(201);
+      await assertSupplierDimensions(db().admin, owner.storeId, supplier, payable, '0');
+      await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+      expect(await invoiceOutstanding(invoice.response.invoice.id)).toBe(payable);
+      expect(
+        (
+          await db().admin.query(
+            `select sum(o.owner_liability_delta_minor)::text as liability,
+        sum(o.equity_delta_minor)::text as equity from ledger.owner_ledger_entries o
+        join ledger.supplier_payments p on p.store_id=o.store_id and p.owner_ledger_entry_id=o.id
+        where p.store_id=$1 and p.supplier_id=$2`,
+            [owner.storeId, supplier],
+          )
+        ).rows,
+      ).toEqual([{ liability, equity: '0' }]);
+    }
+    const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    expect(after['ledger.money_movements']).toEqual(before['ledger.money_movements']);
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-06 preserves rounding, bigint and historical facts after Supplier description edits', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const rounded = await request(server)
+      .post(`/v1/suppliers/${supplier}/invoices`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        occurredAt,
+        invoiceDiscountMinor: '10',
+        roundingMinor: '1',
+        items: [
+          {
+            description: 'Half-up line',
+            unitName: 'piece',
+            quantityMilli: '1500',
+            unitCostMinor: '101',
+            lineDiscountMinor: '2',
+          },
+        ],
+      })
+      .expect(201);
+    const roundedInvoice = rounded.body as SupplierInvoicePostingResponse;
+    expect(roundedInvoice.items[0]).toMatchObject({
+      lineGrossMinor: '152',
+      lineDiscountMinor: '2',
+      roundingMinor: '0',
+      lineTotalMinor: '150',
+    });
+    expect(roundedInvoice.invoice).toMatchObject({
+      itemsSubtotalMinor: '152',
+      lineDiscountTotalMinor: '2',
+      invoiceDiscountMinor: '10',
+      roundingMinor: '1',
+      totalMinor: '141',
+    });
+    expect(
+      (
+        await db().admin.query(
+          `select line_gross_minor::text as gross,line_discount_minor::text as discount,
+      rounding_minor::text as rounding,line_total_minor::text as total from ledger.purchase_items
+      where store_id=$1 and purchase_invoice_id=$2`,
+          [owner.storeId, roundedInvoice.invoice.id],
+        )
+      ).rows,
+    ).toEqual([{ gross: '152', discount: '2', rounding: '0', total: '150' }]);
+    expect(
+      (
+        await db().admin.query(
+          `select items_subtotal_minor::text as subtotal,invoice_discount_minor::text as discount,
+      rounding_minor::text as rounding,total_minor::text as total from ledger.purchase_invoices where store_id=$1 and id=$2`,
+          [owner.storeId, roundedInvoice.invoice.id],
+        )
+      ).rows,
+    ).toEqual([{ subtotal: '152', discount: '10', rounding: '1', total: '141' }]);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '141', '0');
+    const huge = '9007199254740993';
+    const large = await postInvoice(supplier, huge);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '9007199254741134', '0');
+    await payInvoice(supplier, large.response.invoice.id, huge, account);
+    await assertSupplierPaymentFacts(db().admin, owner.storeId, supplier);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '141', '0');
+    expect(await accountBalance(account)).toBe('-9007199254740993');
+    const before = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    await request(server)
+      .patch(`/v1/suppliers/${supplier}`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        expectedVersion: await supplierVersion(supplier),
+        name: 'Updated Supplier display name',
+      })
+      .expect(200);
+    const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    for (const table of supplierFinancialTables) expect(after[table]).toEqual(before[table]);
+    for (const table of Object.keys(before))
+      expect(after[table]).toEqual(expect.arrayContaining(before[table] ?? []));
+    const read = await request(server)
+      .get(`/v1/suppliers/${supplier}/invoices`)
+      .set(authorized())
+      .expect(200);
+    expect(read.body).toMatchObject({
+      invoices: expect.arrayContaining([
+        expect.objectContaining({
+          id: large.response.invoice.id,
+          totalMinor: huge,
+          paidAmountMinor: huge,
+          outstandingMinor: '0',
+        }),
+      ]) as unknown,
+    });
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-06 rejects archived account funding while preserving historical payment and exact reversal', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const invoice = await postInvoice(supplier, '300');
+    const paymentId = randomUUID();
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    await payInvoice(supplier, invoice.response.invoice.id, '100', account, paymentId);
+    const credit = await createCredit('100');
+    await refundCredit(credit.supplierId, account, '100').expect(201);
+    expect(await accountBalance(account)).toBe('0');
+    const version = (
+      await db().admin.query<{ version: string }>(
+        'select version::text as version from ledger.money_accounts where store_id=$1 and id=$2',
+        [owner.storeId, account],
+      )
+    ).rows[0]?.version;
+    await request(server)
+      .post(`/v1/money-accounts/${account}/archive`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), expectedVersion: version })
+      .expect(200);
+    const before = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    const replacement = {
+      supplierId: supplier,
+      paymentSource: 'money_account',
+      moneyAccountId: account,
+      amountMinor: '100',
+      occurredAt,
+      allocations: [
+        {
+          targetType: 'purchase_invoice',
+          targetId: invoice.response.invoice.id,
+          amountMinor: '100',
+        },
+      ],
+    };
+    const { supplierId: ignored, ...newPayment } = replacement;
+    void ignored;
+    const rejected = await request(server)
+      .post(`/v1/suppliers/${supplier}/payments`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), ...newPayment })
+      .expect(409);
+    expect(rejected.body).toMatchObject({ code: 'MONEY_ACCOUNT_UNAVAILABLE' });
+    await request(server)
+      .post(`/v1/suppliers/payments/${paymentId}/edit`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), occurredAt, replacement })
+      .expect(409);
+    const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    for (const table of Object.keys(before).filter(
+      (table) => table !== 'sync.processed_operations',
+    ))
+      expect(after[table]).toEqual(before[table]);
+    const history = await request(server)
+      .get(`/v1/suppliers/${supplier}/payments`)
+      .set(authorized())
+      .expect(200);
+    expect(history.body).toMatchObject({
+      payments: expect.arrayContaining([
+        expect.objectContaining({ amountMinor: '100', status: 'posted' }),
+      ]) as unknown,
+    });
+    await request(server)
+      .post(`/v1/suppliers/payments/${paymentId}/cancel`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), occurredAt })
+      .expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '300', '0');
+    expect(await invoiceOutstanding(invoice.response.invoice.id)).toBe('300');
+    expect(await accountBalance(account)).toBe('100');
+    expect(
+      (
+        await db().admin.query(
+          `select r.amount_delta_minor::text as amount,o.amount_delta_minor::text as original
+      from ledger.money_movements r join ledger.money_movements o on o.store_id=r.store_id and o.id=r.reversal_of_id
+      where r.store_id=$1 and r.account_id=$2`,
+          [owner.storeId, account],
+        )
+      ).rows,
+    ).toEqual([{ amount: '100', original: '-100' }]);
+    expect(
+      (
+        await db().admin.query(
+          'select status from ledger.money_accounts where store_id=$1 and id=$2',
+          [owner.storeId, account],
+        )
+      ).rows,
+    ).toEqual([{ status: 'archived' }]);
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-06 requires Supplier restoration for all six new financial operations while retaining historical replay and safe correction', async () => {
+    const supplier = await createSupplier();
+    const account = await createAccount();
+    const boundary = await supplierBoundaries(db().admin, owner.storeId);
+    const invoice = await postInvoice(supplier, '1000');
+    const openingBody = { operationId: randomUUID(), amountMinor: '300', occurredAt };
+    const openingPost = (body: Record<string, unknown>) =>
+      request(server)
+        .post(`/v1/suppliers/${supplier}/opening-payables`)
+        .set(authorized())
+        .send(body);
+    const opening = await openingPost(openingBody).expect(201);
+    const openingId = (opening.body as { payable: { id: string } }).payable.id;
+    const paymentBody = {
+      operationId: randomUUID(),
+      paymentSource: 'money_account',
+      moneyAccountId: account,
+      amountMinor: '1300',
+      occurredAt,
+      allocations: [
+        {
+          targetType: 'purchase_invoice',
+          targetId: invoice.response.invoice.id,
+          amountMinor: '1000',
+        },
+        { targetType: 'opening_payable', targetId: openingId, amountMinor: '300' },
+      ],
+    };
+    const paymentPost = (body: Record<string, unknown>) =>
+      request(server).post(`/v1/suppliers/${supplier}/payments`).set(authorized()).send(body);
+    const payment = await paymentPost(paymentBody).expect(201);
+    const returnId = randomUUID();
+    const returned = await postReturn(
+      supplier,
+      invoice.response.invoice.id,
+      '200',
+      returnId,
+    ).expect(201);
+    const creditTarget = await postInvoice(supplier, '100');
+    const creditId = randomUUID();
+    const credit = await applyCredit(
+      supplier,
+      creditTarget.response.invoice.id,
+      '100',
+      creditId,
+    ).expect(201);
+    const refundId = randomUUID();
+    const refund = await refundCredit(supplier, account, '100', refundId).expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '0', '0');
+    await request(server)
+      .post(`/v1/suppliers/${supplier}/archive`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), expectedVersion: await supplierVersion(supplier) })
+      .expect(200);
+    const before = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    expect(
+      (await postInvoice(supplier, '1000', owner, occurredAt, invoice.operationId)).response,
+    ).toEqual(invoice.response);
+    expect((await openingPost(openingBody).expect(201)).body).toEqual(opening.body);
+    expect((await paymentPost(paymentBody).expect(201)).body).toEqual(payment.body);
+    expect(
+      (await postReturn(supplier, invoice.response.invoice.id, '200', returnId).expect(201)).body,
+    ).toEqual(returned.body);
+    expect(
+      (await applyCredit(supplier, creditTarget.response.invoice.id, '100', creditId).expect(201))
+        .body,
+    ).toEqual(credit.body);
+    expect((await refundCredit(supplier, account, '100', refundId).expect(201)).body).toEqual(
+      refund.body,
+    );
+    expect(await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables)).toEqual(
+      before,
+    );
+    await request(server).get(`/v1/suppliers/${supplier}/invoices`).set(authorized()).expect(200);
+    await request(server).get(`/v1/suppliers/${supplier}/payments`).set(authorized()).expect(200);
+    await request(server)
+      .get(`/v1/suppliers/${supplier}/return-financials`)
+      .set(authorized())
+      .expect(200);
+    const invoiceBody = {
+      operationId: randomUUID(),
+      occurredAt,
+      items: [
+        {
+          description: 'Archived rejection',
+          unitName: 'piece',
+          quantityMilli: '1000',
+          unitCostMinor: '1',
+        },
+      ],
+    };
+    const invoicePost = (body: Record<string, unknown>) =>
+      request(server).post(`/v1/suppliers/${supplier}/invoices`).set(authorized()).send(body);
+    const rejectedOpening = { ...openingBody, operationId: randomUUID() };
+    const rejectedPayment = { ...paymentBody, operationId: randomUUID() };
+    for (const rejected of [
+      () => invoicePost(invoiceBody),
+      () => openingPost(rejectedOpening),
+      () => paymentPost(rejectedPayment),
+      () => postReturn(supplier, invoice.response.invoice.id, '1'),
+      () => applyCredit(supplier, invoice.response.invoice.id, '1'),
+      () => refundCredit(supplier, account, '1'),
+    ]) {
+      const result = await rejected().expect(409);
+      expect(result.body).toMatchObject({ code: 'SUPPLIER_INACTIVE' });
+      const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      for (const table of Object.keys(before).filter(
+        (table) => table !== 'sync.processed_operations',
+      ))
+        expect(after[table]).toEqual(before[table]);
+    }
+    expect(
+      (
+        await db().admin.query('select status from ledger.suppliers where store_id=$1 and id=$2', [
+          owner.storeId,
+          supplier,
+        ])
+      ).rows,
+    ).toEqual([{ status: 'archived' }]);
+    // Pure inverses retain historical eligibility; replacement facts require an active Supplier.
+    const replacement = {
+      supplierId: supplier,
+      paymentSource: 'money_account',
+      moneyAccountId: account,
+      amountMinor: '1',
+      occurredAt,
+      allocations: [
+        { targetType: 'purchase_invoice', targetId: invoice.response.invoice.id, amountMinor: '1' },
+      ],
+    };
+    const rejectedEdit = await request(server)
+      .post(`/v1/suppliers/payments/${paymentBody.operationId}/edit`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), occurredAt, replacement })
+      .expect(409);
+    expect(rejectedEdit.body).toMatchObject({ code: 'SUPPLIER_INACTIVE' });
+    const afterEdit = await captureReplayEvidence(
+      db().admin,
+      owner.storeId,
+      supplierFinancialTables,
+    );
+    for (const table of supplierFinancialTables) expect(afterEdit[table]).toEqual(before[table]);
+    await request(server)
+      .post(`/v1/suppliers/payments/${paymentBody.operationId}/cancel`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), occurredAt })
+      .expect(201);
+    await correct('credit-applications', 'cancel', creditId, correctionBody()).expect(201);
+    await correct('refunds', 'cancel', refundId, correctionBody()).expect(201);
+    await correct('financial-returns', 'cancel', returnId, correctionBody()).expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '1400', '0');
+    const rejectedInvoiceEdit = await request(server)
+      .post(`/v1/suppliers/invoices/${invoice.operationId}/edit`)
+      .set(authorized())
+      .send({
+        operationId: randomUUID(),
+        occurredAt,
+        replacement: { supplierId: supplier, items: invoiceBody.items },
+      })
+      .expect(409);
+    expect(rejectedInvoiceEdit.body).toMatchObject({ code: 'SUPPLIER_INACTIVE' });
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '1400', '0');
+    for (const operation of [invoice.operationId, creditTarget.operationId])
+      await request(server)
+        .post(`/v1/suppliers/invoices/${operation}/cancel`)
+        .set(authorized())
+        .send({ operationId: randomUUID(), occurredAt })
+        .expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '300', '0');
+    await request(server)
+      .post(`/v1/suppliers/${supplier}/restore`)
+      .set(authorized())
+      .send({ operationId: randomUUID(), expectedVersion: await supplierVersion(supplier) })
+      .expect(200);
+    // Persisted rejection is historical; restoration permits a genuinely new operation only.
+    expect((await invoicePost(invoiceBody).expect(409)).body).toMatchObject({
+      code: 'SUPPLIER_INACTIVE',
+    });
+    expect((await openingPost(rejectedOpening).expect(409)).body).toMatchObject({
+      code: 'SUPPLIER_INACTIVE',
+    });
+    expect((await paymentPost(rejectedPayment).expect(409)).body).toMatchObject({
+      code: 'SUPPLIER_INACTIVE',
+    });
+    await invoicePost({ ...invoiceBody, operationId: randomUUID() }).expect(201);
+    await assertSupplierDimensions(db().admin, owner.storeId, supplier, '301', '0');
+    expect(await supplierBoundaries(db().admin, owner.storeId)).toEqual(boundary);
+  });
+
+  it('S4C2-06 rechecks Supplier activity after a concurrent archive wins the row lock', async () => {
+    for (const family of ['invoices', 'opening-payables', 'payments'] as const) {
+      const supplier = await createSupplier();
+      const account = await createAccount();
+      const invoice = await postInvoice(supplier, '100');
+      await payInvoice(supplier, invoice.response.invoice.id, '100', account);
+      const before = await captureReplayEvidence(
+        db().admin,
+        owner.storeId,
+        supplierFinancialTables,
+      );
+      const blocker = await db().admin.connect();
+      let pending: Promise<Response> | undefined;
+      try {
+        await blocker.query('begin');
+        const blockerPid = (await blocker.query<{ pid: number }>('select pg_backend_pid() as pid'))
+          .rows[0]?.pid;
+        // Stage the archive under its real row lock; the HTTP writer must observe the committed status.
+        await blocker.query(
+          `update ledger.suppliers set status='archived',archived_at=clock_timestamp()
+          where store_id=$1 and id=$2`,
+          [owner.storeId, supplier],
+        );
+        const body =
+          family === 'invoices'
+            ? {
+                operationId: randomUUID(),
+                occurredAt,
+                items: [
+                  {
+                    description: 'Race',
+                    unitName: 'piece',
+                    quantityMilli: '1000',
+                    unitCostMinor: '1',
+                  },
+                ],
+              }
+            : family === 'opening-payables'
+              ? { operationId: randomUUID(), occurredAt, amountMinor: '1' }
+              : {
+                  operationId: randomUUID(),
+                  occurredAt,
+                  amountMinor: '1',
+                  paymentSource: 'money_account',
+                  moneyAccountId: account,
+                  allocations: [
+                    {
+                      targetType: 'purchase_invoice',
+                      targetId: invoice.response.invoice.id,
+                      amountMinor: '1',
+                    },
+                  ],
+                };
+        pending = request(server)
+          .post(`/v1/suppliers/${supplier}/${family}`)
+          .set(authorized())
+          .send(body)
+          .then((result) => result);
+        const deadline = Date.now() + 5000;
+        let blocked = false;
+        while (Date.now() < deadline) {
+          const result = await db().admin.query<{ blocked: boolean }>(
+            `select exists(select 1 from pg_stat_activity
+            where datname=current_database() and $1::int=any(pg_blocking_pids(pid)) and wait_event_type='Lock') as blocked`,
+            [blockerPid],
+          );
+          if (result.rows[0]?.blocked) {
+            blocked = true;
+            break;
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        await blocker.query('commit');
+        const response = await pending;
+        expect(response.status).toBe(409);
+        expect(response.body).toMatchObject({ code: 'SUPPLIER_INACTIVE' });
+        const after = await captureReplayEvidence(
+          db().admin,
+          owner.storeId,
+          supplierFinancialTables,
+        );
+        for (const table of supplierFinancialTables) expect(after[table]).toEqual(before[table]);
+      } finally {
+        await blocker.query('rollback');
+        blocker.release();
+        if (pending) await pending;
+      }
+    }
+  });
 
   beforeAll(async () => {
     let setupStage = 'read test environment';

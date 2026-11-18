@@ -110,6 +110,11 @@ const failureDefinitions: Readonly<Record<SupplierPostingFailureCode, SupplierPo
     message: 'Supplier not found.',
     statusCode: 404,
   },
+  SUPPLIER_INACTIVE: {
+    code: 'SUPPLIER_INACTIVE',
+    message: 'Supplier is not active.',
+    statusCode: 409,
+  },
 };
 
 export class SupplierPostingRejectedError extends Error {
@@ -532,12 +537,15 @@ export class SupplierInvoicePostingRepository {
     supplierId: string,
   ): Promise<void> {
     const rows = await transaction
-      .select({ id: suppliers.id })
+      .select({ id: suppliers.id, status: suppliers.status })
       .from(suppliers)
       .where(and(eq(suppliers.storeId, storeId), eq(suppliers.id, supplierId)))
       .limit(1)
       .for('update');
     if (!rows[0]) throw new SupplierPostingRejectedError(failure('SUPPLIER_NOT_FOUND'));
+    if (rows[0].status !== 'active') {
+      throw new SupplierPostingRejectedError(failure('SUPPLIER_INACTIVE'));
+    }
   }
 
   private async resolvePosting(

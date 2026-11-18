@@ -118,6 +118,11 @@ export const supplierPaymentFailureDefinitions: Readonly<
     message: 'Supplier not found.',
     statusCode: 404,
   },
+  SUPPLIER_INACTIVE: {
+    code: 'SUPPLIER_INACTIVE',
+    message: 'Supplier is not active.',
+    statusCode: 409,
+  },
   SUPPLIER_PAYMENT_ALLOCATION_EXCEEDS_OUTSTANDING: {
     code: 'SUPPLIER_PAYMENT_ALLOCATION_EXCEEDS_OUTSTANDING',
     message: 'Supplier Payment allocation exceeds the current outstanding amount.',
@@ -436,12 +441,13 @@ export class SupplierPaymentPostingRepository {
     supplierId: string,
   ): Promise<void> {
     const rows = await transaction
-      .select({ id: suppliers.id })
+      .select({ id: suppliers.id, status: suppliers.status })
       .from(suppliers)
       .where(and(eq(suppliers.storeId, storeId), eq(suppliers.id, supplierId)))
       .limit(1)
       .for('update');
     if (!rows[0]) reject('SUPPLIER_NOT_FOUND');
+    if (rows[0].status !== 'active') reject('SUPPLIER_INACTIVE');
   }
 
   private async lockAndValidateTargets(

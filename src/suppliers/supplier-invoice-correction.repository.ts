@@ -158,6 +158,11 @@ const postingFailureDefinitions: Readonly<
     message: 'Supplier not found.',
     statusCode: 404,
   },
+  SUPPLIER_INACTIVE: {
+    code: 'SUPPLIER_INACTIVE',
+    message: 'Supplier is not active.',
+    statusCode: 409,
+  },
 };
 
 const failureDefinitions: Readonly<
