@@ -3238,3 +3238,81 @@ external Fable sign-off. Deferred: **4D** customer receivable/credit and Sale/Re
 formulas; **4E** period/correction-date and DST boundaries; **4F** opening balances and account
 presentation. **Stage 4C PASS - ready for Stage 4D under the owner's progression gate.
 Stage 4D was not started.**
+
+### Independent Review Stage 4D - Customer Finance Runtime Closure (2026-11-19)
+
+**Stage 4D PASS.** Start: `main` at `77759572a9a4c95b86338da390b97c8ff3112da0`,
+equal to `origin/main`, clean, 0/0; PostgreSQL 39 applied / 0 pending. Stage 4D.1
+mapping was reused. Checkpoints executed in order 01, 02, 03, 04, 06, 05, 07;
+the resumed work preserved the existing fixes and evidence and continued at 07.
+
+| Candidate | Result | Runtime evidence |
+| --- | --- | --- |
+| S4D2-01 reconciliation | PASS, corrected | Opening 1000, advance 500, application 300, cancellation restores raw R=1000/C=500, planner=1000 and public outstanding=1000; noncash settlement cancellation and edit/cancel chains reconcile. Sale debt 10000 collected as 4000 then 6000 yields 6000 then 0 without subtracting allocations twice. Full opening-settlement reversals restore overdue-notification evidence. |
+| S4D2-02 mixed Sale settlement | PASS | All seven Money/Customer-credit/receivable combinations satisfy T=M+U+D with exact PostgreSQL header, tender, application and ledger links. Anonymous debt/credit and int8 overflow reject without business facts. Large minor-unit values, half-up quantity multiplication, discounts and line/invoice rounding remain exact. |
+| S4D2-03 Collection allocation/excess | PASS | Partial/full, multiple Collections, multiple Sales/openings, FIFO origin time/UUID ties, custom targets, multiple accounts and explicit excess choices reconcile T=A+E. Duplicate, foreign, missing, zero, negative and excessive targets reject without business effects. No implicit advance or second Sale/revenue/expense/inventory effect. |
+| S4D2-04 Customer credit | PASS | R/C coexist independently; advance, retained excess, application, refund and reasoned noncash settlement have exact signs. Insufficient credit/exposure rejects. Two requests observed waiting on real PostgreSQL locks consume only one 80-unit share of 100 available credit, leaving C=20. |
+| S4D2-06 corrections/reversals | PASS | Sale, Collection, application, refund and settlement cancellation/replacement preserve original facts and historical responses, append linked inverses and enforce active-leaf/consumed-credit dependencies. Controlled failure after writing the applied result rolls back headers, allocations, ledger, Money, audit/change evidence and root operation; retry produces one effect set. |
+| S4D2-05 credit policy | PASS | Defaults/overrides, null limit, legacy persisted allow, warn, block and limit -1/equality/+1 behave as configured. R-C+U+D accounts for consumed credit once. Competing 15-unit Sales starting at exposure 80 with limit 100 admit one, ending at 95. Warn remains nonblocking and existing in-app notification reconciliation emits the net-exposure credit-limit alert. No new warning field or allow write policy was invented. |
+| S4D2-07 lifecycle | PASS | Actual Customer/account archive and restore APIs preserve financial history and UUIDs. New named Sales, Collections, applications and refunds reject archived resources. Historical reads/replay and permitted cancellation remain available; unavailable replacement rolls back. Restored resources accept new operations. |
+
+**Confirmed finding S4D2-F01 (High, fixed): reversed opening settlements were omitted
+from outstanding projections.** Both the public receivables query and overdue-notification
+origin query included `credit_used`/`settlement` but excluded their `correction` entries.
+Before remediation, the exact application and noncash-settlement reversal scenarios each
+returned public opening outstanding **700 instead of 1000**, although the authoritative
+ledger, Customer total and settlement planner were correct. A full-settlement reversal also
+left the overdue alert absent. This understated collectible opening debt and could suppress
+collection reminders; it did not corrupt the underlying ledger or Money facts.
+
+The smallest application-only correction includes the existing correction entries in both
+queries. Direct reversals of the opening origin remain counted only in their existing term.
+Failing assertions were retained as regression tests. No stored financial facts, ledger signs,
+posting algorithms, schema, or applied migrations were changed. Existing balances are read
+correctly without historical data repair; normal notification reconciliation restores alerts.
+Confirmed findings: Critical **0**, High **1 fixed**, Medium **0**, Low **0**; unresolved **0**.
+
+Verification and test economy:
+
+- Final consolidated PostgreSQL/HTTP regression:
+  `npm.cmd run test:integration -- --runTestsByPath test/customer-collection.integration-spec.ts test/sale-correction.integration-spec.ts test/sale-read.integration-spec.ts --silent`:
+  **85 passed / 3 files / 0 skipped / 76.663 s / exit 0**. Includes **36 new** Stage 4D
+  cases and directly related existing regressions. Facts were observed in isolated databases
+  upgraded through 0039; application requests used the normal runtime role and RLS.
+- Focused unit:
+  `npm.cmd run test:unit -- --runTestsByPath src/sales/sale-posting-command.spec.ts src/sales/customer-payment-posting-command.spec.ts src/sales/customer-credit-command.spec.ts src/sales/customer-financial-correction-command.spec.ts src/notifications/notification.repository.spec.ts --silent`:
+  **82 passed / 5 files / 0 skipped / 37.393 s / exit 0**.
+- Earlier focused checkpoint runs selected only their applicable cases. The initial
+  application fixture incorrectly supplied a forbidden reason field; that fixture was
+  corrected before recording the two expected 700-versus-1000 failures. The notification
+  regression also failed before its correction. All retained regressions passed afterward.
+  One command failed at shell argument parsing before Jest started; it was rerun with an
+  equivalent pattern. Initial lint found five test typing errors; type-only corrections
+  were followed by successful typecheck/lint without repeating successful runtime tests.
+- `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`,
+  `npm.cmd run db:migrate:verify`, `npm.cmd run db:check`, `git diff --check`: **PASS**.
+  PostgreSQL **18.4**, local `DOCANA`, runtime `dokana_runtime_login` verified;
+  migrations **39 applied / 0 pending / 39 executed / 0 baseline registrations**.
+- Cleanup: temporary databases **0**, idle transactions **0**, other test connections **0**;
+  development Stores/Users/Devices/Sales/Customer-ledger rows **0**. Stage 4D fixture residue
+  **0**. Pre-existing audit **540**, legacy changes **772**, refresh tokens **6548** preserved.
+
+Implementation/tests commit: `8a7e8a7b969bab509edd40f96cd55587baa5be6e`; this Roadmap
+closure is separate. Changed scope:
+`src/sales/sale-read.repository.ts`, `src/notifications/notification.repository.ts`,
+`test/customer-collection.integration-spec.ts`, and this existing Roadmap only.
+**Database/schema/migration delta 0; ceiling 0039; 0040+ NONE.** No dependency, environment,
+API-shape, operation-identity, RLS, grant, ownership, function, trigger, constraint or reference
+change. Audit evidence was evaluated at the business-operation boundary; a ledger table's
+lack of its own central trigger was not classified as a defect. Financial mutations,
+change-feed behavior and immutable history retain their established contracts.
+
+Full repository unit/integration, release/clean-install, recovery/DR and baseline
+`06_runtime_tests.sql` campaigns were not run. This is bounded Stage 4D verification,
+not production approval or external Fable sign-off.
+
+**LATER STAGE 4E CANDIDATE - NOT INVESTIGATED:** Return financial waterfall and cross-domain
+corrections, accounting periods, posting/business dates and DST. **LATER STAGE 4F CANDIDATE -
+NOT INVESTIGATED:** Expenses, owner ledger, transfers, account presentation and wider report
+consistency. **Stage 4D PASS - ready for Stage 4E under the owner's progression gate.
+Stage 4E was not started.**
