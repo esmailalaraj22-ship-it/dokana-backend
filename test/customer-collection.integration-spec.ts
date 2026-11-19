@@ -13,6 +13,9 @@ import { configureApplication } from '../src/bootstrap';
 import { createLoggingParams } from '../src/common/logging/logging.module';
 import { AppConfigService } from '../src/config/app-config.service';
 import { DATABASE_POOL } from '../src/database/database.constants';
+import { DatabaseService } from '../src/database/database.service';
+import { NotificationRepository } from '../src/notifications/notification.repository';
+import { CustomerReceivableSettlementRepository } from '../src/sales/customer-receivable-settlement.repository';
 import {
   deriveMoneyFactId,
   deriveMoneyFactOperationId,
@@ -44,6 +47,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 import { interceptOperationQueries } from './stage3b-driver-boundary';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 const migrationFilename = '0015_sale_customer_credit_tender.sql';
 
@@ -504,6 +508,1259 @@ describe('S15.3-S15.4 Customer collections and credit on isolated PostgreSQL', (
     } finally {
       await database?.close();
     }
+  });
+
+  const stage4dTables = [
+    'ledger.sales',
+    'ledger.sale_items',
+    'ledger.sale_payments',
+    'ledger.sale_customer_credit_applications',
+    'ledger.customer_ledger_entries',
+    'ledger.customer_payments',
+    'ledger.customer_payment_allocations',
+    'ledger.money_movements',
+    'ledger.inventory_movements',
+    'ledger.expenses',
+    'ledger.audit_logs',
+  ];
+
+  function stage4dEvidence() {
+    return captureReplayEvidence(db().admin, owner.storeId, stage4dTables);
+  }
+
+  async function stage4dDeltas(operationId: string) {
+    return (
+      await db().admin.query(
+        `select
+        (select coalesce(sum(receivable_delta_minor),0)::text from ledger.customer_ledger_entries
+          where store_id=$1 and transaction_group_id=$2) as r,
+        (select coalesce(sum(credit_delta_minor),0)::text from ledger.customer_ledger_entries
+          where store_id=$1 and transaction_group_id=$2) as c,
+        (select coalesce(sum(amount_delta_minor),0)::text from ledger.money_movements
+          where store_id=$1 and transaction_group_id=$2) as m`,
+        [owner.storeId, operationId],
+      )
+    ).rows[0] as { r: string; c: string; m: string };
+  }
+
+  describe('S4D2-07 Customer and Money Account lifecycle', () => {
+    async function lifecycle(
+      kind: 'customers' | 'money-accounts',
+      id: string,
+      action: 'archive' | 'restore',
+    ) {
+      const table = kind === 'customers' ? 'ledger.customers' : 'ledger.money_accounts';
+      const version = (
+        await db().admin.query<{ version: string }>(
+          `select version::text as version from ${table} where store_id=$1 and id=$2`,
+          [owner.storeId, id],
+        )
+      ).rows[0]?.version;
+      const before = await stage4dEvidence();
+      await request(server)
+        .post(`/v1/${kind}/${id}/${action}`)
+        .set('authorization', `Bearer ${owner.token}`)
+        .send({ operationId: randomUUID(), expectedVersion: version })
+        .expect(200);
+      const after = await stage4dEvidence();
+      for (const financialTable of stage4dTables.filter((name) => name !== 'ledger.audit_logs')) {
+        expect(after[financialTable]).toEqual(before[financialTable]);
+      }
+      expect(
+        (
+          await db().admin.query(`select id, status from ${table} where store_id=$1 and id=$2`, [
+            owner.storeId,
+            id,
+          ])
+        ).rows,
+      ).toEqual([{ id, status: action === 'archive' ? 'archived' : 'active' }]);
+    }
+
+    it('archives a settled Customer, preserves replay/reversal, and restores the same UUID for new writes', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '100', '2026-09-01T08:00:00Z');
+      const collection = fifoRequest([{ moneyAccountId: account, amountMinor: '100' }]);
+      const original = (await postCollection(customerId, collection).expect(201))
+        .body as CustomerCollectionPostingResponse;
+      expect(await customerBalances(customerId)).toEqual({ receivable: '0', credit: '0' });
+      await lifecycle('customers', customerId, 'archive');
+      const writes = [
+        () =>
+          postSale(
+            customerCreditSaleRequest({
+              customerId,
+              totalMinor: '10',
+              payments: [{ moneyAccountId: account, amountMinor: '10' }],
+            }),
+          ),
+        () =>
+          postCollection(customerId, fifoRequest([{ moneyAccountId: account, amountMinor: '10' }])),
+        () =>
+          postCustomerFinancial(customerId, 'credit/applications', customerFinancialRequest('10')),
+        () =>
+          postCustomerFinancial(customerId, 'credit/refunds', {
+            operationId: randomUUID(),
+            occurredAt: '2026-09-15T13:00:00Z',
+            amountMinor: '10',
+            moneyAccountId: account,
+          }),
+      ];
+      for (const write of writes) {
+        const before = await stage4dEvidence();
+        await write().expect(409).expect(expectResponseCode('CUSTOMER_UNAVAILABLE'));
+        const after = await stage4dEvidence();
+        for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+      }
+      const beforeReplay = await stage4dEvidence();
+      expect((await postCollection(customerId, collection).expect(201)).body).toEqual(original);
+      expect(await stage4dEvidence()).toEqual(beforeReplay);
+      await request(server)
+        .get(`/v1/customers/${customerId}/receivables`)
+        .set('authorization', `Bearer ${owner.token}`)
+        .expect(200);
+      const cancel = correctionRequest();
+      await postCustomerFinancialCorrection(
+        customerId,
+        'payments',
+        collection.operationId as string,
+        'cancel',
+        cancel,
+      ).expect(201);
+      expect(await stage4dDeltas(cancel.operationId as string)).toEqual({
+        r: '100',
+        c: '0',
+        m: '-100',
+      });
+      expect(await customerBalances(customerId)).toEqual({ receivable: '100', credit: '0' });
+      await lifecycle('customers', customerId, 'restore');
+      await postSale(
+        customerCreditSaleRequest({
+          customerId,
+          totalMinor: '20',
+          payments: [{ moneyAccountId: account, amountMinor: '20' }],
+        }),
+      ).expect(201);
+      await createCustomerCredit(customerId, account, '100');
+      const application = (
+        await postCustomerFinancial(
+          customerId,
+          'credit/applications',
+          customerFinancialRequest('50'),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      expect(await stage4dDeltas(application.operationId)).toEqual({ r: '-50', c: '-50', m: '0' });
+      await postCustomerFinancial(customerId, 'credit/refunds', {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T13:00:00Z',
+        amountMinor: '50',
+        moneyAccountId: account,
+      }).expect(201);
+      await postCollection(
+        customerId,
+        fifoRequest([{ moneyAccountId: account, amountMinor: '50' }]),
+      ).expect(201);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '0', credit: '0' });
+      expect(await moneyBalance(account)).toBe('120');
+    });
+
+    it('rejects new archived-account tenders/refunds but permits historical inverse and restored use', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      const fundingAccount = await createAccount();
+      await createCustomerCredit(customerId, account, '100');
+      const refund = {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T13:00:00Z',
+        amountMinor: '100',
+        moneyAccountId: account,
+      };
+      const original = (
+        await postCustomerFinancial(customerId, 'credit/refunds', refund).expect(201)
+      ).body as CustomerFinancialResponse;
+      await createCustomerCredit(customerId, fundingAccount, '100');
+      await postOpening(customerId, '50', '2026-09-01T08:00:00Z');
+      expect(await moneyBalance(account)).toBe('0');
+      await lifecycle('money-accounts', account, 'archive');
+      const writes = [
+        () =>
+          postSale(
+            customerCreditSaleRequest({
+              customerId,
+              totalMinor: '10',
+              payments: [{ moneyAccountId: account, amountMinor: '10' }],
+            }),
+          ),
+        () =>
+          postCollection(customerId, fifoRequest([{ moneyAccountId: account, amountMinor: '10' }])),
+        () =>
+          postCustomerFinancial(customerId, 'credit/refunds', {
+            ...refund,
+            operationId: randomUUID(),
+            amountMinor: '10',
+          }),
+        () =>
+          postCustomerFinancialCorrection(
+            customerId,
+            'credit/refunds',
+            refund.operationId,
+            'edit',
+            correctionRequest({ replacement: { amountMinor: '10', moneyAccountId: account } }),
+          ),
+      ];
+      for (const write of writes) {
+        const before = await stage4dEvidence();
+        await write().expect(409).expect(expectResponseCode('MONEY_ACCOUNT_UNAVAILABLE'));
+        const after = await stage4dEvidence();
+        for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+      }
+      const beforeReplay = await stage4dEvidence();
+      expect(
+        (await postCustomerFinancial(customerId, 'credit/refunds', refund).expect(201)).body,
+      ).toEqual(original);
+      expect(await stage4dEvidence()).toEqual(beforeReplay);
+      const cancel = correctionRequest();
+      await postCustomerFinancialCorrection(
+        customerId,
+        'credit/refunds',
+        refund.operationId,
+        'cancel',
+        cancel,
+      ).expect(201);
+      expect(await stage4dDeltas(cancel.operationId as string)).toEqual({
+        r: '0',
+        c: '100',
+        m: '100',
+      });
+      await lifecycle('money-accounts', account, 'restore');
+      await postSale(
+        customerCreditSaleRequest({
+          customerId,
+          totalMinor: '10',
+          payments: [{ moneyAccountId: account, amountMinor: '10' }],
+        }),
+      ).expect(201);
+      await postCollection(
+        customerId,
+        fifoRequest([{ moneyAccountId: account, amountMinor: '10' }]),
+      ).expect(201);
+      await postCustomerFinancial(customerId, 'credit/refunds', {
+        ...refund,
+        operationId: randomUUID(),
+        amountMinor: '10',
+      }).expect(201);
+      expect(await moneyBalance(account)).toBe('110');
+      expect(await customerBalances(customerId)).toEqual({ receivable: '40', credit: '190' });
+    });
+  });
+
+  async function stage4dReconcileNotifications() {
+    if (!app) throw new Error('Application unavailable');
+    await app
+      .get(NotificationRepository)
+      .reconcile({
+        storeId: owner.storeId,
+        userId: owner.userId,
+        deviceId: owner.deviceId,
+        requestId: randomUUID(),
+      });
+  }
+
+  describe('S4D2-05 credit policy', () => {
+    it.each([
+      ['default below', 'block', '100', null, null, '99', 201],
+      ['default equality', 'block', '100', null, null, '100', 201],
+      ['default above', 'block', '100', null, null, '101', 409],
+      ['warn', 'warn', '100', null, null, '101', 201],
+      ['legacy allow', 'allow', '100', null, null, '101', 201],
+      ['null limit', 'block', null, null, null, '101', 201],
+      ['Customer warn override', 'block', '100', 'warn', '50', '101', 201],
+      ['Customer block override', 'warn', '100', 'block', '50', '51', 409],
+      ['Customer limit equality', 'block', '100', null, '50', '50', 201],
+    ] as const)(
+      'enforces %s with exact stored effects',
+      async (_label, storePolicy, storeLimit, customerPolicy, customerLimit, amount, status) => {
+        const customerId = await createCustomer();
+        const settings = (
+          await db().admin.query(
+            'select default_credit_policy, default_credit_limit_minor::text from ledger.app_settings where store_id=$1',
+            [owner.storeId],
+          )
+        ).rows[0] as { default_credit_policy: string; default_credit_limit_minor: string | null };
+        try {
+          await db().admin.query(
+            'update ledger.app_settings set default_credit_policy=$2, default_credit_limit_minor=$3 where store_id=$1',
+            [owner.storeId, storePolicy, storeLimit],
+          );
+          await db().admin.query(
+            'update ledger.customers set credit_policy=$3, credit_limit_minor=$4 where store_id=$1 and id=$2',
+            [owner.storeId, customerId, customerPolicy, customerLimit],
+          );
+          const body = customerCreditSaleRequest({ customerId, totalMinor: amount });
+          const before = await stage4dEvidence();
+          const response = await postSale(body).expect(status);
+          expect(await stage4dDeltas(body.operationId as string)).toEqual({
+            r: status === 201 ? amount : '0',
+            c: '0',
+            m: '0',
+          });
+          if (status === 409) {
+            expect(response.body).toMatchObject({ code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED' });
+            const after = await stage4dEvidence();
+            for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+          } else {
+            expect(await customerBalances(customerId)).toEqual({ receivable: amount, credit: '0' });
+          }
+        } finally {
+          await db().admin.query(
+            'update ledger.app_settings set default_credit_policy=$2, default_credit_limit_minor=$3 where store_id=$1',
+            [owner.storeId, settings.default_credit_policy, settings.default_credit_limit_minor],
+          );
+        }
+      },
+    );
+
+    it.each([
+      ['50', 201],
+      ['51', 409],
+    ] as const)(
+      'counts existing credit and consumed credit once when new debt is %s',
+      async (debt, status) => {
+        const customerId = await createCustomer();
+        const account = await createAccount();
+        await postOpening(customerId, '80', '2026-09-01T08:00:00Z');
+        await createCustomerCredit(customerId, account, '50');
+        await db().admin.query(
+          "update ledger.customers set credit_policy='block', credit_limit_minor=100 where store_id=$1 and id=$2",
+          [owner.storeId, customerId],
+        );
+        const body = customerCreditSaleRequest({
+          customerId,
+          totalMinor: (BigInt(debt) + 20n).toString(),
+          customerCreditAmountMinor: '20',
+        });
+        const before = await stage4dEvidence();
+        await postSale(body).expect(status);
+        expect(await customerBalances(customerId)).toEqual(
+          status === 201 ? { receivable: '130', credit: '30' } : { receivable: '80', credit: '50' },
+        );
+        expect(await stage4dDeltas(body.operationId as string)).toEqual(
+          status === 201 ? { r: '50', c: '-20', m: '0' } : { r: '0', c: '0', m: '0' },
+        );
+        if (status === 409) {
+          const after = await stage4dEvidence();
+          for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+        }
+      },
+    );
+
+    it('serializes two waiting Sales near the blocking limit without partial rejected facts', async () => {
+      const customerId = await createCustomer();
+      await postOpening(customerId, '80', '2026-09-01T08:00:00Z');
+      await db().admin.query(
+        "update ledger.customers set credit_policy='block', credit_limit_minor=100 where store_id=$1 and id=$2",
+        [owner.storeId, customerId],
+      );
+      const bodies = [
+        customerCreditSaleRequest({ customerId, totalMinor: '15' }),
+        customerCreditSaleRequest({ customerId, totalMinor: '15' }),
+      ];
+      const responses = await stage4dContend(
+        customerId,
+        bodies.map((body) => () => postSale(body)),
+      );
+      expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '95', credit: '0' });
+      for (const [index, body] of bodies.entries()) {
+        const accepted = responses[index]?.status === 201;
+        expect(await stage4dDeltas(body.operationId as string)).toEqual({
+          r: accepted ? '15' : '0',
+          c: '0',
+          m: '0',
+        });
+        expect(
+          (
+            await db().admin.query(
+              'select count(*)::int as count from ledger.sales where store_id=$1 and operation_id=$2',
+              [owner.storeId, body.operationId],
+            )
+          ).rows,
+        ).toEqual([{ count: accepted ? 1 : 0 }]);
+      }
+    });
+
+    it('admits warn-policy debt and emits the existing net-exposure notification', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '80', '2026-09-01T08:00:00Z');
+      await createCustomerCredit(customerId, account, '50');
+      await db().admin.query(
+        "update ledger.customers set credit_policy='warn', credit_limit_minor=100 where store_id=$1 and id=$2",
+        [owner.storeId, customerId],
+      );
+      await stage4dReconcileNotifications();
+      const notifications = async () =>
+        (
+          await db().admin.query<{ notification_type: string }>(
+            `select notification_type from ledger.notifications where store_id=$1 and entity_id=$2
+         and notification_type='customer_credit_limit' and resolved_at is null`,
+            [owner.storeId, customerId],
+          )
+        ).rows;
+      expect(await notifications()).toEqual([]);
+      await postSale(
+        customerCreditSaleRequest({
+          customerId,
+          totalMinor: '71',
+          customerCreditAmountMinor: '20',
+        }),
+      ).expect(201);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '131', credit: '30' });
+      await stage4dReconcileNotifications();
+      expect(await notifications()).toEqual([{ notification_type: 'customer_credit_limit' }]);
+    });
+  });
+
+  it.each(['credit/applications', 'settlements'] as const)(
+    'S4D2-01 restores overdue-opening evidence after full %s reversal',
+    async (path) => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '1000', '2026-01-01T08:00:00Z');
+      await createCustomerCredit(customerId, account, '1000');
+      const operation = (
+        await postCustomerFinancial(
+          customerId,
+          path,
+          customerFinancialRequest(
+            '1000',
+            path === 'settlements' ? { reason: 'Agreed adjustment' } : {},
+          ),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      await stage4dReconcileNotifications();
+      const overdue = async () =>
+        (
+          await db().admin.query<{ notification_type: string }>(
+            `select notification_type from ledger.notifications where store_id=$1 and entity_id=$2
+         and notification_type='customer_debt_age' and resolved_at is null`,
+            [owner.storeId, customerId],
+          )
+        ).rows;
+      expect(await overdue()).toEqual([]);
+      await postCustomerFinancialCorrection(
+        customerId,
+        path,
+        operation.operationId,
+        'cancel',
+        correctionRequest(),
+      ).expect(201);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '1000', credit: '1000' });
+      await stage4dReconcileNotifications();
+      expect(await overdue()).toEqual([{ notification_type: 'customer_debt_age' }]);
+    },
+  );
+
+  describe('S4D2-06 correction and rollback', () => {
+    it.each(['credit/applications', 'settlements'] as const)(
+      'keeps opening %s edit/cancel lineage and historical responses exact',
+      async (path) => {
+        const customerId = await createCustomer();
+        const account = await createAccount();
+        await postOpening(customerId, '1000', '2026-09-01T08:00:00Z');
+        await createCustomerCredit(customerId, account, '500');
+        const source = customerFinancialRequest(
+          '300',
+          path === 'settlements' ? { reason: 'Agreed adjustment' } : {},
+        );
+        const original = (await postCustomerFinancial(customerId, path, source).expect(201))
+          .body as CustomerFinancialResponse;
+        const edit = correctionRequest({
+          replacement: {
+            amountMinor: '100',
+            allocationMode: 'fifo',
+            ...(path === 'settlements' ? { reason: 'Corrected adjustment' } : {}),
+          },
+        });
+        await postCustomerFinancialCorrection(
+          customerId,
+          path,
+          source.operationId as string,
+          'edit',
+          edit,
+        ).expect(201);
+        expect(await customerBalances(customerId)).toEqual({
+          receivable: '900',
+          credit: path === 'settlements' ? '500' : '400',
+        });
+        const read = (
+          await request(server)
+            .get(`/v1/customers/${customerId}/receivables`)
+            .set('authorization', `Bearer ${owner.token}`)
+            .expect(200)
+        ).body as CustomerReceivableListResponse;
+        expect(read.receivables[0]?.outstandingMinor).toBe('900');
+        await postCustomerFinancialCorrection(
+          customerId,
+          path,
+          edit.operationId as string,
+          'cancel',
+          correctionRequest(),
+        ).expect(201);
+        expect(await customerBalances(customerId)).toEqual({ receivable: '1000', credit: '500' });
+        const restored = (
+          await request(server)
+            .get(`/v1/customers/${customerId}/receivables`)
+            .set('authorization', `Bearer ${owner.token}`)
+            .expect(200)
+        ).body as CustomerReceivableListResponse;
+        expect(restored.receivables[0]?.outstandingMinor).toBe('1000');
+        const beforeReplay = await stage4dEvidence();
+        expect((await postCustomerFinancial(customerId, path, source).expect(201)).body).toEqual(
+          original,
+        );
+        expect(await stage4dEvidence()).toEqual(beforeReplay);
+        expect(
+          (
+            await db().admin.query(
+              `select original.receivable_delta_minor::text as r, reversal.receivable_delta_minor::text as inverse,
+            original.credit_delta_minor::text as c, reversal.credit_delta_minor::text as inverse_credit
+           from ledger.customer_ledger_entries original join ledger.customer_ledger_entries reversal
+             on reversal.store_id=original.store_id and reversal.reversal_of_id=original.id
+           where original.store_id=$1 and original.customer_id=$2 order by original.receivable_delta_minor`,
+              [owner.storeId, customerId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            r: '-300',
+            inverse: '300',
+            c: path === 'settlements' ? '0' : '-300',
+            inverse_credit: path === 'settlements' ? '0' : '300',
+          },
+          {
+            r: '-100',
+            inverse: '100',
+            c: path === 'settlements' ? '0' : '-100',
+            inverse_credit: path === 'settlements' ? '0' : '100',
+          },
+        ]);
+      },
+    );
+
+    it('rolls back all Collection facts and evidence after applied-result write fails unexpectedly', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '1000', '2026-09-01T08:00:00Z');
+      const body = fifoRequest([{ moneyAccountId: account, amountMinor: '1100' }], {
+        overpaymentHandling: 'keep_as_customer_credit',
+      });
+      const before = await stage4dEvidence();
+      if (!runtimePool) throw new Error('Runtime pool unavailable');
+      let injected = false;
+      const restore = interceptOperationQueries(
+        runtimePool,
+        body.operationId as string,
+        async (text, execute) => {
+          const result = await execute();
+          if (
+            text.includes('update sync.processed_operations') &&
+            text.includes("status='applied'")
+          ) {
+            injected = true;
+            throw new Error('S4D2 controlled post-result failure');
+          }
+          return result;
+        },
+      );
+      try {
+        await postCollection(customerId, body).expect(500);
+      } finally {
+        restore();
+      }
+      expect(injected).toBe(true);
+      expect(await stage4dEvidence()).toEqual(before);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '1000', credit: '0' });
+      expect(await moneyBalance(account)).toBe('0');
+      await postCollection(customerId, body).expect(201);
+      expect(await stage4dDeltas(body.operationId as string)).toEqual({
+        r: '-1000',
+        c: '100',
+        m: '1100',
+      });
+    });
+  });
+
+  async function stage4dContend(customerId: string, calls: (() => request.Test)[]) {
+    const blocker = await db().runtime.connect();
+    let pending: Promise<request.Response>[] = [];
+    try {
+      await blocker.query('begin');
+      await blocker.query("select set_config('app.store_id',$1,true)", [owner.storeId]);
+      await blocker.query(
+        'select id from ledger.customers where store_id=$1 and id=$2 for update',
+        [owner.storeId, customerId],
+      );
+      pending = calls.map((call) => call().then((response) => response));
+      const deadline = Date.now() + 4000;
+      let waiting = 0;
+      while (Date.now() < deadline) {
+        waiting =
+          (
+            await db().admin.query<{ count: number }>(
+              `select count(*)::int as count from pg_stat_activity where datname=current_database()
+           and application_name='dokana-s153-runtime' and wait_event_type='Lock'`,
+            )
+          ).rows[0]?.count ?? 0;
+        if (waiting >= calls.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(waiting).toBe(calls.length);
+    } finally {
+      await blocker.query('rollback');
+      blocker.release();
+      // Always drain HTTP work before fixture teardown, including a failed wait assertion.
+      await Promise.allSettled(pending);
+    }
+    return Promise.all(pending);
+  }
+
+  describe('S4D2-04 Customer credit lifecycle', () => {
+    it('preserves independent R/C and exact advance, application, refund and noncash effects', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '1000', '2026-09-01T08:00:00Z');
+      const before = await stage4dEvidence();
+      const advance = await createCustomerCredit(customerId, account, '500');
+      expect(await stage4dDeltas(advance.operationId)).toEqual({ r: '0', c: '500', m: '500' });
+      expect(await customerBalances(customerId)).toEqual({ receivable: '1000', credit: '500' });
+      const application = (
+        await postCustomerFinancial(
+          customerId,
+          'credit/applications',
+          customerFinancialRequest('300'),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      expect(await stage4dDeltas(application.operationId)).toEqual({
+        r: '-300',
+        c: '-300',
+        m: '0',
+      });
+      const refund = (
+        await postCustomerFinancial(customerId, 'credit/refunds', {
+          operationId: randomUUID(),
+          occurredAt: '2026-09-15T13:00:00Z',
+          amountMinor: '100',
+          moneyAccountId: account,
+        }).expect(201)
+      ).body as CustomerFinancialResponse;
+      expect(await stage4dDeltas(refund.operationId)).toEqual({ r: '0', c: '-100', m: '-100' });
+      const settlement = (
+        await postCustomerFinancial(
+          customerId,
+          'settlements',
+          customerFinancialRequest('200', { reason: 'Agreed adjustment' }),
+        ).expect(201)
+      ).body as CustomerFinancialResponse;
+      expect(await stage4dDeltas(settlement.operationId)).toEqual({ r: '-200', c: '0', m: '0' });
+      expect(await customerBalances(customerId)).toEqual({ receivable: '500', credit: '100' });
+      expect(await moneyBalance(account)).toBe('400');
+      for (const operation of [application, refund, settlement]) {
+        expect(
+          (
+            await db().admin.query(
+              `select id, receivable_delta_minor::text as r, credit_delta_minor::text as c
+           from ledger.customer_ledger_entries where store_id=$1 and transaction_group_id=$2 order by id`,
+              [owner.storeId, operation.operationId],
+            )
+          ).rows,
+        ).toEqual(
+          operation.ledgerEffects
+            .map((effect) => ({
+              id: effect.id,
+              r: effect.receivableDeltaMinor,
+              c: effect.creditDeltaMinor,
+            }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        );
+        expect(
+          (
+            await db().admin.query(
+              'select status, response_body from sync.processed_operations where store_id=$1 and operation_id=$2',
+              [owner.storeId, operation.operationId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'applied', response_body: operation }]);
+      }
+      const after = await stage4dEvidence();
+      for (const table of [
+        'ledger.sales',
+        'ledger.sale_items',
+        'ledger.sale_payments',
+        'ledger.inventory_movements',
+        'ledger.expenses',
+      ])
+        expect(after[table]).toEqual(before[table]);
+      expect(after['sync.store_change_events_v1']?.length).toBeGreaterThan(
+        before['sync.store_change_events_v1']?.length ?? 0,
+      );
+      for (const path of ['credit/applications', 'credit/refunds'] as const) {
+        const evidence = await stage4dEvidence();
+        const body =
+          path === 'credit/applications'
+            ? customerFinancialRequest('101')
+            : {
+                operationId: randomUUID(),
+                occurredAt: '2026-09-15T13:00:00Z',
+                amountMinor: '101',
+                moneyAccountId: account,
+              };
+        await postCustomerFinancial(customerId, path, body)
+          .expect(409)
+          .expect(expectResponseCode('CUSTOMER_CREDIT_INSUFFICIENT'));
+        const rejected = await stage4dEvidence();
+        for (const table of stage4dTables) expect(rejected[table]).toEqual(evidence[table]);
+      }
+      await createCustomerCredit(customerId, account, '1000');
+      const evidence = await stage4dEvidence();
+      await postCustomerFinancial(
+        customerId,
+        'credit/applications',
+        customerFinancialRequest('501'),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_COLLECTION_EXCEEDS_OUTSTANDING'));
+      const rejected = await stage4dEvidence();
+      for (const table of stage4dTables) expect(rejected[table]).toEqual(evidence[table]);
+      expect(await customerBalances(customerId)).toEqual({ receivable: '500', credit: '1100' });
+    });
+
+    it('forces competing credit consumption to wait and admits only available credit', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      await postOpening(customerId, '100', '2026-09-01T08:00:00Z');
+      await createCustomerCredit(customerId, account, '100');
+      const apply = customerFinancialRequest('80');
+      const refund = {
+        operationId: randomUUID(),
+        occurredAt: '2026-09-15T13:00:00Z',
+        amountMinor: '80',
+        moneyAccountId: account,
+      };
+      const results = await stage4dContend(customerId, [
+        () => postCustomerFinancial(customerId, 'credit/applications', apply),
+        () => postCustomerFinancial(customerId, 'credit/refunds', refund),
+      ]);
+      expect(results.map((result) => result.status).sort()).toEqual([201, 409]);
+      const applicationWon = results[0]?.status === 201;
+      expect(await customerBalances(customerId)).toEqual({
+        receivable: applicationWon ? '20' : '100',
+        credit: '20',
+      });
+      expect(await stage4dDeltas(apply.operationId as string)).toEqual(
+        applicationWon ? { r: '-80', c: '-80', m: '0' } : { r: '0', c: '0', m: '0' },
+      );
+      expect(await stage4dDeltas(refund.operationId)).toEqual(
+        applicationWon ? { r: '0', c: '0', m: '0' } : { r: '0', c: '-80', m: '-80' },
+      );
+      expect(
+        (
+          await db().admin.query(
+            `select count(*)::int as count from ledger.customer_ledger_entries
+         where store_id=$1 and customer_id=$2 and credit_delta_minor < 0`,
+            [owner.storeId, customerId],
+          )
+        ).rows,
+      ).toEqual([{ count: 1 }]);
+    });
+  });
+
+  describe('S4D2-03 Collection allocation and excess', () => {
+    it.each(['keep_as_customer_credit', 'refund_excess'] as const)(
+      'reconciles multi-account multi-target %s without second recognition',
+      async (handling) => {
+        const customerId = await createCustomer();
+        const accounts: [string, string] = [await createAccount(), await createAccount()];
+        accounts.sort();
+        const refundAccount = await createAccount();
+        const opening = await postOpening(customerId, '100', '2026-09-01T08:00:00Z');
+        const saleA = await postCreditSale(customerId, '100', '2026-09-02T08:00:00Z');
+        const saleB = await postCreditSale(customerId, '200', '2026-09-03T08:00:00Z');
+        const before = await stage4dEvidence();
+        const body = fifoRequest(
+          [
+            { moneyAccountId: accounts[1], amountMinor: '300' },
+            { moneyAccountId: accounts[0], amountMinor: '200' },
+          ],
+          {
+            overpaymentHandling: handling,
+            ...(handling === 'refund_excess' ? { refundMoneyAccountId: refundAccount } : {}),
+          },
+        );
+        const result = (await postCollection(customerId, body).expect(201))
+          .body as CustomerCollectionPostingResponse;
+        expect(result.amountMinor).toBe('500');
+        expect(result.excessMinor).toBe('100');
+        expect(await stage4dDeltas(result.operationId)).toEqual({
+          r: '-400',
+          c: handling === 'refund_excess' ? '0' : '100',
+          m: handling === 'refund_excess' ? '400' : '500',
+        });
+        expect(await allocatedTo(owner.storeId, 'opening', opening.receivable.id)).toBe(100n);
+        expect(await allocatedTo(owner.storeId, 'sale', saleA.sale.id)).toBe(100n);
+        expect(await allocatedTo(owner.storeId, 'sale', saleB.sale.id)).toBe(200n);
+        expect(
+          (
+            await db().admin.query(
+              `select p.amount_minor::text as t, p.allocated_total_minor::text as a,
+            p.credit_created_minor::text as e, m.account_id, m.amount_delta_minor::text as money
+           from ledger.customer_payments p join ledger.money_movements m
+             on m.store_id=p.store_id and m.id=p.money_movement_id
+           where p.store_id=$1 and p.customer_id=$2 order by m.account_id`,
+              [owner.storeId, customerId],
+            )
+          ).rows,
+        ).toEqual([
+          { t: '200', a: '200', e: '0', account_id: accounts[0], money: '200' },
+          { t: '300', a: '200', e: '100', account_id: accounts[1], money: '300' },
+        ]);
+        expect(
+          (
+            await db().admin.query(
+              `select a.amount_minor::text as amount, l.receivable_delta_minor::text as debt,
+            l.credit_delta_minor::text as credit from ledger.customer_payment_allocations a
+           join ledger.customer_payments p on p.store_id=a.store_id and p.id=a.customer_payment_id
+           join ledger.customer_ledger_entries l on l.store_id=a.store_id and l.id=a.customer_ledger_entry_id
+           where p.store_id=$1 and p.customer_id=$2 order by a.amount_minor`,
+              [owner.storeId, customerId],
+            )
+          ).rows,
+        ).toEqual([
+          { amount: '100', debt: '-100', credit: '0' },
+          { amount: '100', debt: '-100', credit: '0' },
+          { amount: '200', debt: '-200', credit: '0' },
+        ]);
+        const after = await stage4dEvidence();
+        for (const table of [
+          'ledger.sales',
+          'ledger.sale_items',
+          'ledger.sale_payments',
+          'ledger.inventory_movements',
+          'ledger.expenses',
+        ])
+          expect(after[table]).toEqual(before[table]);
+        expect(after['audit.central_audit_logs']?.length).toBeGreaterThan(
+          before['audit.central_audit_logs']?.length ?? 0,
+        );
+        expect(after['sync.store_change_events_v1']?.length).toBeGreaterThan(
+          before['sync.store_change_events_v1']?.length ?? 0,
+        );
+        expect(
+          (
+            await db().admin.query(
+              'select status, response_body from sync.processed_operations where store_id=$1 and operation_id=$2',
+              [owner.storeId, result.operationId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'applied', response_body: result }]);
+      },
+    );
+
+    it('rejects invalid custom targets/amounts and implicit excess without business effects', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      const sale = await postCreditSale(customerId, '100', '2026-09-01T08:00:00Z');
+      const foreignCustomer = await createCustomer(foreignOwner);
+      const foreignSale = await postCreditSale(
+        foreignCustomer,
+        '100',
+        '2026-09-01T08:00:00Z',
+        foreignOwner,
+      );
+      const target = { targetType: 'sale_receivable', targetId: sale.sale.id, amountMinor: '100' };
+      const tender = [{ moneyAccountId: account, amountMinor: '100' }];
+      const cases: [Record<string, unknown>, number][] = [
+        [
+          customRequest(tender, [
+            { ...target, amountMinor: '50' },
+            { ...target, amountMinor: '50' },
+          ]),
+          400,
+        ],
+        [customRequest(tender, [{ ...target, amountMinor: '101' }]), 400],
+        [
+          customRequest(
+            [{ moneyAccountId: account, amountMinor: '101' }],
+            [{ ...target, amountMinor: '101' }],
+          ),
+          409,
+        ],
+        [customRequest(tender, [{ ...target, targetId: randomUUID() }]), 404],
+        [customRequest(tender, [{ ...target, targetId: foreignSale.sale.id }]), 404],
+        [customRequest(tender, [{ ...target, amountMinor: '0' }]), 400],
+        [customRequest(tender, [{ ...target, amountMinor: '-1' }]), 400],
+        [fifoRequest([{ moneyAccountId: account, amountMinor: '101' }]), 409],
+      ];
+      for (const [body, status] of cases) {
+        const before = await stage4dEvidence();
+        await postCollection(customerId, body).expect(status);
+        const after = await stage4dEvidence();
+        for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+        expect(await stage4dDeltas(body.operationId as string)).toEqual({ r: '0', c: '0', m: '0' });
+      }
+      const noDebt = await createCustomer();
+      const before = await stage4dEvidence();
+      await postCollection(
+        noDebt,
+        fifoRequest(tender, { overpaymentHandling: 'keep_as_customer_credit' }),
+      )
+        .expect(409)
+        .expect(expectResponseCode('CUSTOMER_COLLECTION_EXCEEDS_OUTSTANDING'));
+      const after = await stage4dEvidence();
+      for (const table of stage4dTables) expect(after[table]).toEqual(before[table]);
+    });
+  });
+
+  describe('S4D2-02 Sale settlement', () => {
+    it.each([
+      ['Money', 300n, 0n, 0n],
+      ['receivable', 0n, 0n, 300n],
+      ['Customer credit', 0n, 300n, 0n],
+      ['Money + receivable', 100n, 0n, 200n],
+      ['Money + Customer credit', 100n, 200n, 0n],
+      ['Customer credit + receivable', 0n, 100n, 200n],
+      ['Money + Customer credit + receivable', 100n, 100n, 100n],
+    ] as const)('reconciles %s against physical facts', async (_label, m, u, d) => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      if (u > 0n) await createCustomerCredit(customerId, account, u.toString());
+      const body = customerCreditSaleRequest({
+        customerId,
+        totalMinor: '300',
+        payments: m > 0n ? [{ moneyAccountId: account, amountMinor: m.toString() }] : [],
+        ...(u > 0n ? { customerCreditAmountMinor: u.toString() } : {}),
+      });
+      const before = await stage4dEvidence();
+      const posted = (await postSale(body).expect(201)).body as SalePostingResponse;
+      expect(posted.sale).toMatchObject({
+        totalMinor: '300',
+        paidTotalMinor: (m + u).toString(),
+        creditTotalMinor: d.toString(),
+      });
+      expect(
+        (
+          await db().admin.query(
+            `select total_minor::text as t, paid_total_minor::text as paid,
+          credit_total_minor::text as debt from ledger.sales where store_id=$1 and id=$2`,
+            [owner.storeId, posted.sale.id],
+          )
+        ).rows,
+      ).toEqual([{ t: '300', paid: (m + u).toString(), debt: d.toString() }]);
+      expect(await stage4dDeltas(posted.operationId)).toEqual({
+        r: d.toString(),
+        c: (-u).toString(),
+        m: m.toString(),
+      });
+      expect(
+        (
+          await db().admin.query(
+            `select p.amount_minor::text as amount, m.amount_delta_minor::text as money,
+          m.account_id, m.reference_id from ledger.sale_payments p
+         join ledger.money_movements m on m.store_id=p.store_id and m.id=p.money_movement_id
+         where p.store_id=$1 and p.sale_id=$2`,
+            [owner.storeId, posted.sale.id],
+          )
+        ).rows,
+      ).toEqual(
+        m > 0n
+          ? [
+              {
+                amount: m.toString(),
+                money: m.toString(),
+                account_id: account,
+                reference_id: posted.payments[0]?.id,
+              },
+            ]
+          : [],
+      );
+      expect(
+        (
+          await db().admin.query(
+            `select a.amount_minor::text as amount, l.credit_delta_minor::text as credit,
+          l.receivable_delta_minor::text as receivable, l.source_sale_id
+         from ledger.sale_customer_credit_applications a
+         join ledger.customer_ledger_entries l on l.store_id=a.store_id and l.id=a.customer_ledger_entry_id
+         where a.store_id=$1 and a.sale_id=$2`,
+            [owner.storeId, posted.sale.id],
+          )
+        ).rows,
+      ).toEqual(
+        u > 0n
+          ? [
+              {
+                amount: u.toString(),
+                credit: (-u).toString(),
+                receivable: '0',
+                source_sale_id: posted.sale.id,
+              },
+            ]
+          : [],
+      );
+      const after = await stage4dEvidence();
+      expect(after['ledger.sales']).toHaveLength((before['ledger.sales']?.length ?? 0) + 1);
+      expect(after['ledger.sale_items']).toHaveLength(
+        (before['ledger.sale_items']?.length ?? 0) + 1,
+      );
+      expect(after['ledger.inventory_movements']).toEqual(before['ledger.inventory_movements']);
+      expect(after['ledger.expenses']).toEqual(before['ledger.expenses']);
+      expect(after['audit.central_audit_logs']?.length).toBeGreaterThan(
+        before['audit.central_audit_logs']?.length ?? 0,
+      );
+      expect(after['sync.store_change_events_v1']?.length).toBeGreaterThan(
+        before['sync.store_change_events_v1']?.length ?? 0,
+      );
+      expect(
+        (
+          await db().admin.query(
+            'select status, response_body from sync.processed_operations where store_id=$1 and operation_id=$2',
+            [owner.storeId, posted.operationId],
+          )
+        ).rows,
+      ).toEqual([{ status: 'applied', response_body: posted }]);
+      expect(await customerBalances(customerId)).toEqual({ receivable: d.toString(), credit: '0' });
+      expect(await moneyBalance(account)).toBe((m + u).toString());
+    });
+
+    it('rejects anonymous debt/credit and overflow with zero facts, and keeps bigint rounding exact', async () => {
+      const account = await createAccount();
+      for (const body of [
+        customerCreditSaleRequest({ totalMinor: '100' }),
+        customerCreditSaleRequest({ totalMinor: '100', customerCreditAmountMinor: '100' }),
+        customerCreditSaleRequest({
+          totalMinor: '9223372036854775808',
+          payments: [{ moneyAccountId: account, amountMinor: '9223372036854775808' }],
+        }),
+      ]) {
+        const before = await stage4dEvidence();
+        await postSale(body).expect(400).expect(expectResponseCode('VALIDATION_ERROR'));
+        expect(await stage4dEvidence()).toEqual(before);
+      }
+      const customerId = await createCustomer();
+      // 0.5 * 9007199254740993 rounds half up to 4503599627370497.
+      const body = {
+        operationId: randomUUID(),
+        customerId,
+        occurredAt: '2026-09-15T13:00:00Z',
+        items: [
+          {
+            isManualLine: true,
+            description: 'Large half',
+            quantityMilli: '500',
+            unitPriceMinor: '9007199254740993',
+            lineDiscountMinor: '2',
+            roundingMinor: '1',
+            lineTotalMinor: '4503599627370496',
+          },
+          {
+            isManualLine: true,
+            description: 'Large whole',
+            quantityMilli: '1000',
+            unitPriceMinor: '9007199254740993',
+            roundingMinor: '-1',
+            lineTotalMinor: '9007199254740992',
+          },
+        ],
+        invoiceDiscountMinor: '3',
+        roundingMinor: '1',
+        totalMinor: '13510798882111486',
+        payments: [{ moneyAccountId: account, amountMinor: '9007199254740993' }],
+      };
+      const posted = (await postSale(body).expect(201)).body as SalePostingResponse;
+      expect(posted.sale).toMatchObject({
+        itemsSubtotalMinor: '13510798882111490',
+        lineDiscountTotalMinor: '2',
+        totalMinor: '13510798882111486',
+        paidTotalMinor: '9007199254740993',
+        creditTotalMinor: '4503599627370493',
+      });
+      expect(await stage4dDeltas(posted.operationId)).toEqual({
+        r: '4503599627370493',
+        c: '0',
+        m: '9007199254740993',
+      });
+      expect(
+        (
+          await db().admin.query(
+            `select quantity_milli::text as q, unit_price_minor::text as price,
+          line_gross_minor::text as gross, line_total_minor::text as total
+         from ledger.sale_items where store_id=$1 and sale_id=$2 order by quantity_milli`,
+            [owner.storeId, posted.sale.id],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          q: '500',
+          price: '9007199254740993',
+          gross: '4503599627370497',
+          total: '4503599627370496',
+        },
+        {
+          q: '1000',
+          price: '9007199254740993',
+          gross: '9007199254740993',
+          total: '9007199254740992',
+        },
+      ]);
+    });
+  });
+
+  describe('S4D2-01 receivable reconciliation', () => {
+    async function rawBalances(customerId: string) {
+      return (
+        await db().admin.query(
+          `select coalesce(sum(receivable_delta_minor),0)::text as receivable,
+          coalesce(sum(credit_delta_minor),0)::text as credit
+         from ledger.customer_ledger_entries where store_id=$1 and customer_id=$2`,
+          [owner.storeId, customerId],
+        )
+      ).rows[0] as { receivable: string; credit: string };
+    }
+
+    async function readReceivables(customerId: string) {
+      return (
+        await request(server)
+          .get(`/v1/customers/${customerId}/receivables`)
+          .set('authorization', `Bearer ${owner.token}`)
+          .expect(200)
+      ).body as CustomerReceivableListResponse;
+    }
+
+    it.each(['credit/applications', 'settlements'] as const)(
+      'restores opening outstanding after cancellation of %s',
+      async (path) => {
+        const customerId = await createCustomer();
+        const account = await createAccount();
+        const opening = await postOpening(customerId, '1000', '2026-09-01T08:00:00Z');
+        await createCustomerCredit(customerId, account, '500');
+        const operation = (
+          await postCustomerFinancial(
+            customerId,
+            path,
+            customerFinancialRequest(
+              '300',
+              path === 'settlements' ? { reason: 'S4D2 opening settlement' } : {},
+            ),
+          ).expect(201)
+        ).body as CustomerFinancialResponse;
+        const original = (
+          await db().admin.query('select * from ledger.customer_ledger_entries where id=$1', [
+            operation.ledgerEffects[0]?.id,
+          ])
+        ).rows;
+        expect(await rawBalances(customerId)).toEqual({
+          receivable: '700',
+          credit: path === 'settlements' ? '500' : '200',
+        });
+        expect((await readReceivables(customerId)).receivables[0]?.outstandingMinor).toBe('700');
+        await postCustomerFinancialCorrection(
+          customerId,
+          path,
+          operation.operationId,
+          'cancel',
+          correctionRequest(),
+        ).expect(201);
+        expect(await rawBalances(customerId)).toEqual({ receivable: '1000', credit: '500' });
+        expect(await customerBalances(customerId)).toEqual({ receivable: '1000', credit: '500' });
+        expect(
+          (
+            await db().admin.query('select * from ledger.customer_ledger_entries where id=$1', [
+              operation.ledgerEffects[0]?.id,
+            ])
+          ).rows,
+        ).toEqual(original);
+        expect(
+          (
+            await db().admin.query(
+              `select receivable_delta_minor::text as r, credit_delta_minor::text as c,
+            reference_id from ledger.customer_ledger_entries where reversal_of_id=$1`,
+              [operation.ledgerEffects[0]?.id],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            r: '300',
+            c: path === 'settlements' ? '0' : '300',
+            reference_id: opening.receivable.id,
+          },
+        ]);
+        if (!app) throw new Error('Application unavailable');
+        const planner = app.get(CustomerReceivableSettlementRepository);
+        const plan = await app.get(DatabaseService).withTenantTransaction(
+          {
+            storeId: owner.storeId,
+            userId: owner.userId,
+            deviceId: owner.deviceId,
+            requestId: randomUUID(),
+          },
+          (transaction) =>
+            planner.buildPlan(transaction, owner.storeId, customerId, 'fifo', 1000n, [], false),
+        );
+        expect(plan.plan.map((item) => ({ id: item.targetId, amount: item.amountMinor }))).toEqual([
+          { id: opening.receivable.id, amount: 1000n },
+        ]);
+        expect(plan.unappliedMinor).toBe(0n);
+        expect(await moneyBalance(account)).toBe('500');
+        const publicRead = await readReceivables(customerId);
+        expect(publicRead.outstandingMinor).toBe('1000');
+        expect(publicRead.receivables[0]?.outstandingMinor).toBe('1000');
+      },
+    );
+
+    it('reconciles Sale debt after 4000 then 6000 without subtracting allocations twice', async () => {
+      const customerId = await createCustomer();
+      const account = await createAccount();
+      const sale = await postCreditSale(customerId, '10000', '2026-09-01T08:00:00Z');
+      let allocated = 0n;
+      for (const amountMinor of ['4000', '6000']) {
+        await postCollection(
+          customerId,
+          fifoRequest([{ moneyAccountId: account, amountMinor }]),
+        ).expect(201);
+        allocated += BigInt(amountMinor);
+        const remaining = (10000n - allocated).toString();
+        expect(await rawBalances(customerId)).toEqual({ receivable: remaining, credit: '0' });
+        expect(await allocatedTo(owner.storeId, 'sale', sale.sale.id)).toBe(allocated);
+        expect(
+          (
+            await db().admin.query(
+              `select sum(receivable_delta_minor)::text as outstanding
+           from ledger.customer_ledger_entries where store_id=$1 and source_sale_id=$2`,
+              [owner.storeId, sale.sale.id],
+            )
+          ).rows,
+        ).toEqual([{ outstanding: remaining }]);
+        expect(
+          (
+            await db().admin.query(
+              `select outstanding_minor::text as outstanding from ledger.v_customer_invoice_outstanding
+           where store_id=$1 and sale_id=$2`,
+              [owner.storeId, sale.sale.id],
+            )
+          ).rows,
+        ).toEqual([{ outstanding: remaining }]);
+        const detail = (
+          await request(server)
+            .get(`/v1/sales/${sale.sale.id}`)
+            .set('authorization', `Bearer ${owner.token}`)
+            .expect(200)
+        ).body as SaleDetailResponse;
+        expect(detail.sale.receivableOutstandingMinor).toBe(remaining);
+        const publicRead = await readReceivables(customerId);
+        expect(publicRead.outstandingMinor).toBe(remaining);
+        expect(publicRead.receivables[0]?.outstandingMinor).toBe(remaining);
+        expect(await moneyBalance(account)).toBe(allocated.toString());
+      }
+    });
   });
 
   describe('Stage 3B B01 Customer Collection', () => {

@@ -418,7 +418,8 @@ export class SaleReadRepository {
               from ledger.customer_ledger_entries adjustment
               where adjustment.store_id=origin.store_id
                 and adjustment.customer_id=origin.customer_id
-                and adjustment.entry_type in ('credit_used','settlement')
+                and adjustment.entry_type in ('credit_used','settlement','correction')
+                and adjustment.reversal_of_id is distinct from origin.id
                 and adjustment.reference_type='customer_opening_receivable'
                 and adjustment.reference_id=origin.id
             ), 0) - coalesce((
