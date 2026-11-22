@@ -3316,3 +3316,81 @@ corrections, accounting periods, posting/business dates and DST. **LATER STAGE 4
 NOT INVESTIGATED:** Expenses, owner ledger, transfers, account presentation and wider report
 consistency. **Stage 4D PASS - ready for Stage 4E under the owner's progression gate.
 Stage 4E was not started.**
+
+### Independent Stage 4E closure - 2026-11-22
+
+Resumed Stage 4E.2 from `d260816574d71a4a54f4e9e834bf0d2a2e698528` on `main`;
+Stage 4E.1 reconnaissance and completed checkpoints were retained. Candidate order:
+01, 03, 04, 05, 02, 06, 07, FINAL. **All seven candidates PASS.**
+
+| Candidate | Runtime disposition |
+| --- | --- |
+| S4E2-01 | PASS after F01 fix; seven equivalent Sale settlement histories, partial active noncash settlement, explicit reversal/retry, exact replay, replacement admission, pure historical reversal and a controlled Customer-lock interleaving. |
+| S4E2-03 | PASS; Customer/Supplier downstream dependencies reject without economic mutation; original facts, exact inverses, replacement lineage and duplicate-reversal protection verified; later Inventory movement blocks unsafe correction. |
+| S4E2-04 | PASS; closed original periods retain their facts; selected closed correction periods reject atomically; open counter-effects/replacements retain exact period identity. Supplier Payment replacement independently selects its own open period and rolls back fully when that period is closed. |
+| S4E2-05 | PASS; Invoice and financial-only Supplier Return posting serialize against period close in both orders; injected pre-commit failure rolls back domain, ledger, Money, Inventory, operation, audit and change evidence. |
+| S4E2-02 | PASS after F02 fix; 333/333/334 partial quantities preserve 166/167/167 historical values; cancellation/replacement release capacity exactly; actual PostgreSQL transaction time admits exactly 48 hours and rejects one millisecond later. |
+| S4E2-06 | PASS for the tested runtime; historical Sale/Collection API dates match PostgreSQL daily buckets and persisted period identity at local midnight, with all stored facts unchanged. No current material divergence reproduced. |
+| S4E2-07 | PASS; eight real-posting instants cover midnight, spring gap, autumn repeated hour and March/April transition. OperationalTimeService, persisted posting dates, canonical periods and runtime-role `ledger.assert_period_open` agree. March 2022 is `[2022-02-28T22:00Z,2022-03-31T21:00Z)`, contiguous with April without overlap. |
+
+Confirmed findings: **Critical 0 / High 1 FIXED / Medium 1 FIXED / Low 0**;
+unresolved Critical/High/Medium findings **0**.
+
+- **S4E2-F01 - HIGH - FIXED:** Return residual incorrectly treated noncash receivable
+  settlement as cash-refund capacity: Sale 500, noncash settlement 500, Money received 0
+  previously allowed Money refund 500. Backend Owner **Option A** approved: any active
+  Sale-linked noncash settlement rejects a new Return or replacement with
+  `SALE_RETURN_NONCASH_SETTLEMENT_DEPENDENCY` (409). Explicit settlement reversal restores
+  receivable before retrying the normal waterfall as a new operation. Fully reversed
+  history does not block; prior operation replay and pure historical Return reversal
+  retain their contracts. The shared application authority checks under existing
+  Customer/Sale locks. No proportional attribution or waterfall redesign.
+- **S4E2-F02 - MEDIUM - FIXED:** After the 48-hour window, equal merchandise quantity/value
+  replacement could convert a 500-credit Return into a new 500 cash refund. This violated
+  Stage 4E.2 section 22's explicit financial non-expansion rule, although the Sale had
+  received the cash. Existing transactional replacement validation now caps refund and
+  original-credit restoration independently against the corrected Return snapshot, using
+  `SALE_RETURN_CORRECTION_SCOPE_EXPANDED`. Rejection rolls back counter-effects and replacement;
+  unchanged-scope late replacement and accepted/rejected operation replay remain valid.
+
+Verification used isolated real PostgreSQL databases with normal runtime/auth roles,
+current migrations, actual HTTP paths and complete financial evidence. Focused checkpoint
+proofs: **25 passed** (01:9, 03:5, 04:2, 05:2, 02:5, 06:1, 07:1).
+The one consolidated run used:
+
+```text
+npm.cmd run test:integration -- --runTestsByPath test/sale-return-posting.integration-spec.ts test/sale-return-correction.integration-spec.ts test/supplier-return.integration-spec.ts --testNamePattern '^(?!.*(?:S4B2|S4C2|Stage 3B)).*$'
+```
+
+It established **63 passed / 1 test-assertion failure / 21 deliberately excluded** in
+71.326 s. The remaining assertion incorrectly compared per-request HTTP error metadata;
+it was corrected to assert the stable rejection plus unchanged persisted operation and
+financial evidence. Targeted rerun with `--testNamePattern 'expired-window credit Return'`:
+**1 passed / 33 excluded / 26.638 s / exit 0**. Thus all **64 selected final scenarios**
+are established; the consolidated suite was not rerun. Earlier fixture errors (physical
+column/table names, DTO casing, transaction-hook selection and typing) were corrected;
+the initial F01/F02 financial failures and all checkpoint logs remain preserved locally.
+
+`typecheck`, `lint`, `build`, `db:migrate:verify`, `db:check`, and `git diff --check`: **PASS**.
+Initial lint exposed test-result typing/nullability errors; those were corrected and only
+affected static checks repeated. Successful runtime evidence was retained. PostgreSQL
+**18.4 / local DOCANA / dokana_runtime_login verified / 39 applied / 0 pending**.
+Temporary databases **0**, idle transactions **0**, other test connections **0**; development
+Stores/Users/Devices/Sales/Customer Returns/Supplier Returns/both ledgers **0**. Existing
+audit **540** and legacy change events **772** preserved. Stage 4E fixture residue **0**.
+
+Implementation/tests commit: `ba55571701d2d3f9d7a970a86cd42b92bff7d98c`;
+Roadmap closure is committed separately.
+Changed scope: four `src/returns` files, the three integration files above and this Roadmap.
+**Database/schema/migration delta 0; ceiling 0039; 0040+ NONE.** No dependency, environment,
+RLS, ownership, grants, function, trigger, constraint, baseline/reference or sync identity
+change. API changes are the new 409 dependency code and clarified correction-scope message.
+
+Unit/full-repository suites, release/clean-install, recovery/DR and baseline
+`06_runtime_tests.sql` campaigns were not run. This is bounded Stage 4E verification,
+not production approval or external Fable sign-off. Date evidence covers the installed
+timezone engines, not arbitrary future TZDB changes: reports derive their own PostgreSQL
+date buckets and use persisted period filters; no presentation-only downgrade was assumed.
+**Stage 4F deferrals:** Expenses, Owner ledger, transfers, account presentation and wider
+report consistency remain uninvestigated. **Stage 4E PASS - ready for Stage 4F under the
+owner's progression gate. Stage 4F was not started.**
