@@ -103,6 +103,11 @@ export const saleReturnPostingFailureDefinitions: Readonly<
     'Sale Return line not found.',
     404,
   ),
+  SALE_RETURN_NONCASH_SETTLEMENT_DEPENDENCY: definition(
+    'SALE_RETURN_NONCASH_SETTLEMENT_DEPENDENCY',
+    'Reverse the active noncash settlement before posting a Sale Return.',
+    409,
+  ),
   SALE_RETURN_OPERATION_CONFLICT: definition(
     'SALE_RETURN_OPERATION_CONFLICT',
     'Sale Return operation conflicts with the stored operation.',

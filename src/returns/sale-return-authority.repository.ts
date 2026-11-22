@@ -76,6 +76,33 @@ export class SaleReturnAuthorityRepository {
       throw new SaleReturnAuthorityError('SALE_RETURN_SALE_INACTIVE');
     }
 
+    // Noncash settlement and its correction take the same Customer lock before
+    // changing Sale receivables. Check after those locks, including replacements;
+    // exact replay is resolved by the posting repository before reaching here.
+    const dependency = await transaction.execute<{ present: boolean }>(sql`
+      select exists (
+        select 1 from ledger.customer_ledger_entries settlement
+        where settlement.store_id = ${storeId}::uuid
+          and settlement.source_sale_id = ${sale.id}::uuid
+          and settlement.entry_type = 'settlement'
+          and settlement.receivable_delta_minor < 0
+          and settlement.reversal_of_id is null
+          and not exists (
+            select 1 from ledger.customer_ledger_entries reversal
+            where reversal.store_id = settlement.store_id
+              and reversal.customer_id = settlement.customer_id
+              and reversal.source_sale_id = settlement.source_sale_id
+              and reversal.reversal_of_id = settlement.id
+              and reversal.entry_type = 'correction'
+              and reversal.receivable_delta_minor = -settlement.receivable_delta_minor
+              and reversal.credit_delta_minor = -settlement.credit_delta_minor
+          )
+      ) as present
+    `);
+    if (dependency.rows[0]?.present) {
+      throw new SaleReturnAuthorityError('SALE_RETURN_NONCASH_SETTLEMENT_DEPENDENCY');
+    }
+
     const acceptedAtResult = await transaction.execute<{ acceptedAt: string }>(
       sql`select transaction_timestamp()::text as "acceptedAt"`,
     );

@@ -117,7 +117,7 @@ const correctionFailureDefinitions: Readonly<
   ),
   SALE_RETURN_CORRECTION_SCOPE_EXPANDED: definition(
     'SALE_RETURN_CORRECTION_SCOPE_EXPANDED',
-    'An expired Return replacement cannot expand the active merchandise scope.',
+    'An expired Return replacement cannot expand the active Return scope.',
     409,
   ),
   SALE_RETURN_CORRECTION_TARGET_INTEGRITY_CONFLICT: definition(
@@ -296,6 +296,16 @@ export class SaleReturnCorrectionRepository {
         assertNonExpansiveReplacementTotal(
           target.root.totalMinor,
           BigInt(replacement.return.totalMinor),
+        );
+        // Expired-window replacement may not expand either financial capacity,
+        // even when its merchandise quantity and total remain unchanged.
+        assertNonExpansiveReplacementTotal(
+          BigInt(target.snapshot.settlementSummary.refundMinor),
+          BigInt(replacement.settlementSummary.refundMinor),
+        );
+        assertNonExpansiveReplacementTotal(
+          BigInt(target.snapshot.settlementSummary.originalCustomerCreditRestorationMinor),
+          BigInt(replacement.settlementSummary.originalCustomerCreditRestorationMinor),
         );
       }
     }

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
+import { sql } from 'drizzle-orm';
+import { OperationalTimeService } from '../src/settings/operational-time.service';
 
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -27,6 +29,7 @@ import {
 } from './inventory-postgresql-fixture';
 import { createTestPool, readLocalPostgresTestEnvironment } from './postgresql-test-environment';
 import { captureReplayEvidence } from './stage3b-replay-evidence';
+import { interceptOperationQueries } from './stage3b-driver-boundary';
 import {
   assertSupplierDimensions,
   assertSupplierPaymentFacts,
@@ -1401,6 +1404,99 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
     }
   });
 
+  it('S4E2-07 agrees across application time, persisted posting, PostgreSQL admission and DST month boundaries', async () => {
+    if (!app) throw new Error('Application unavailable');
+    const supplierId = await createSupplier();
+    const times = [
+      ['2026-01-14T21:59:59.999Z', '2026-01-14T23:59:59.999+02:00'],
+      ['2026-01-14T22:00:00.000Z', '2026-01-15T00:00:00.000+02:00'],
+      ['2022-03-26T21:59:59.999Z', '2022-03-26T23:59:59.999+02:00'],
+      ['2022-03-26T22:00:00.000Z', '2022-03-27T01:00:00.000+03:00'],
+      ['2022-10-28T22:30:00.000Z', '2022-10-29T01:30:00.000+03:00'],
+      ['2022-10-28T23:30:00.000Z', '2022-10-29T01:30:00.000+02:00'],
+      ['2022-03-31T20:59:59.999Z', '2022-03-31T23:59:59.999+03:00'],
+      ['2022-03-31T21:00:00.000Z', '2022-04-01T00:00:00.000+03:00'],
+    ] as const;
+    for (const [at, local] of times) {
+      const time = app.get(OperationalTimeService).resolve(new Date(at));
+      expect(time.storeLocalDatetime).toBe(`${local}[Asia/Hebron]`);
+      const invoice = await postInvoice(supplierId, '100', owner, at);
+      const expectedDate = local.slice(0, 10);
+      const expectedPeriod = deriveAccountingPeriodId(
+        owner.storeId,
+        Number(local.slice(0, 4)),
+        Number(local.slice(5, 7)),
+      );
+      expect(invoice.response).toMatchObject({
+        businessDate: expectedDate,
+        postingDate: expectedDate,
+        accountingPeriodId: expectedPeriod,
+      });
+      const rows = (
+        await db().admin.query(
+          `select p.posting_date::text as date,
+        (p.invoice_date_at at time zone 'Asia/Hebron')::date::text as pg_date,
+        p.accounting_period_id as period, p.invoice_date_at as at,
+        a.starts_at as start,a.ends_at as stop,a.status,
+        p.invoice_date_at>=a.starts_at and p.invoice_date_at<a.ends_at as contained
+        from ledger.purchase_invoices p join ledger.accounting_periods a
+        on a.store_id=p.store_id and a.id=p.accounting_period_id
+        where p.store_id=$1 and p.operation_id=$2`,
+          [owner.storeId, invoice.operationId],
+        )
+      ).rows;
+      const boundaries = resolveAccountingPeriodBoundaries(
+        Number(local.slice(0, 4)),
+        Number(local.slice(5, 7)),
+      );
+      expect(rows).toEqual([
+        {
+          date: expectedDate,
+          pg_date: expectedDate,
+          period: expectedPeriod,
+          at: new Date(at),
+          start: boundaries.startsAt,
+          stop: boundaries.endsAt,
+          status: 'open',
+          contained: true,
+        },
+      ]);
+      await app.get(DatabaseService).withTenantTransaction(
+        {
+          storeId: owner.storeId,
+          userId: owner.userId,
+          deviceId: owner.deviceId,
+          requestId: randomUUID(),
+        },
+        async (transaction) => {
+          await transaction.execute(sql`select ledger.assert_period_open(${owner.storeId}::uuid,
+          ${expectedPeriod}::uuid, ${at}::timestamptz)`);
+        },
+      );
+    }
+    const marchId = deriveAccountingPeriodId(owner.storeId, 2022, 3);
+    const aprilId = deriveAccountingPeriodId(owner.storeId, 2022, 4);
+    expect(
+      (
+        await db().admin.query(
+          `select m.starts_at as start,m.ends_at as stop,
+      m.ends_at=a.starts_at as contiguous,
+      tstzrange(m.starts_at,m.ends_at,'[)') && tstzrange(a.starts_at,a.ends_at,'[)') as overlap
+      from ledger.accounting_periods m join ledger.accounting_periods a on a.store_id=m.store_id
+      where m.store_id=$1 and m.id=$2 and a.id=$3`,
+          [owner.storeId, marchId, aprilId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        start: new Date('2022-02-28T22:00:00Z'),
+        stop: new Date('2022-03-31T21:00:00Z'),
+        contiguous: true,
+        overlap: false,
+      },
+    ]);
+  });
+
   beforeAll(async () => {
     let setupStage = 'read test environment';
     try {
@@ -1927,6 +2023,452 @@ describe('S17.6 Supplier financial Returns and Credit lifecycle on isolated Post
       [supplierReturnBody(active).return.id],
     );
     expect(state.rows[0]).toEqual({ status: 'posted' });
+  });
+
+  it.each(['invoice', 'return'] as const)(
+    'S4E2-05 serializes %s posting with period close and rolls back failure',
+    async (family) => {
+      if (!runtimePool) throw new Error('Runtime pool unavailable');
+      const supplierId = await createSupplier();
+      const month = family === 'invoice' ? 1 : 2;
+      const at = `2031-${String(month).padStart(2, '0')}-15T10:00:00.000Z`;
+      const period = deriveAccountingPeriodId(owner.storeId, 2031, month);
+      const source = await postInvoice(supplierId, '500', owner, at);
+      const post = (operationId: ReturnType<typeof randomUUID>) =>
+        family === 'return'
+          ? postReturn(supplierId, source.response.invoice.id, '100', operationId, owner, at)
+          : request(server)
+              .post(`/v1/suppliers/${supplierId}/invoices`)
+              .set(authorized())
+              .send({
+                operationId,
+                occurredAt: at,
+                totalMinor: '100',
+                items: [
+                  {
+                    description: 'S4E2-05 posting',
+                    unitName: 'piece',
+                    quantityMilli: '1000',
+                    unitCostMinor: '100',
+                    lineTotalMinor: '100',
+                  },
+                ],
+              });
+      const tables = [...supplierFinancialTables, 'ledger.accounting_periods'];
+      const failureOperation = randomUUID();
+      const beforeFailure = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      const restoreFailure = interceptOperationQueries(
+        runtimePool,
+        failureOperation,
+        async (text, execute) => {
+          if (text === 'commit') throw new Error('S4E2-05 controlled failure before commit');
+          return execute();
+        },
+      );
+      try {
+        await post(failureOperation).expect(500);
+      } finally {
+        restoreFailure();
+      }
+      expect(await captureReplayEvidence(db().admin, owner.storeId, tables)).toEqual(beforeFailure);
+
+      const postingOperation = randomUUID();
+      let arrived!: () => void;
+      let release!: () => void;
+      const atCommit = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const restore = interceptOperationQueries(
+        runtimePool,
+        postingOperation,
+        async (text, execute) => {
+          if (text === 'commit') {
+            arrived();
+            await gate;
+          }
+          return execute();
+        },
+      );
+      const posting = post(postingOperation).then((response) => response);
+      let closing: Promise<Response> | undefined;
+      try {
+        await Promise.race([
+          atCommit,
+          posting.then(() => {
+            throw new Error('Posting missed commit gate');
+          }),
+        ]);
+        const version = (
+          await db().admin.query<{ version: string }>(
+            `select version::text as version from ledger.accounting_periods
+        where store_id=$1 and id=$2`,
+            [owner.storeId, period],
+          )
+        ).rows[0]?.version;
+        if (version === undefined) throw new Error('Accounting period version missing');
+        closing = request(server)
+          .post(`/v1/accounting-periods/${period}/close`)
+          .set(authorized())
+          .send({ operationId: randomUUID(), expectedVersion: version })
+          .then((response) => response);
+        let waiting = 0;
+        const deadline = Date.now() + 10_000;
+        while (Date.now() < deadline) {
+          waiting =
+            (
+              await db().admin.query<{
+                count: number;
+              }>(`select count(*)::int as count from pg_stat_activity
+          where datname=current_database() and wait_event_type='Lock' and query like '%accounting_periods%'`)
+            ).rows[0]?.count ?? 0;
+          if (waiting > 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waiting).toBe(1);
+      } finally {
+        release();
+        await Promise.allSettled([posting, ...(closing ? [closing] : [])]);
+        restore();
+      }
+      expect((await posting).status).toBe(201);
+      expect((await closing).status).toBe(200);
+      expect(
+        (
+          await db().admin.query(
+            `select status from ledger.accounting_periods
+      where store_id=$1 and id=$2`,
+            [owner.storeId, period],
+          )
+        ).rows,
+      ).toEqual([{ status: 'closed' }]);
+      const effects = (
+        await db().admin.query(
+          `select accounting_period_id,payable_delta_minor::text as p,
+      credit_delta_minor::text as c from ledger.supplier_ledger_entries
+      where store_id=$1 and transaction_group_id=$2`,
+          [owner.storeId, postingOperation],
+        )
+      ).rows;
+      expect(effects).toEqual([
+        { accounting_period_id: period, p: family === 'invoice' ? '100' : '-100', c: '0' },
+      ]);
+      const blockedOperation = randomUUID();
+      const beforeBlocked = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      expect((await post(blockedOperation).expect(409)).body).toMatchObject({
+        code: 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE',
+      });
+      const afterBlocked = await captureReplayEvidence(db().admin, owner.storeId, tables);
+      for (const table of tables) expect(afterBlocked[table]).toEqual(beforeBlocked[table]);
+      expect(
+        (
+          await db().admin.query(
+            `select status from sync.processed_operations
+      where store_id=$1 and operation_id=$2`,
+            [owner.storeId, blockedOperation],
+          )
+        ).rows,
+      ).toEqual([{ status: 'rejected' }]);
+    },
+  );
+
+  it('S4E2-04 admits Supplier Return and independent replacement periods without partial correction', async () => {
+    const supplierId = await createSupplier();
+    const accountId = await createAccount();
+    const invoice = await postInvoice(supplierId, '500', owner, previousOccurredAt);
+    const paymentOperation = randomUUID();
+    const paymentPayload = {
+      operationId: paymentOperation,
+      paymentSource: 'money_account',
+      moneyAccountId: accountId,
+      amountMinor: '200',
+      occurredAt: previousOccurredAt,
+      allocations: [
+        {
+          targetType: 'purchase_invoice',
+          targetId: invoice.response.invoice.id,
+          amountMinor: '200',
+        },
+      ],
+    };
+    await request(server)
+      .post(`/v1/suppliers/${supplierId}/payments`)
+      .set(authorized())
+      .send(paymentPayload)
+      .expect(201);
+    await db().admin.query(
+      `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
+      where store_id=$1 and id=$2`,
+      [owner.storeId, previousPeriodId],
+    );
+    const original = (
+      await db().admin.query<{ id: string; fact: string }>(
+        `select id,to_jsonb(e)::text as fact
+      from ledger.supplier_ledger_entries e where store_id=$1 and supplier_id=$2 order by id`,
+        [owner.storeId, supplierId],
+      )
+    ).rows;
+    const editOperation = randomUUID();
+    const { operationId: ignoredOperation, ...replacementPayload } = paymentPayload;
+    expect(ignoredOperation).toBe(paymentOperation);
+    const edit = (operationId: string, replacementOccurredAt: string) =>
+      request(server)
+        .post(`/v1/suppliers/payments/${paymentOperation}/edit`)
+        .set(authorized())
+        .send({
+          operationId,
+          occurredAt,
+          replacement: { ...replacementPayload, supplierId, occurredAt: replacementOccurredAt },
+        });
+    const before = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    expect((await edit(editOperation, previousOccurredAt).expect(409)).body).toMatchObject({
+      code: 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE',
+    });
+    const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    for (const table of supplierFinancialTables) expect(after[table]).toEqual(before[table]);
+    expect(
+      (
+        await db().admin.query(
+          `select status from sync.processed_operations where store_id=$1 and operation_id=$2`,
+          [owner.storeId, editOperation],
+        )
+      ).rows,
+    ).toEqual([{ status: 'rejected' }]);
+    const at = new Date(occurredAt);
+    const replacementAt = new Date(
+      Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 15, 10),
+    ).toISOString();
+    const acceptedOperation = randomUUID();
+    await edit(acceptedOperation, replacementAt).expect(201);
+    const facts = (
+      await db().admin.query<{
+        accounting_period_id: string;
+        occurred_at: Date;
+        delta: string;
+        date: string;
+        status: string;
+        contained: boolean;
+      }>(
+        `select e.accounting_period_id,e.occurred_at,e.payable_delta_minor::text as delta,
+        (e.occurred_at at time zone 'Asia/Hebron')::date::text as date,
+        p.status,(p.starts_at<=e.occurred_at and e.occurred_at<p.ends_at) as contained
+       from ledger.supplier_ledger_entries e join ledger.accounting_periods p
+         on p.store_id=e.store_id and p.id=e.accounting_period_id
+       where e.store_id=$1 and e.transaction_group_id=$2 order by e.occurred_at`,
+        [owner.storeId, acceptedOperation],
+      )
+    ).rows;
+    expect(facts).toHaveLength(2);
+    expect(facts[0]).toMatchObject({
+      accounting_period_id: currentPeriodId,
+      delta: '200',
+      status: 'open',
+      contained: true,
+    });
+    expect(facts[0]?.occurred_at.toISOString()).toBe(occurredAt);
+    expect(facts[1]).toMatchObject({
+      delta: '-200',
+      status: 'open',
+      contained: true,
+      date: replacementAt.slice(0, 10),
+    });
+    expect(facts[1]?.occurred_at.toISOString()).toBe(replacementAt);
+    expect(facts[1]?.accounting_period_id).not.toBe(currentPeriodId);
+    const money = (
+      await db().admin.query(
+        `select accounting_period_id,occurred_at,amount_delta_minor::text as delta
+      from ledger.money_movements where store_id=$1 and transaction_group_id=$2 order by occurred_at`,
+        [owner.storeId, acceptedOperation],
+      )
+    ).rows;
+    expect(money).toEqual(
+      facts.map((row) => ({
+        accounting_period_id: row.accounting_period_id,
+        occurred_at: row.occurred_at,
+        delta: row.delta,
+      })),
+    );
+    expect(
+      (
+        await db().admin.query(
+          `select id,to_jsonb(e)::text as fact from ledger.supplier_ledger_entries e
+      where store_id=$1 and id=any($2::uuid[]) order by id`,
+          [owner.storeId, original.map((row) => row.id)],
+        )
+      ).rows,
+    ).toEqual(original);
+    const returned = supplierReturnBody(
+      await postReturn(supplierId, invoice.response.invoice.id, '100').expect(201),
+    );
+    expect(returned.posting.accountingPeriodId).toBe(currentPeriodId);
+    expect(
+      (
+        await db().admin.query(
+          `select accounting_period_id from ledger.purchase_invoices where store_id=$1 and id=$2`,
+          [owner.storeId, invoice.response.invoice.id],
+        )
+      ).rows,
+    ).toEqual([{ accounting_period_id: previousPeriodId }]);
+    expect(
+      (
+        await db().admin.query(
+          `select status from ledger.accounting_periods where store_id=$1 and id=$2`,
+          [owner.storeId, previousPeriodId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'closed' }]);
+    // Restore only the disposable fixture for unrelated tests sharing this month.
+    await db().admin.query(
+      `update ledger.accounting_periods set status='open',closed_at=null
+      where store_id=$1 and id=$2`,
+      [owner.storeId, previousPeriodId],
+    );
+  });
+
+  it('S4E2-03 blocks Supplier dependencies and preserves exact Return replacement lineage', async () => {
+    async function rejectUnchanged(call: request.Test, operationId: string, code: string) {
+      const before = await captureReplayEvidence(
+        db().admin,
+        owner.storeId,
+        supplierFinancialTables,
+      );
+      expect((await call.expect(409)).body).toMatchObject({ code });
+      const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+      for (const table of supplierFinancialTables) expect(after[table]).toEqual(before[table]);
+      expect(
+        (
+          await db().admin.query(
+            `select count(*)::int as count from sync.processed_operations
+         where store_id=$1 and operation_id=$2 and status='applied'`,
+            [owner.storeId, operationId],
+          )
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+    }
+    const supplierId = await createSupplier();
+    const invoice = await postInvoice(supplierId, '500');
+    await payInvoice(supplierId, invoice.response.invoice.id, '100', await createAccount());
+    const invoiceCorrection = randomUUID();
+    await rejectUnchanged(
+      request(server)
+        .post(`/v1/suppliers/invoices/${invoice.operationId}/cancel`)
+        .set(authorized())
+        .send({ operationId: invoiceCorrection, occurredAt }),
+      invoiceCorrection,
+      'SUPPLIER_CORRECTION_TARGET_HAS_ACTIVE_ALLOCATIONS',
+    );
+    expect(await invoiceOutstanding(invoice.response.invoice.id)).toBe('400');
+
+    const source = await createCredit('200');
+    const refundOperation = randomUUID();
+    const refundAccount = await createAccount();
+    await refundCredit(source.supplierId, refundAccount, '150', refundOperation).expect(201);
+    const blockedOperation = randomUUID();
+    await rejectUnchanged(
+      correct(
+        'financial-returns',
+        'cancel',
+        source.returnOperationId,
+        correctionBody(undefined, blockedOperation),
+      ),
+      blockedOperation,
+      'SUPPLIER_RETURN_CREDIT_DEPENDENCY',
+    );
+    expect(await supplierBalances(source.supplierId)).toEqual({ payable: '0', credit: '50' });
+    await correct('refunds', 'cancel', refundOperation, correctionBody()).expect(201);
+    expect(await supplierBalances(source.supplierId)).toEqual({ payable: '0', credit: '200' });
+    expect(await accountBalance(refundAccount)).toBe('0');
+    const originalFacts = async () =>
+      (
+        await db().admin.query<{ id: string; fact: string }>(
+          `select id,(to_jsonb(r)-array['status','cancelled_at','updated_at','version'])::text as fact
+       from ledger.supplier_returns r where store_id=$1 and operation_id=$2`,
+          [owner.storeId, source.returnOperationId],
+        )
+      ).rows;
+    const saved = await originalFacts();
+    const body = correctionBody({ amountMinor: '100', reason: 'S4E2-03 replacement' });
+    const replacement = await correct(
+      'financial-returns',
+      'replace',
+      source.returnOperationId,
+      body,
+    ).expect(201);
+    expect(await originalFacts()).toEqual(saved);
+    expect(replacement.body).toMatchObject({
+      target: { id: saved[0]?.id, status: 'cancelled' },
+      replacement: {
+        operationId: body.operationId,
+        return: {
+          purchaseInvoiceId: source.invoice.response.invoice.id,
+          amountMinor: '100',
+          supplierCreditCreatedMinor: '100',
+        },
+      },
+    });
+    expect(await supplierBalances(source.supplierId)).toEqual({ payable: '0', credit: '100' });
+    const inverse = (
+      await db().admin.query<{
+        reversal_of_id: string;
+        original: string;
+        reference_id: string;
+        accounting_period_id: string;
+        p: string;
+        c: string;
+      }>(
+        `select r.reversal_of_id,o.id as original,r.reference_id,r.accounting_period_id,
+        (r.payable_delta_minor+o.payable_delta_minor)::text as p,
+        (r.credit_delta_minor+o.credit_delta_minor)::text as c
+       from ledger.supplier_ledger_entries r join ledger.supplier_ledger_entries o
+         on o.store_id=r.store_id and o.id=r.reversal_of_id
+       where r.store_id=$1 and r.transaction_group_id=$2`,
+        [owner.storeId, body.operationId],
+      )
+    ).rows;
+    expect(inverse).toHaveLength(1);
+    expect(inverse[0]).toMatchObject({
+      reversal_of_id: inverse[0]?.original,
+      reference_id: saved[0]?.id,
+      p: '0',
+      c: '0',
+      accounting_period_id: currentPeriodId,
+    });
+    expect(
+      (
+        await db().admin.query(
+          `select status,response_body from sync.processed_operations where store_id=$1 and operation_id=$2`,
+          [owner.storeId, body.operationId],
+        )
+      ).rows,
+    ).toEqual([{ status: 'applied', response_body: replacement.body as unknown }]);
+    const after = await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables);
+    for (const table of [
+      'audit.central_audit_logs',
+      'sync.change_events',
+      'sync.store_change_events_v1',
+    ]) {
+      expect(after[table]?.some((row) => row.includes(String(saved[0]?.id)))).toBe(true);
+    }
+    expect(
+      (await correct('financial-returns', 'replace', source.returnOperationId, body).expect(201))
+        .body,
+    ).toEqual(replacement.body);
+    expect(await captureReplayEvidence(db().admin, owner.storeId, supplierFinancialTables)).toEqual(
+      after,
+    );
+    const secondOperation = randomUUID();
+    await rejectUnchanged(
+      correct(
+        'financial-returns',
+        'cancel',
+        source.returnOperationId,
+        correctionBody(undefined, secondOperation),
+      ),
+      secondOperation,
+      'SUPPLIER_FINANCIAL_CORRECTION_TARGET_NOT_ACTIVE',
+    );
   });
 
   it('blocks originating Return correction after its Supplier Credit has been consumed', async () => {

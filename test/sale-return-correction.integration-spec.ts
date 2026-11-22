@@ -6,6 +6,7 @@ import { Test } from '@nestjs/testing';
 import { Logger, PARAMS_PROVIDER_TOKEN } from 'nestjs-pino';
 import type { Pool } from 'pg';
 import request from 'supertest';
+import { captureReplayEvidence } from './stage3b-replay-evidence';
 
 import { deriveAccountingPeriodId } from '../src/accounting-periods/accounting-period-identity';
 import { resolveAccountingPeriodBoundaries } from '../src/accounting-periods/accounting-period-month';
@@ -961,6 +962,159 @@ describe('S17.5 immutable Sale Return corrections on isolated PostgreSQL', () =>
         )
       ).rows.map((row) => row.status),
     ).toEqual(['posted', 'posted']);
+  });
+
+  it('S4E2-04 preserves closed originals and admits Return counter-effects only in their selected open period', async () => {
+    const cases = [];
+    for (const kind of ['cancel', 'replace', 'new'] as const) {
+      const customerId = await createCustomer();
+      const sale = (await postManualSale({ customerId })).body;
+      const original =
+        kind === 'new'
+          ? null
+          : await postReturn(sale.sale.id, returnRequest(sale, { quantityMilli: '200' }));
+      cases.push({ kind, customerId, sale, original });
+    }
+    const [year, month] = businessDate.split('-').map(Number);
+    if (year === undefined || month === undefined) throw new Error('Fixture month missing');
+    const correctionAt = new Date(Date.UTC(year, month, 15, 10)).toISOString();
+    const next = new Date(correctionAt);
+    const correctionPeriod = deriveAccountingPeriodId(
+      owner.storeId,
+      next.getUTCFullYear(),
+      next.getUTCMonth() + 1,
+    );
+    const tables = [
+      'ledger.sales',
+      'ledger.sale_items',
+      'ledger.sale_returns',
+      'ledger.sale_return_items',
+      'ledger.sale_return_settlements',
+      'ledger.customer_ledger_entries',
+      'ledger.money_movements',
+      'ledger.inventory_movements',
+      'ledger.stock_balances',
+    ];
+    await db().admin.query(
+      `update ledger.accounting_periods set status='closed',closed_at=clock_timestamp()
+      where store_id=$1 and id=$2`,
+      [owner.storeId, periodId],
+    );
+    const periodSnapshot = async () =>
+      (
+        await db().admin.query<{ fact: string }>(
+          `select to_jsonb(p)::text as fact from ledger.accounting_periods p where store_id=$1 and id=$2`,
+          [owner.storeId, periodId],
+        )
+      ).rows;
+    const closed = await periodSnapshot();
+    try {
+      for (const item of cases) {
+        const originalLedger = (
+          await db().admin.query<{ id: string; fact: string }>(
+            `select id,to_jsonb(e)::text as fact from ledger.customer_ledger_entries e
+           where store_id=$1 and customer_id=$2 order by id`,
+            [owner.storeId, item.customerId],
+          )
+        ).rows;
+        const rejectedOperation = randomUUID();
+        const before = await captureReplayEvidence(db().admin, owner.storeId, tables);
+        const denied = item.original
+          ? cancelReturn(item.original.return.id, cancelBody(rejectedOperation))
+          : request(server)
+              .post(`/v1/sales/${item.sale.sale.id}/return`)
+              .set(authorized())
+              .send(returnRequest(item.sale, { operationId: rejectedOperation }));
+        expect((await denied.expect(409)).body).toMatchObject({
+          code: 'ACCOUNTING_PERIOD_NOT_POSTING_ELIGIBLE',
+        });
+        const after = await captureReplayEvidence(db().admin, owner.storeId, tables);
+        for (const table of tables) expect(after[table]).toEqual(before[table]);
+        expect(
+          (
+            await db().admin.query(
+              `select status from sync.processed_operations
+          where store_id=$1 and operation_id=$2`,
+              [owner.storeId, rejectedOperation],
+            )
+          ).rows,
+        ).toEqual([{ status: 'rejected' }]);
+        const operationId = randomUUID();
+        if (item.kind === 'new') {
+          await postReturn(item.sale.sale.id, {
+            ...returnRequest(item.sale, { operationId }),
+            occurredAt: correctionAt,
+          });
+        } else if (item.original && item.kind === 'replace') {
+          await replaceReturn(
+            item.original.return.id,
+            replaceBody(item.sale, operationId, { quantityMilli: '300', at: correctionAt }),
+          ).expect(201);
+        } else if (item.original) {
+          await cancelReturn(item.original.return.id, cancelBody(operationId, correctionAt)).expect(
+            201,
+          );
+        }
+        const facts = (
+          await db().admin.query<{
+            accounting_period_id: string;
+            occurred_at: Date;
+            date: string;
+            status: string;
+            contained: boolean;
+            delta: string;
+            reversal_of_id: string | null;
+          }>(
+            `select e.accounting_period_id,e.occurred_at,
+             (e.occurred_at at time zone 'Asia/Hebron')::date::text as date,
+             p.status,(p.starts_at<=e.occurred_at and e.occurred_at<p.ends_at) as contained,
+             e.receivable_delta_minor::text as delta,e.reversal_of_id
+           from ledger.customer_ledger_entries e join ledger.accounting_periods p
+             on p.store_id=e.store_id and p.id=e.accounting_period_id
+           where e.store_id=$1 and e.transaction_group_id=$2`,
+            [owner.storeId, operationId],
+          )
+        ).rows;
+        expect(facts).toHaveLength(item.kind === 'replace' ? 2 : 1);
+        expect(facts.map((row) => row.delta).sort()).toEqual(
+          item.kind === 'replace' ? ['-150', '100'] : item.kind === 'cancel' ? ['100'] : ['-500'],
+        );
+        for (const fact of facts) {
+          expect(fact).toMatchObject({
+            accounting_period_id: correctionPeriod,
+            status: 'open',
+            contained: true,
+            date: correctionAt.slice(0, 10),
+          });
+          expect(new Date(fact.occurred_at).toISOString()).toBe(correctionAt);
+        }
+        expect(
+          (
+            await db().admin.query(
+              `select id,to_jsonb(e)::text as fact from ledger.customer_ledger_entries e
+          where store_id=$1 and id=any($2::uuid[]) order by id`,
+              [owner.storeId, originalLedger.map((row) => row.id)],
+            )
+          ).rows,
+        ).toEqual(originalLedger);
+        expect(
+          (
+            await db().admin.query(
+              `select accounting_period_id from ledger.sales where store_id=$1 and id=$2`,
+              [owner.storeId, item.sale.sale.id],
+            )
+          ).rows,
+        ).toEqual([{ accounting_period_id: periodId }]);
+        expect(await periodSnapshot()).toEqual(closed);
+      }
+    } finally {
+      // Fixture restoration only; production period reopening is not exercised or permitted.
+      await db().admin.query(
+        `update ledger.accounting_periods set status='open',closed_at=null
+        where store_id=$1 and id=$2`,
+        [owner.storeId, periodId],
+      );
+    }
   });
 
   it('posts correction in the current open S9 period without reopening the closed original period', async () => {
